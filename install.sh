@@ -74,32 +74,28 @@ if [ "$MODE" = uninstall ]; then
 fi
 
 # ---- find the release ----
-if [ -n "$VERSION" ]; then API="https://api.github.com/repos/$REPO/releases/tags/v$VERSION"
-else API="https://api.github.com/repos/$REPO/releases/latest"; fi
-RELEASE=$(curl -fsSL -H "Accept: application/vnd.github+json" "$API") || die "Could not reach GitHub (or release ${VERSION:-latest} doesn't exist)."
-URLS=$(printf '%s' "$RELEASE" | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4)
-TAG=$(printf '%s' "$RELEASE" | grep -o '"tag_name": *"[^"]*"' | head -n1 | cut -d'"' -f4)
-[ -n "$TAG" ] || die "Could not read the release from GitHub."
-
-asset() { printf '%s\n' "$URLS" | grep -E "$1" | head -n1; }
+# The release's SHA256SUMS lists every file, so no GitHub API call (and no API rate limit) is needed.
+if [ -n "$VERSION" ]; then BASE="https://github.com/$REPO/releases/download/v$VERSION"
+else BASE="https://github.com/$REPO/releases/latest/download"; fi
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-fetch() { # url -> $TMP/<name>, verified
-  name=$(basename "$1")
+curl -fsSL --retry 3 -o "$TMP/SHA256SUMS" "$BASE/SHA256SUMS" ||
+  die "Could not download release ${VERSION:-latest} from GitHub. Check your internet connection, or the version number."
+FILES=$(sed 's/^[0-9a-f]* *\*\{0,1\}//' "$TMP/SHA256SUMS")
+TAG=v$(printf '%s\n' "$FILES" | sed -n 's/^whittle-web-\(.*\)\.tar\.gz$/\1/p' | head -n1)
+
+asset() { printf '%s\n' "$FILES" | grep -E "$1" | head -n1; }
+
+fetch() { # file name -> $TMP/<name>, verified against SHA256SUMS
+  name=$1
   say "Downloading $name"
-  curl -fL --progress-bar -o "$TMP/$name" "$1"
-  sums=$(asset '/SHA256SUMS$')
-  if [ -n "$sums" ]; then
-    curl -fsSL -o "$TMP/SHA256SUMS" "$sums"
-    want=$(grep " $name\$" "$TMP/SHA256SUMS" | cut -d' ' -f1 || true)
-    if [ -n "$want" ]; then
-      if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$TMP/$name" | cut -d' ' -f1)
-      else got=$(shasum -a 256 "$TMP/$name" | cut -d' ' -f1); fi
-      [ "$got" = "$want" ] || die "Checksum mismatch for $name. The download may be damaged; try again."
-    fi
-  fi
+  curl -fL --retry 3 --progress-bar -o "$TMP/$name" "$BASE/$name"
+  want=$(grep " \*\{0,1\}$name\$" "$TMP/SHA256SUMS" | cut -d' ' -f1)
+  if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$TMP/$name" | cut -d' ' -f1)
+  else got=$(shasum -a 256 "$TMP/$name" | cut -d' ' -f1); fi
+  [ "$got" = "$want" ] || die "Checksum mismatch for $name. The download may be damaged; try again."
   FILE="$TMP/$name"
 }
 
@@ -143,6 +139,7 @@ if [ "$ARCH" = x86_64 ]; then DEB=amd64; RPM=x86_64; IMG=amd64; else DEB=arm64; 
 if [ "$APPIMAGE" = 0 ] && command -v apt-get >/dev/null 2>&1 && [ -n "$(asset "_$DEB\.deb\$")" ]; then
   fetch "$(asset "_$DEB\.deb\$")"
   chmod 644 "$FILE"; chmod 755 "$TMP"   # apt reads the file as the _apt user
+  as_root apt-get update -qq || true
   as_root apt-get install -y "$FILE"
   say "Whittle $TAG is installed. Find it in your applications menu, or run: whittle-desktop"
   exit 0

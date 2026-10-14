@@ -27,6 +27,7 @@ on:
 permissions:
   contents: write
   packages: write
+  actions: write
 
 concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
@@ -296,3 +297,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: Try the one-line installers against this release
+        # A release published by this workflow doesn't fire other workflows' release triggers; a dispatch does.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run installers.yml --repo "$GITHUB_REPOSITORY" --ref "${{ github.event.repository.default_branch }}"

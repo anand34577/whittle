@@ -1,10 +1,8 @@
 # Runs the one-line installers on real machines against the latest published release:
-# after every release, when an installer changes, or by hand.
+# after every release (started by release.yml), when an installer changes, or by hand.
 name: Installers
 
 on:
-  release:
-    types: [published]
   push:
     branches: [main]
     paths: [install.sh, install.ps1, deploy/install.sh, deploy/docker-compose.yml, .github/workflows/installers.yml]
