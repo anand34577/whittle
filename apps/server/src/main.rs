@@ -112,7 +112,7 @@ async fn user_command(rest: &[&str]) -> Result<(), String> {
         ["add", name, flags @ ..] => {
             let admin = flags.contains(&"--admin");
             let password = read_password().await?;
-            let u = auth::create_local_user(&state, name, &password, None, None, admin).await.map_err(err)?;
+            let u = auth::create_local_user(&state, name, Some(&password), None, None, admin).await.map_err(err)?;
             println!("created {}{}", u.username, if u.is_admin { " (administrator)" } else { "" });
         }
         ["passwd", name] => {

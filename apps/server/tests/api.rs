@@ -235,6 +235,37 @@ async fn admin_rules() {
 }
 
 #[tokio::test]
+async fn single_sign_on_accounts_are_added_by_email() {
+    // Without OIDC an account needs a password.
+    let plain = app(|_| {}).await;
+    let ada = session(&post_json(&plain, "/api/auth/register", None, json!({ "username": "ada", "password": "correct horse" })).await);
+    let r = post_json(&plain, "/api/admin/users", Some(&ada), json!({ "username": "bob", "email": "bob@example.com" })).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    drop(plain);
+
+    // With OIDC, an admin can add a password-less account by email; it can't sign in with a password.
+    let sso = app(|c| {
+        c.oidc = Some(whittle_server::config::OidcConfig {
+            issuer: "https://auth.example.com".into(),
+            client_id: "whittle".into(),
+            client_secret: None,
+            name: "SSO".into(),
+            scopes: vec!["openid".into(), "email".into()],
+            auto_create: false,
+        });
+    })
+    .await;
+    let ada = session(&post_json(&sso, "/api/auth/register", None, json!({ "username": "ada", "password": "correct horse" })).await);
+    let r = post_json(&sso, "/api/admin/users", Some(&ada), json!({ "username": "bob" })).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "needs an email when there's no password");
+    let r = post_json(&sso, "/api/admin/users", Some(&ada), json!({ "username": "bob", "email": "bob@example.com" })).await;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(r.json()["hasPassword"], false);
+    let r = post_json(&sso, "/api/auth/login", None, json!({ "username": "bob", "password": "" })).await;
+    assert_ne!(r.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn no_login_mode() {
     let app = app(|c| {
         c.auth_none = true;

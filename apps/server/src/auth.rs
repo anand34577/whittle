@@ -248,30 +248,37 @@ pub async fn register(State(s): State<Shared>, Json(b): Json<RegisterBody>) -> A
     if !first && !s.config.signup {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "Sign-up is closed. Ask an administrator for an account."));
     }
-    let user = create_local_user(&s, &b.username, &b.password, b.display_name.as_deref(), b.email.as_deref(), first).await?;
+    let user = create_local_user(&s, &b.username, Some(&b.password), b.display_name.as_deref(), b.email.as_deref(), first).await?;
     let cookie = start_session(&s, &user.id).await?;
     Ok(([(header::SET_COOKIE, cookie)], (StatusCode::CREATED, Json(user))).into_response())
 }
 
+/// `password: None` makes a single sign-on account: it can't sign in with a password and
+/// is linked to the person's identity the first time they sign in with that email (see oidc.rs).
 pub async fn create_local_user(
     s: &Shared,
     username: &str,
-    password: &str,
+    password: Option<&str>,
     display_name: Option<&str>,
     email: Option<&str>,
     is_admin: bool,
 ) -> ApiResult<User> {
     let username = username.trim();
     check_username(username).map_err(ApiError::bad_request)?;
-    check_password_rules(password).map_err(ApiError::bad_request)?;
+    if let Some(p) = password {
+        check_password_rules(p).map_err(ApiError::bad_request)?;
+    }
     if db::user_by(&s.db, "username", username).await?.is_some() {
         return Err(ApiError::new(StatusCode::CONFLICT, "That username is taken"));
     }
-    let hash = hash_password(password.to_owned()).await?;
+    let hash = match password {
+        Some(p) => Some(hash_password(p.to_owned()).await?),
+        None => None,
+    };
     let id = random_token(12);
     let display = display_name.map(str::trim).filter(|d| !d.is_empty()).unwrap_or(username);
     let email = email.map(str::trim).filter(|e| !e.is_empty());
-    db::insert_user(&s.db, &id, NewUser { username, display_name: display, email, password_hash: Some(&hash), oidc_subject: None, is_admin })
+    db::insert_user(&s.db, &id, NewUser { username, display_name: display, email, password_hash: hash.as_deref(), oidc_subject: None, is_admin })
         .await?;
     db::user_by(&s.db, "id", &id).await?.ok_or_else(ApiError::not_found)
 }
@@ -313,6 +320,8 @@ pub async fn admin_list(State(s): State<Shared>, AdminUser(_): AdminUser) -> Api
 #[serde(rename_all = "camelCase")]
 pub struct AdminCreateBody {
     username: String,
+    /// Empty or missing: a single sign-on account, linked by `email` on first sign-in.
+    #[serde(default)]
     password: String,
     display_name: Option<String>,
     email: Option<String>,
@@ -321,7 +330,16 @@ pub struct AdminCreateBody {
 }
 
 pub async fn admin_create(State(s): State<Shared>, AdminUser(_): AdminUser, Json(b): Json<AdminCreateBody>) -> ApiResult<(StatusCode, Json<User>)> {
-    let u = create_local_user(&s, &b.username, &b.password, b.display_name.as_deref(), b.email.as_deref(), b.is_admin).await?;
+    let password = Some(b.password.as_str()).filter(|p| !p.is_empty());
+    if password.is_none() {
+        if s.config.oidc.is_none() {
+            return Err(ApiError::bad_request("Set a password for the new account"));
+        }
+        if b.email.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            return Err(ApiError::bad_request("Enter a password, or the email address they use for single sign-on"));
+        }
+    }
+    let u = create_local_user(&s, &b.username, password, b.display_name.as_deref(), b.email.as_deref(), b.is_admin).await?;
     Ok((StatusCode::CREATED, Json(u)))
 }
 

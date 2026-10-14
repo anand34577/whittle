@@ -203,7 +203,9 @@ export function UsersDialog() {
   const platform = useApp((s) => s.platform);
   const me = platform.kind === "server" ? platform.user : null;
   const [users, setUsers] = useState<ServerUser[] | null>(null);
-  const [draft, setDraft] = useState({ username: "", password: "", displayName: "", isAdmin: false });
+  const blank = { username: "", password: "", displayName: "", email: "", isAdmin: false };
+  const [draft, setDraft] = useState(blank);
+  const config = platform.kind === "server" ? platform.config : null;
 
   const load = () =>
     apiJson<ServerUser[]>("/admin/users")
@@ -225,7 +227,7 @@ export function UsersDialog() {
     e.preventDefault();
     try {
       await apiJson("/admin/users", { method: "POST", json: draft });
-      setDraft({ username: "", password: "", displayName: "", isAdmin: false });
+      setDraft(blank);
       toast("ok", `Added ${draft.username}`);
       void load();
     } catch (err) {
@@ -282,12 +284,17 @@ export function UsersDialog() {
           ))}
           {users === null && <p className="muted">Loading…</p>}
         </div>
-        {platform.kind === "server" && platform.config.local && (
+        {config && (config.local || config.oidc) && (
           <form className="userform" onSubmit={add} onKeyDown={(e) => e.stopPropagation()}>
             <h3 className="eyebrow">Add a user</h3>
             <input className="textfield" placeholder="Username" value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} required />
             <input className="textfield" placeholder="Name (optional)" value={draft.displayName} onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} />
-            <input className="textfield" type="password" placeholder="Password (8+ characters)" minLength={8} value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} required autoComplete="new-password" />
+            {config?.oidc && (
+              <input className="textfield" type="email" placeholder={config.local ? "Email (for single sign-on)" : "Email they sign in with"} value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} required={!config.local} />
+            )}
+            {config?.local && (
+              <input className="textfield" type="password" placeholder={config.oidc ? "Password (empty: single sign-on only)" : "Password (8+ characters)"} minLength={8} value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} required={!config.oidc} autoComplete="new-password" />
+            )}
             <label className="checkrow">
               <input type="checkbox" checked={draft.isAdmin} onChange={(e) => setDraft({ ...draft, isAdmin: e.target.checked })} /> Administrator
             </label>

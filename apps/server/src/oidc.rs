@@ -168,10 +168,36 @@ async fn finish(s: &Shared, q: CallbackQuery) -> Result<(axum::http::HeaderValue
 
     let user = match db::user_by(&s.db, "oidc_subject", &subject).await.map_err(|e| e.to_string())? {
         Some(u) => u,
+        None if !cfg.auto_create => {
+            // Accounts are created by administrators: link the single sign-on account they added
+            // for this (provider-verified) email. Only password-less accounts qualify, so nobody
+            // can sign up with someone else's email and capture their sign-in.
+            let invited = match (email.as_deref(), claims.email_verified()) {
+                (Some(e), Some(true)) => {
+                    let sql = format!(
+                        "SELECT {} FROM users WHERE LOWER(email) = LOWER($1) AND oidc_subject IS NULL AND password_hash IS NULL AND id <> 'local'",
+                        db::USER_COLUMNS
+                    );
+                    let rows = sqlx::query(&sql).bind(e).fetch_all(&s.db).await.map_err(|e| e.to_string())?;
+                    match rows.as_slice() {
+                        [r] => Some(db::user_from_row(r).map_err(|e| e.to_string())?),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            let Some(u) = invited else {
+                return Err("You don't have an account here yet. Ask an administrator to add you with your email address.".into());
+            };
+            sqlx::query("UPDATE users SET oidc_subject = $1 WHERE id = $2 AND oidc_subject IS NULL")
+                .bind(&subject)
+                .bind(&u.id)
+                .execute(&s.db)
+                .await
+                .map_err(|e| e.to_string())?;
+            u
+        }
         None => {
-            if !cfg.auto_create {
-                return Err("You don't have an account here yet. Ask an administrator to create one.".into());
-            }
             let base = preferred.clone().or_else(|| email.as_ref().map(|e| e.split('@').next().unwrap_or("").to_owned())).unwrap_or_default();
             let username = unique_username(s, &base).await?;
             let first = db::user_count(&s.db).await.map_err(|e| e.to_string())? == 0;
