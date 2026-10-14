@@ -1,5 +1,7 @@
 # Self-hosting the Whittle server
 
+> The [wiki](https://github.com/anand34577/whittle/wiki/Self-Hosting) has step-by-step guides for every setup.
+
 `whittle-server` is one small binary. It serves the Whittle web app, stores each person's designs with
 their full version history, and handles sign-in. All modelling runs in the browser, so even a small
 ARM board or a 1-CPU LXC container is enough.
@@ -25,12 +27,18 @@ other people. The desktop app works on its own, offline, and keeps files and his
 ## Install on Linux, bare metal or LXC (x86_64 or arm64)
 
 The release has a static build for each architecture. It has no dependencies and runs on any
-distribution, including Alpine.
+distribution, including Alpine. One line, as root or with sudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anand34577/whittle/main/install.sh | sh -s -- --server
+```
+
+Or by hand:
 
 ```bash
 # On the machine or inside the container (pick aarch64 for ARM64, x86_64 for Intel/AMD):
 ARCH=$(uname -m)            # aarch64 or x86_64
-VERSION=0.2.0
+VERSION=0.2.1
 curl -LO https://github.com/anand34577/whittle/releases/download/v$VERSION/whittle-server-$VERSION-linux-$ARCH.tar.gz
 tar xzf whittle-server-$VERSION-linux-$ARCH.tar.gz
 cd whittle-server-$VERSION-linux-$ARCH
@@ -41,7 +49,7 @@ The installer creates a `whittle` system user, installs to `/opt/whittle`, keeps
 `/var/lib/whittle`, writes settings to `/etc/whittle/whittle.env`, and starts a systemd (or OpenRC)
 service. Open `http://<container-ip>:8080/` and create the first account: it becomes the administrator.
 
-**Upgrading:** download the new release and run `sudo ./deploy/install.sh` again. Settings and data are
+**Upgrading:** run the one-line command again, or download the new release and run `sudo ./deploy/install.sh`. Settings and data are
 kept; the database upgrades itself on start.
 
 ### Proxmox LXC notes
@@ -61,7 +69,8 @@ docker run -d --name whittle -p 8080:8080 -v whittle-data:/data ghcr.io/anand345
 ```
 
 Images are published for `linux/amd64` and `linux/arm64`. Pass settings with `-e`, e.g.
-`-e WHITTLE_AUTH=none`.
+`-e WHITTLE_AUTH=none`. A Compose file with an optional PostgreSQL service is in
+[deploy/docker-compose.yml](https://github.com/anand34577/whittle/blob/main/deploy/docker-compose.yml).
 
 ## HTTPS (reverse proxy)
 
@@ -144,6 +153,10 @@ Issuer examples: Authentik `https://auth.example.com/application/o/<slug>/` · K
 `https://kc.example.com/realms/<realm>` · Authelia `https://auth.example.com` · Google
 `https://accounts.google.com` · Microsoft Entra `https://login.microsoftonline.com/<tenant>/v2.0`.
 
+To invite people one by one instead of creating accounts automatically, set
+`WHITTLE_OIDC_AUTO_CREATE=false` and add each person in **Manage users** with the email address they sign in
+with and no password. Their first single sign-on (with a provider-verified email) is linked to that account.
+
 Whittle uses PKCE and a nonce, verifies the ID token signature, and matches accounts by issuer and
 subject (never by email), so an email change at the provider can't take over another account.
 
@@ -163,14 +176,16 @@ up both.
 
 ## Managing accounts from the command line
 
-Run these as the `whittle` user with the same settings as the service:
+The installer adds a `whittle-server` command that runs as the `whittle` user with the service's settings:
 
 ```bash
-sudo -u whittle sh -c 'set -a; . /etc/whittle/whittle.env; /opt/whittle/whittle-server user list'
-sudo -u whittle sh -c 'set -a; . /etc/whittle/whittle.env; /opt/whittle/whittle-server user add ada --admin'
-sudo -u whittle sh -c 'set -a; . /etc/whittle/whittle.env; /opt/whittle/whittle-server user passwd ada'
-sudo -u whittle sh -c 'set -a; . /etc/whittle/whittle.env; /opt/whittle/whittle-server user admin ada on'
+sudo whittle-server user list
+sudo whittle-server user add ada --admin
+sudo whittle-server user passwd ada
+sudo whittle-server user admin ada on
 ```
+
+With Docker: `docker exec -it whittle whittle-server user list`.
 
 Passwords are read from `WHITTLE_PASSWORD` or the first line of standard input. Locked out of the only
 administrator account? `user passwd` and `user admin` fix it.

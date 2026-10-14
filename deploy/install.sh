@@ -48,6 +48,16 @@ rm -rf "$PREFIX/web"
 mv "$PREFIX/web.new" "$PREFIX/web"
 [ -f "$HERE/README.md" ] && cp "$HERE/README.md" "$PREFIX/README.md"
 
+# Command-line wrapper: runs as the whittle user with the service's settings,
+# so "sudo whittle-server user list" works from anywhere.
+cat > /usr/local/bin/whittle-server <<'WRAPPER'
+#!/bin/sh
+set -a; . /etc/whittle/whittle.env; set +a
+if [ "$(id -u)" = 0 ]; then exec su -s /bin/sh whittle -c 'exec /opt/whittle/whittle-server "$@"' whittle-server "$@"; fi
+exec /opt/whittle/whittle-server "$@"
+WRAPPER
+chmod 755 /usr/local/bin/whittle-server
+
 if [ ! -f "$CONF/whittle.env" ]; then
   echo "- Writing default settings to $CONF/whittle.env"
   install -m 640 "$HERE/deploy/whittle.env.example" "$CONF/whittle.env"
@@ -80,5 +90,5 @@ echo "  Open      http://${ADDR:-localhost}:${PORT:-8080}/   (the first account 
 echo "  Settings  $CONF/whittle.env   (restart the service after changes)"
 echo "  Data      $DATA   (back this folder up; with PostgreSQL, back up the database too)"
 [ -n "$SVC" ] && echo "  Service   $SVC"
-echo "  Accounts  run 'whittle-server user --help' as the whittle user with the same settings"
+echo "  Accounts  sudo whittle-server user list   (also: user add NAME --admin, user passwd NAME)"
 exit 0

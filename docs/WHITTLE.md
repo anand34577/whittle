@@ -1,6 +1,6 @@
 # Whittle: Complete Application Reference
 
-**Version:** 0.2.0 · **License:** MPL-2.0 · **Type:** open-source parametric 3D CAD for part design
+**Version:** 0.2.1 · **License:** MPL-2.0 · **Type:** open-source parametric 3D CAD for part design
 
 Whittle is a parametric 3D CAD application in the same category as Fusion 360, built to be lighter, easier to install and easier to learn. It runs in any modern browser, as a desktop app (Windows, macOS, Linux via Tauri), or self-hosted on a server.
 
@@ -58,7 +58,7 @@ Whittle is a parametric 3D CAD application in the same category as Fusion 360, b
 ### Desktop and server
 
 - **Desktop:** in `apps/desktop`, run `npx tauri dev` or `npx tauri build`. The installer registers `.whittle` files so they open on double-click.
-- **Server:** in `apps/server`, run `cargo build --release`, or use the `Dockerfile`. Environment variables: `PORT` (default 8080), `WHITTLE_WEB` (folder with the built app), `WHITTLE_DATA` (where designs are stored), and optional `WHITTLE_TOKEN` (bearer token that protects the design API).
+- **Server:** in `apps/server`, run `cargo build --release`, or use the `Dockerfile`. Accounts, single sign-on, databases and every setting are described in [SELF_HOSTING.md](SELF_HOSTING.md).
 
 ### First launch
 
@@ -121,7 +121,7 @@ Tools are grouped. Each group label is also a menu listing **every** tool in tha
 | Modify | Fillet, Chamfer, Shell, Move / Copy | Combine, Mirror, Pattern |
 | Inspect | Measure, Section, Print check | Display styles, Orthographic, Save image |
 | Library | Parts | |
-| Make | 3D print (3MF), Export… | Export STL, Export STEP, Save image |
+| Export | Export… | Export STEP, Export 3MF, Export STL, Save image, Version history |
 
 Buttons are greyed out when they don't apply (for example, Fillet before any body exists).
 
@@ -132,7 +132,7 @@ The toolbar turns orange-tinted and shows sketch tools:
 | Group | Tools |
 |---|---|
 | Draw | Line, Rectangle, Circle, Ellipse, Polygon, Slot |
-| Special | Text, Gear |
+| Special | Text, Gear, Import SVG (menu adds: Export sketch as SVG, Export sketch as DXF) |
 | Arrange | Select, Duplicate, Mirror, Rotate 90°, Construction (menu adds: Mirror up/down, Delete) |
 | | **Finish sketch** button on the right |
 
@@ -151,7 +151,7 @@ Shows one of three things:
 2. **Sketch panel** while sketching: plane offset and tips, or the editor for the selected shape (sizes, solid/hole mode, construction, Arrange tools, Delete).
 3. **Inspector** otherwise: for the whole design (features, bodies, volume, mass) or for a selected body (name, colour, finish, volume, mass, size, area), face (surface type, area) or edge (curve type, length).
 
-**Mass** is calculated for a chosen material: PLA 1.24, PETG 1.27, ABS 1.04, Aluminium 2.7, Steel 7.85 g/cm³.
+**Mass** is calculated for a chosen material, in g or kg: plastics (PLA, PETG, ABS, nylon, SLA resin, acrylic), metals (aluminium, steel, stainless steel, brass, copper, titanium), and wood and other materials (pine, oak, plywood, MDF, glass, concrete).
 
 ### Viewport overlays
 
@@ -411,7 +411,9 @@ Changing a parameter rebuilds everything that uses it.
   - **Edit**
   - **Turn off (suppress)** / **Turn back on**
   - **Roll back to before this**
+  - **Move earlier** / **Move later**
   - **Delete**: warns and lists the later steps that depend on it.
+- **Drag a step** to reorder the timeline. Moves that would break the design (a step placed before something it uses) are refused with the reason.
 - **Rollback marker:** drag the orange marker to rebuild only up to that point. New features are inserted at the marker. Buttons: go to start, step back, step forward, go to end.
 - Step states: OK, warning (yellow dot), error (red dot), suppressed, rolled back (greyed).
 
@@ -557,6 +559,8 @@ The format is plain JSON, open and readable. Older files are migrated automatica
 - **Autosave:** the design is saved in the browser about a second after every change. After a crash, the start screen offers **Continue where you left off**.
 - Closing with unsaved changes asks for confirmation.
 - Desktop app: double-clicking a `.whittle` file opens it.
+- **Version history** (Export ▸ Version history, or Ctrl+K "history"): every save keeps the previous version, on your computer (desktop app), in the browser (web), or on the server (self-hosted). Restore one, or open it as a copy.
+- **Self-hosted server:** Save stores the design in your library on the server; if it was saved elsewhere in the meantime, you're asked before anything is overwritten.
 
 ### Export
 
@@ -564,7 +568,9 @@ The format is plain JSON, open and readable. Older files are migrated automatica
 |---|---|---|
 | **3MF** | Slicers (Bambu Studio, PrusaSlicer, OrcaSlicer, Cura) | Recommended for 3D printing; units included |
 | **STL** | Any slicer or mesh tool | Binary |
-| **STEP** | Other CAD (Fusion 360, SolidWorks, Onshape, FreeCAD) | Exact geometry |
+| **STEP** | Other CAD (Fusion 360, SolidWorks, Onshape, FreeCAD), CNC and manufacturing | Exact geometry |
+| **SVG** | One sketch, for laser and vinyl cutters, plotters, Inkscape, Illustrator | True size, in millimetres |
+| **DXF** | One sketch, for laser cutters, CNC and CAM, AutoCAD | Units set to millimetres |
 | **PNG** | Pictures | Save image |
 
 ### Import
@@ -573,6 +579,7 @@ The format is plain JSON, open and readable. Older files are migrated automatica
 |---|---|---|
 | STEP (`.step`, `.stp`) | Create ▸ Import, or drag and drop | Exact geometry, becomes a body |
 | STL | Same | Triangles are sewn into a solid and flat areas are merged into clean faces. Limit: 40,000 triangles |
+| SVG | In a sketch: Special ▸ Import SVG | Closed paths become editable sketch outlines; you choose the width |
 
 Files up to 40 MB. Each import has a **Scale** field.
 

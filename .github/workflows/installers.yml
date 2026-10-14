@@ -1,0 +1,78 @@
+# Runs the one-line installers on real machines against the latest published release:
+# after every release, when an installer changes, or by hand.
+name: Installers
+
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths: [install.sh, install.ps1, deploy/install.sh, deploy/docker-compose.yml, .github/workflows/installers.yml]
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }} (server, .deb, AppImage)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Server
+        run: |
+          sh install.sh --server
+          curl -fsS --retry 15 --retry-delay 2 --retry-connrefused http://localhost:8080/api/health
+          curl -fsS http://localhost:8080/api/config
+          systemctl is-active whittle
+      - name: Desktop (.deb)
+        run: |
+          sh install.sh
+          dpkg -s whittle | grep -E '^(Package|Version)'
+      - name: Desktop (AppImage)
+        run: |
+          sh install.sh --appimage
+          test -x ~/.local/bin/Whittle.AppImage
+          test -f ~/.local/share/applications/whittle.desktop
+      - name: Uninstall
+        run: |
+          sh install.sh --uninstall
+          if dpkg -s whittle >/dev/null 2>&1; then echo "still installed"; exit 1; fi
+          test ! -e ~/.local/bin/Whittle.AppImage
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh install.sh
+      - run: test -d /Applications/Whittle.app && ls /Applications/Whittle.app/Contents/MacOS
+      - run: sh install.sh --uninstall && test ! -e /Applications/Whittle.app
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        shell: powershell
+        run: ./install.ps1
+      - name: Check
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Whittle" -Filter *.exe | Where-Object { $_.Name -notlike "uninstall*" }
+          if (-not $exe) { Get-ChildItem "$env:LOCALAPPDATA\Whittle" -ErrorAction SilentlyContinue; throw "Whittle was not installed" }
+          $exe.FullName
+
+  docker:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f deploy/docker-compose.yml up -d
+      - run: curl -fsS --retry 20 --retry-delay 2 --retry-all-errors http://localhost:8080/api/health
+      - if: always()
+        run: docker compose -f deploy/docker-compose.yml logs

@@ -13,6 +13,18 @@ design.
 > Status: **0.2, early preview.** Part modelling works end to end. Assemblies, 2D drawings and sheet
 > metal are on the [roadmap](PLAN.md#10-roadmap).
 
+## Install
+
+| System | One line |
+|---|---|
+| **Windows** (PowerShell) | `irm https://raw.githubusercontent.com/anand34577/whittle/main/install.ps1 \| iex` |
+| **macOS, Linux** (Terminal) | `curl -fsSL https://raw.githubusercontent.com/anand34577/whittle/main/install.sh \| sh` |
+| **Server** (Linux x86_64/arm64, bare metal or LXC) | `curl -fsSL https://raw.githubusercontent.com/anand34577/whittle/main/install.sh \| sh -s -- --server` |
+| **Server** (Docker) | `docker run -d --name whittle -p 8080:8080 -v whittle-data:/data --restart unless-stopped ghcr.io/anand34577/whittle:latest` |
+
+Or download an installer from the [latest release](https://github.com/anand34577/whittle/releases/latest).
+Step-by-step guides, configuration, single sign-on and troubleshooting are in the **[wiki](https://github.com/anand34577/whittle/wiki)**.
+
 ## Three ways to run it
 
 | | Desktop app | Self-hosted server | Static web |
@@ -21,7 +33,7 @@ design.
 | Sign-in | none | none, local accounts, single sign-on (OIDC), or both | none |
 | Files | ordinary `.whittle` files anywhere on disk, native Open/Save dialogs, recent files, double-click to open | each person's design library with thumbnails | browser file access or downloads |
 | Version history | every save keeps the previous copy (on your computer) | every save is a version on the server, with restore | every save keeps a copy in the browser |
-| Get it | [Releases](../../releases): `.msi`/`.exe`, `.dmg`, `.AppImage`/`.deb`/`.rpm` | [Releases](../../releases) (static Linux x86_64 / arm64), Docker; see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md) | `npm run build`, serve `apps/web/dist` |
+| Get it | [Installation guide](https://github.com/anand34577/whittle/wiki/Installation): `.msi`/`.exe`, `.dmg`, `.AppImage`/`.deb`/`.rpm` | [Self-hosting guide](https://github.com/anand34577/whittle/wiki/Self-Hosting), [Docker](https://github.com/anand34577/whittle/wiki/Docker) | `npm run build`, serve `apps/web/dist` |
 
 ## What you can do
 
@@ -69,7 +81,7 @@ npx tauri build      # installers for this OS
 
 ```bash
 npm run build
-cd apps/server && cargo run --release      # http://localhost:8080, SQLite in ./data
+cargo run --release --manifest-path apps/server/Cargo.toml   # http://localhost:8080, SQLite in ./data
 ```
 
 Bare metal, LXC (x86_64 / arm64), Docker, PostgreSQL, single sign-on, reverse proxies and backups:

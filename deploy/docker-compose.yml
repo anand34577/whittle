@@ -1,0 +1,35 @@
+# Whittle server with Docker Compose.
+#   curl -fsSLO https://raw.githubusercontent.com/anand34577/whittle/main/deploy/docker-compose.yml
+#   docker compose up -d
+# Then open http://<this machine>:8080/ and create the first account (it becomes the administrator).
+# Every setting: https://github.com/anand34577/whittle/wiki/Configuration
+
+services:
+  whittle:
+    image: ghcr.io/anand34577/whittle:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - whittle-data:/data
+    environment:
+      WHITTLE_AUTH: local              # local, oidc, local,oidc or none
+      # WHITTLE_PUBLIC_URL: https://cad.example.com
+      # WHITTLE_SIGNUP: "true"
+      # To use PostgreSQL, uncomment this and the postgres service below:
+      # WHITTLE_DATABASE_URL: postgres://whittle:change-me@postgres:5432/whittle
+    # depends_on: [postgres]
+
+  # postgres:
+  #   image: postgres:16
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: whittle
+  #     POSTGRES_PASSWORD: change-me
+  #     POSTGRES_DB: whittle
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  whittle-data:
+  # postgres-data:
