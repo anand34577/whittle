@@ -80,9 +80,8 @@ await step("04-history-restore", async () => {
 await step("05-gallery-reopen", async () => {
   await page.getByTitle(/Start screen/).click();
   await page.locator(".lib-card__open", { hasText: "Mounting plate" }).click();
-  await waitBuilt();
-  const bodies = await state(() => window.whittle.useApp.getState().regen?.bodies.length);
-  if (bodies !== 1) throw new Error("reopened design should have 1 body, got " + bodies);
+  // The status bar still shows the previous build, so wait for the new result itself.
+  await page.waitForFunction(() => window.whittle.useApp.getState().regen?.bodies.length === 1, null, { timeout: 60000 });
 });
 
 await step("06-sign-out-in", async () => {
