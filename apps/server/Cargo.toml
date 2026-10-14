@@ -1,0 +1,41 @@
+[package]
+name = "whittle-server"
+version = "0.2.0"
+description = "Optional self-hosted server for Whittle: serves the web app, user accounts and design storage with version history"
+license = "MPL-2.0"
+edition = "2021"
+rust-version = "1.80"
+
+[lib]
+name = "whittle_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "whittle-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "signal", "net", "io-std", "io-util"] }
+tower-http = { version = "0.6", features = ["fs", "set-header", "compression-gzip", "compression-br", "trace"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "any", "sqlite", "postgres", "tls-rustls-ring-webpki"] }
+argon2 = "0.5"
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
+url = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

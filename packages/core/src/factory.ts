@@ -1,0 +1,282 @@
+import type {
+  BodyOp,
+  CircleEntity,
+  EllipseEntity,
+  GearEntity,
+  PrimitiveShape,
+  TextEntity,
+  EntityType,
+  Feature,
+  FeatureType,
+  Id,
+  PlaneRef,
+  PolygonEntity,
+  PolylineEntity,
+  RectEntity,
+  SketchEntity,
+  SlotEntity,
+  WhittleDocument,
+} from "./model";
+import { SCHEMA_VERSION } from "./model";
+import type { LengthUnit } from "./units";
+
+/** Short, sortable, collision-resistant id (time + randomness). */
+export function uid(prefix = ""): Id {
+  const t = Date.now().toString(36);
+  const r = Math.random().toString(36).slice(2, 8);
+  return `${prefix}${t}${r}`;
+}
+
+/** Materials-inspired body palette: bone, steel, bronze, sage, clay, slate. */
+export const BODY_COLORS = ["#cfc8bb", "#8ea4b3", "#b98d5f", "#8aa186", "#b07c72", "#7a87a3", "#c2a96a"];
+
+export function newDocument(name = "Untitled", units: LengthUnit = "mm"): WhittleDocument {
+  const now = new Date().toISOString();
+  return {
+    schema: SCHEMA_VERSION,
+    id: uid("d"),
+    name,
+    units,
+    parameters: [],
+    features: [],
+    bodies: {},
+    rollback: null,
+    createdAt: now,
+    modifiedAt: now,
+  };
+}
+
+export const FEATURE_LABELS: Record<FeatureType, string> = {
+  sketch: "Sketch",
+  extrude: "Extrude",
+  revolve: "Revolve",
+  fillet: "Fillet",
+  chamfer: "Chamfer",
+  shell: "Shell",
+  primitive: "Shape",
+  mirror: "Mirror",
+  pattern: "Pattern",
+  hole: "Hole",
+  loft: "Loft",
+  move: "Move",
+  combine: "Combine",
+  import: "Import",
+};
+
+/** "Extrude 3" — next free numbered name for a feature type. */
+export function nextName(doc: WhittleDocument, base: string): string {
+  const used = new Set(doc.features.map((f) => f.name));
+  for (let i = 1; ; i++) {
+    const n = `${base} ${i}`;
+    if (!used.has(n)) return n;
+  }
+}
+
+export function nextBodyName(doc: WhittleDocument): string {
+  const used = new Set(Object.values(doc.bodies).map((b) => b.name));
+  for (let i = 1; ; i++) {
+    const n = `Body ${i}`;
+    if (!used.has(n)) return n;
+  }
+}
+
+export function nextBodyColor(doc: WhittleDocument): string {
+  return BODY_COLORS[Object.keys(doc.bodies).length % BODY_COLORS.length]!;
+}
+
+export function makeSketch(doc: WhittleDocument, plane: PlaneRef): Feature {
+  return { id: uid("sk"), type: "sketch", name: nextName(doc, "Sketch"), plane, entities: [] };
+}
+
+export function makeExtrude(doc: WhittleDocument, sketch: Id, op: BodyOp = "new"): Feature {
+  return {
+    id: uid("ex"),
+    type: "extrude",
+    name: nextName(doc, "Extrude"),
+    sketch,
+    distance: "10",
+    extent: "one",
+    flip: false,
+    op,
+  };
+}
+
+export function makeRevolve(doc: WhittleDocument, sketch: Id, op: BodyOp = "new"): Feature {
+  return { id: uid("rv"), type: "revolve", name: nextName(doc, "Revolve"), sketch, axis: "y", angle: "360", op };
+}
+
+export function makeFillet(doc: WhittleDocument): Feature {
+  return { id: uid("fi"), type: "fillet", name: nextName(doc, "Fillet"), edges: [], radius: "2" };
+}
+
+export function makeChamfer(doc: WhittleDocument): Feature {
+  return { id: uid("ch"), type: "chamfer", name: nextName(doc, "Chamfer"), edges: [], distance: "1" };
+}
+
+export function makeShell(doc: WhittleDocument): Feature {
+  return { id: uid("sh"), type: "shell", name: nextName(doc, "Shell"), faces: [], thickness: "2" };
+}
+
+export const PRIMITIVE_LABELS: Record<PrimitiveShape, string> = {
+  box: "Box",
+  cylinder: "Cylinder",
+  sphere: "Sphere",
+  cone: "Cone",
+  torus: "Torus",
+  tube: "Tube",
+};
+
+export function makePrimitive(doc: WhittleDocument, shape: PrimitiveShape, op: BodyOp = "new"): Feature {
+  return {
+    id: uid("pr"),
+    type: "primitive",
+    name: nextName(doc, PRIMITIVE_LABELS[shape]),
+    shape,
+    width: "40",
+    depth: "30",
+    height: shape === "cone" ? "30" : "20",
+    radius: shape === "torus" ? "20" : "15",
+    radius2: shape === "cone" ? "0" : shape === "torus" ? "5" : shape === "tube" ? "11" : undefined,
+    position: ["0", "0", "0"],
+    op,
+  };
+}
+
+export function makeHole(doc: WhittleDocument): Feature {
+  return {
+    id: uid("ho"),
+    type: "hole",
+    name: nextName(doc, "Hole"),
+    face: null,
+    points: [],
+    style: "simple",
+    diameter: "5",
+    depth: "10",
+    through: true,
+    headDiameter: "9",
+    headDepth: "3",
+  };
+}
+
+export function makeLoft(doc: WhittleDocument, sketches: Id[]): Feature {
+  return { id: uid("lo"), type: "loft", name: nextName(doc, "Loft"), sketches, ruled: false, op: "new" };
+}
+
+export function makeMove(doc: WhittleDocument, bodyId?: Id): Feature {
+  return { id: uid("mv"), type: "move", name: nextName(doc, "Move"), bodyId, translate: ["0", "0", "0"], axis: "z", angle: "0", copy: false };
+}
+
+export function makeCombine(doc: WhittleDocument, target?: Id, tools: Id[] = []): Feature {
+  return { id: uid("cb"), type: "combine", name: nextName(doc, "Combine"), target, tools, op: "join", keepTools: false };
+}
+
+export function makeImport(doc: WhittleDocument, fileName: string, format: "step" | "stl", data: string): Feature {
+  return { id: uid("im"), type: "import", name: nextName(doc, "Import"), fileName, format, data, scale: "1" };
+}
+
+export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {
+  return { id: uid("mi"), type: "mirror", name: nextName(doc, "Mirror"), bodyId, plane: "YZ", merge: true };
+}
+
+export function makePattern(doc: WhittleDocument, bodyId?: Id): Feature {
+  return {
+    id: uid("pa"),
+    type: "pattern",
+    name: nextName(doc, "Pattern"),
+    bodyId,
+    pattern: "linear",
+    axis: "x",
+    count: "3",
+    spacing: "20",
+    angle: "360",
+    merge: true,
+  };
+}
+
+const fmt = (n: number) => String(Math.round(n * 1000) / 1000);
+
+export function makeEntity(type: EntityType, a: [number, number], b: [number, number]): SketchEntity {
+  const id = uid("e");
+  switch (type) {
+    case "rect": {
+      const e: RectEntity = {
+        id,
+        type,
+        x: fmt(Math.min(a[0], b[0])),
+        y: fmt(Math.min(a[1], b[1])),
+        w: fmt(Math.abs(b[0] - a[0])),
+        h: fmt(Math.abs(b[1] - a[1])),
+        anchor: "corner",
+      };
+      return e;
+    }
+    case "circle": {
+      const e: CircleEntity = { id, type, cx: fmt(a[0]), cy: fmt(a[1]), r: fmt(Math.hypot(b[0] - a[0], b[1] - a[1])) };
+      return e;
+    }
+    case "polygon": {
+      const e: PolygonEntity = {
+        id,
+        type,
+        cx: fmt(a[0]),
+        cy: fmt(a[1]),
+        r: fmt(Math.hypot(b[0] - a[0], b[1] - a[1])),
+        sides: "6",
+        angle: fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI),
+      };
+      return e;
+    }
+    case "slot": {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const e: SlotEntity = {
+        id,
+        type,
+        cx: fmt((a[0] + b[0]) / 2),
+        cy: fmt((a[1] + b[1]) / 2),
+        length: fmt(len),
+        width: fmt(Math.max(len / 4, 1)),
+        angle: fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI),
+      };
+      return e;
+    }
+    case "polyline": {
+      const e: PolylineEntity = { id, type, points: [[fmt(a[0]), fmt(a[1])], [fmt(b[0]), fmt(b[1])]] };
+      return e;
+    }
+    case "ellipse": {
+      const e: EllipseEntity = {
+        id,
+        type,
+        cx: fmt(a[0]),
+        cy: fmt(a[1]),
+        rx: fmt(Math.max(Math.abs(b[0] - a[0]), 0.5)),
+        ry: fmt(Math.max(Math.abs(b[1] - a[1]), 0.5)),
+        angle: "0",
+      };
+      return e;
+    }
+    case "text": {
+      const size = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const e: TextEntity = { id, type, x: fmt(a[0]), y: fmt(a[1]), text: "Whittle", size: fmt(size > 1 ? size : 10), angle: "0" };
+      return e;
+    }
+    case "gear": {
+      const r = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const e: GearEntity = {
+        id,
+        type,
+        cx: fmt(a[0]),
+        cy: fmt(a[1]),
+        teeth: String(Math.max(8, Math.min(120, Math.round(r)))),
+        module: "2",
+        bore: "5",
+      };
+      return e;
+    }
+  }
+}
+
+/** A copy of an entity with a new id (positions unchanged). */
+export function cloneEntity(e: SketchEntity): SketchEntity {
+  return { ...structuredClone(e), id: uid("e") };
+}

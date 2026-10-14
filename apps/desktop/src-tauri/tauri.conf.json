@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Whittle",
+  "version": "0.2.0",
+  "identifier": "app.whittle.desktop",
+  "build": {
+    "beforeDevCommand": {
+      "script": "npm run dev",
+      "cwd": "../../.."
+    },
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": {
+      "script": "npm run build",
+      "cwd": "../../.."
+    },
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Whittle",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "center": true,
+        "backgroundColor": "#1b1a18"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost blob: data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Graphics and Design",
+    "shortDescription": "Parametric 3D CAD for makers, designers and engineers",
+    "longDescription": "Whittle is an open-source parametric 3D CAD application: sketch, extrude, fillet, pattern and assemble parts, keep every version, and export STEP for manufacturing or 3MF/STL for 3D printing.",
+    "license": "MPL-2.0",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "whittle"
+        ],
+        "name": "Whittle design",
+        "description": "Whittle parametric design",
+        "mimeType": "application/vnd.whittle+zip",
+        "role": "Editor"
+      }
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    },
+    "macOS": {
+      "signingIdentity": "-",
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}

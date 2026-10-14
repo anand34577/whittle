@@ -1,0 +1,337 @@
+/* Accounts, design library, recent files and version history. Same tokens as the rest of the app. */
+
+.modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 20px 20px;
+  overflow: auto;
+}
+.modal__body .modal__lede {
+  margin: 0;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Sign-in ─────────────────────────────────────────────── */
+.signin {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(var(--line-soft) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--bg-0);
+}
+.signin__card {
+  width: min(380px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px;
+  border-radius: 6px;
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
+  animation: rise var(--dur) var(--ease);
+}
+.signin__brand {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.signin__brand h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.signin__brand p {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+}
+.signin__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.signin__form .field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  text-align: left;
+}
+.signin__form .field__label {
+  text-align: left;
+}
+.signin .textfield,
+.userform .textfield,
+.stack .textfield {
+  width: 100%;
+  height: 36px;
+}
+.signin__form .link {
+  align-self: center;
+}
+.signin__or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.signin__or::before,
+.signin__or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.signin a.btn {
+  justify-content: center;
+  text-decoration: none;
+}
+.signin__foot {
+  margin: 0;
+  text-align: center;
+}
+
+/* ── Account ─────────────────────────────────────────────── */
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--accent);
+}
+.avatar:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.userlist {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-3);
+}
+.userrow {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto 32px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+}
+.userrow + .userrow {
+  border-top: 1px solid var(--line-soft);
+}
+.userrow.is-disabled .userrow__who {
+  opacity: 0.55;
+}
+.userrow__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.userform {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+.userform .eyebrow {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+/* ── Library (server designs, recent files) ───────────────── */
+.welcome__right {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.library__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  max-height: 340px;
+  overflow: auto;
+}
+.lib-card {
+  position: relative;
+}
+.lib-card__open {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0 10px;
+  text-align: left;
+  border-radius: var(--r-3);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  overflow: hidden;
+  transition: border-color var(--dur-fast);
+}
+.lib-card__open:hover {
+  border-color: var(--accent);
+}
+.lib-card__thumb {
+  display: grid;
+  place-items: center;
+  height: 104px;
+  margin-bottom: 6px;
+  color: var(--text-3);
+  background: var(--bg-inset);
+}
+.lib-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lib-card__name,
+.lib-card__open small {
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-card__name {
+  color: var(--text-1);
+  font-weight: 500;
+}
+.lib-card__del {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  background: var(--bg-1);
+}
+.lib-card:hover .lib-card__del,
+.lib-card__del:focus-visible {
+  opacity: 1;
+}
+.recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow: auto;
+}
+.recent li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--r-2);
+}
+.recent li:hover {
+  background: var(--bg-2);
+}
+.recent__open {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 20px auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  text-align: left;
+}
+.recent__name {
+  color: var(--text-1);
+  font-weight: 500;
+}
+.recent__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.recent li.is-missing .recent__name {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+/* ── Version history ─────────────────────────────────────── */
+.versions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid var(--line);
+  margin-left: 6px;
+}
+.versions li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 8px 16px;
+}
+.versions li::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--bg-1);
+  border: 2px solid var(--line-strong);
+}
+.versions li.is-current::before {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.versions__when {
+  display: flex;
+  flex-direction: column;
+}
+.versions .btnrow {
+  display: flex;
+}
+
+/* ── Timeline reorder & misc ─────────────────────────────── */
+.step.is-drop-before {
+  box-shadow: -3px 0 0 var(--accent);
+}
+
+@media (max-width: 720px) {
+  .welcome {
+    grid-template-columns: 1fr;
+  }
+  .userrow {
+    grid-template-columns: 1fr auto 32px;
+  }
+  .userform {
+    grid-template-columns: 1fr;
+  }
+}

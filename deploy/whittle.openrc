@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# Whittle for Alpine Linux / OpenRC. Installed by install.sh when systemd is absent.
+name="whittle"
+description="Whittle (self-hosted parametric CAD)"
+command="/opt/whittle/whittle-server"
+command_user="whittle:whittle"
+command_background=true
+pidfile="/run/whittle.pid"
+directory="/var/lib/whittle"
+output_log="/var/log/whittle.log"
+error_log="/var/log/whittle.log"
+
+depend() {
+  need net
+  after postgresql
+}
+
+start_pre() {
+  set -a
+  . /etc/whittle/whittle.env
+  set +a
+  checkpath -f -o whittle:whittle /var/log/whittle.log
+}

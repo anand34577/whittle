@@ -1,0 +1,26 @@
+[Unit]
+Description=Whittle (self-hosted parametric CAD)
+Documentation=file:///opt/whittle/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=whittle
+Group=whittle
+EnvironmentFile=/etc/whittle/whittle.env
+WorkingDirectory=/var/lib/whittle
+ExecStart=/opt/whittle/whittle-server
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+# Stricter sandboxing. These need mount namespaces, which some unprivileged
+# LXC containers don't allow (the service would fail with 226/NAMESPACE).
+# Uncomment them on a VM, bare metal, or an LXC with nesting enabled.
+#ProtectSystem=strict
+#ProtectHome=true
+#PrivateTmp=true
+#ReadWritePaths=/var/lib/whittle
+
+[Install]
+WantedBy=multi-user.target

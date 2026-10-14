@@ -1,0 +1,12 @@
+node_modules/
+dist/
+target/
+test-results/
+data/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+apps/desktop/src-tauri/gen/
+*.log
+.claude/
+Claude-Account-*.cmd

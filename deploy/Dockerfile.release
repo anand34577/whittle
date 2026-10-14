@@ -1,0 +1,13 @@
+# Multi-arch image from prebuilt static binaries (used by the release workflow).
+# Build context layout: amd64/whittle-server, arm64/whittle-server, web/
+FROM alpine:3.20
+ARG TARGETARCH
+RUN adduser -D -H -h /data whittle && mkdir /data && chown whittle /data
+COPY ${TARGETARCH}/whittle-server /usr/local/bin/whittle-server
+COPY web /srv/whittle
+ENV WHITTLE_BIND=0.0.0.0:8080 WHITTLE_WEB=/srv/whittle WHITTLE_DATA=/data
+USER whittle
+EXPOSE 8080
+VOLUME /data
+HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:8080/api/health || exit 1
+CMD ["whittle-server"]

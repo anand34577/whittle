@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "useDefineForClassFields": true,
+    "types": ["vite/client", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@whittle/core": ["packages/core/src/index.ts"],
+      "@whittle/kernel": ["packages/kernel/src/index.ts"],
+      "@whittle/kernel/*": ["packages/kernel/src/*"]
+    }
+  },
+  "include": ["packages/*/src", "packages/*/test", "apps/web/src", "apps/web/vite.config.ts", "vitest.config.ts"]
+}

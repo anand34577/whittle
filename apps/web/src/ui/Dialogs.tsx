@@ -1,0 +1,639 @@
+/** Parameters, export, start screen, shortcuts and the guided first-part coach. */
+import { useEffect, useMemo, useState } from "react";
+import {
+  type Parameter,
+  type QuantityKind,
+  documentEvaluator,
+  formatQuantity,
+  referencedNames,
+  renameParameter,
+  uid,
+  validateParamName,
+} from "@whittle/core";
+import { COMMANDS } from "../state/commands";
+import {
+  type RecentFile,
+  type VersionItem,
+  exportDesign,
+  forgetRecent,
+  listVersions,
+  loadDocumentConfirm,
+  newDesign,
+  openFromComputer,
+  openPath,
+  openServerDesign,
+  openVersionAsCopy,
+  readAutosave,
+  recentFiles,
+  restoreVersion,
+} from "../state/files";
+import { apiJson, ask } from "../state/platform";
+import { mutate, selectedBodyId, useApp } from "../state/store";
+import { TEMPLATES } from "../state/templates";
+import { Icon } from "./icons";
+
+export function Modal({ title, children, wide, onClose }: { title: string; children: React.ReactNode; wide?: boolean; onClose?: () => void }) {
+  const close = onClose ?? (() => useApp.setState({ panel: null }));
+  return (
+    <div className="scrim" onMouseDown={close}>
+      <div
+        className={`modal ${wide ? "modal--wide" : ""}`}
+        role="dialog"
+        aria-label={title}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") close();
+          e.stopPropagation();
+        }}
+      >
+        <header className="modal__head">
+          <h2>{title}</h2>
+          <button className="iconbtn" onClick={close} aria-label="Close">
+            <Icon name="close" size={18} />
+          </button>
+        </header>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────────── Parameters ───────────────────────────── */
+
+/** Name field: edited freely, applied on Enter/blur, and every formula that uses the old name follows. */
+function ParamName({ p, params }: { p: Parameter; params: Parameter[] }) {
+  const [text, setText] = useState(p.name);
+  useEffect(() => setText(p.name), [p.name]);
+  const error = text === p.name ? null : validateParamName(text, params, p.id);
+  const apply = () => {
+    if (text === p.name) return;
+    if (error) return setText(p.name);
+    mutate(`Rename ${p.name} to ${text}`, (d) => renameParameter(d, p.name, text));
+  };
+  return (
+    <input
+      className={`input mono ${error ? "is-error" : ""}`}
+      value={text}
+      title={error ?? ""}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={apply}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+      aria-label="Name"
+    />
+  );
+}
+
+export function ParamsDialog() {
+  const doc = useApp((s) => s.doc);
+  const ev = useMemo(() => documentEvaluator(doc), [doc]);
+  const [draft, setDraft] = useState<{ name: string; expr: string; kind: QuantityKind }>({ name: "", expr: "", kind: "length" });
+  const nameError = draft.name ? validateParamName(draft.name, doc.parameters) : null;
+
+  const usedBy = (name: string) =>
+    doc.features.filter((f) => new RegExp(`\\b${name}\\b`).test(JSON.stringify(f))).length +
+    doc.parameters.filter((p) => referencedNames(p.expr).includes(name)).length;
+
+  const update = (id: string, patch: Partial<Parameter>) =>
+    mutate(
+      "Edit parameter",
+      (d) => {
+        const p = d.parameters.find((x) => x.id === id);
+        if (p) Object.assign(p, patch);
+      },
+      "param" + id + Object.keys(patch).join(),
+    );
+
+  const add = () => {
+    if (!draft.name || nameError || !draft.expr) return;
+    mutate("Add parameter", (d) => {
+      d.parameters.push({ id: uid("p"), name: draft.name, expr: draft.expr, kind: draft.kind });
+    });
+    setDraft({ name: "", expr: "", kind: draft.kind });
+  };
+
+  return (
+    <Modal title="Parameters" wide>
+      <p className="modal__lede">
+        Name the numbers that matter (wall thickness, screw size, overall width) and use those names in any field: <code>width / 2 + 3</code>. Change one value and the whole
+        design follows.
+      </p>
+      <div className="ptable" role="table">
+        <div className="ptable__row ptable__row--head" role="row">
+          <span>Name</span>
+          <span>Value or formula</span>
+          <span>Kind</span>
+          <span>Result</span>
+          <span>Note</span>
+          <span />
+        </div>
+        {doc.parameters.map((p) => {
+          const v = ev.params.get(p.name);
+          const n = usedBy(p.name);
+          return (
+            <div className="ptable__row" role="row" key={p.id}>
+              <ParamName p={p} params={doc.parameters} />
+              <input className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onChange={(e) => update(p.id, { expr: e.target.value })} aria-label="Formula" title={v?.error} />
+              <select className="select" value={p.kind} onChange={(e) => update(p.id, { kind: e.target.value as QuantityKind })} aria-label="Kind">
+                <option value="length">Length</option>
+                <option value="angle">Angle</option>
+                <option value="number">Number</option>
+                <option value="count">Count</option>
+              </select>
+              <span className={`mono ptable__result ${v?.ok ? "" : "is-error"}`} title={v?.error}>
+                {v?.ok ? formatQuantity(v.value, p.kind, doc.units) : v?.error ?? ""}
+              </span>
+              <input className="input" placeholder={n ? `Used ${n}\u00d7` : "Unused"} value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
+              <button
+                className="iconbtn"
+                aria-label={`Delete ${p.name}`}
+                title={n ? `Used by ${n} feature(s)` : "Delete"}
+                onClick={async () => {
+                  if (n && !(await ask(`${p.name} is used by ${n} feature(s). Delete it anyway?`, "Delete"))) return;
+                  mutate("Delete parameter", (d) => {
+                    d.parameters = d.parameters.filter((x) => x.id !== p.id);
+                  });
+                }}
+              >
+                <Icon name="trash" size={16} />
+              </button>
+            </div>
+          );
+        })}
+        <form
+          className="ptable__row ptable__row--new"
+          role="row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add();
+          }}
+        >
+          <input className={`input mono ${nameError ? "is-error" : ""}`} placeholder="name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} title={nameError ?? ""} aria-label="New parameter name" />
+          <input className="input mono" placeholder="e.g. 40 or width / 2" value={draft.expr} onChange={(e) => setDraft({ ...draft, expr: e.target.value })} aria-label="New parameter formula" />
+          <select className="select" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as QuantityKind })} aria-label="New parameter kind">
+            <option value="length">Length</option>
+            <option value="angle">Angle</option>
+            <option value="number">Number</option>
+            <option value="count">Count</option>
+          </select>
+          <span className="muted small">{nameError}</span>
+          <span />
+          <button className="btn btn--accent btn--small" type="submit" disabled={!draft.name || !!nameError || !draft.expr}>
+            Add
+          </button>
+        </form>
+      </div>
+    </Modal>
+  );
+}
+
+/* ───────────────────────────── Export ───────────────────────────── */
+
+export function ExportDialog() {
+  const bodies = useApp((s) => s.regen?.bodies.length ?? 0);
+  useApp((s) => s.selection);
+  const selected = bodies > 1 ? selectedBodyId() : undefined;
+  const selectedName = useApp((s) => (selected ? s.doc.bodies[selected]?.name : undefined));
+  const [onlySelected, setOnlySelected] = useState(true);
+  const items = [
+    { f: "step" as const, title: "STEP", sub: "Other CAD, machining, manufacturing", body: "Exact geometry for Fusion, SolidWorks, Onshape, FreeCAD, CAM software and manufacturers." },
+    { f: "3mf" as const, title: "3MF", sub: "3D printing", body: "Best for slicers (Bambu Studio, PrusaSlicer, OrcaSlicer, Cura). Keeps units, names and colors." },
+    { f: "stl" as const, title: "STL", sub: "3D printing, rendering, games", body: "The universal mesh format. Works with every slicer, renderer and printing service." },
+  ];
+  return (
+    <Modal title="Export">
+      {bodies === 0 ? (
+        <p className="modal__lede">There's nothing to export yet. Create a body first.</p>
+      ) : (
+        <div className="export-grid">
+          {items.map((it) => (
+            <button
+              key={it.f}
+              className="export-card"
+              onClick={() => {
+                useApp.setState({ panel: null });
+                void exportDesign(it.f, selected && onlySelected ? selected : undefined);
+              }}
+            >
+              <span className="export-card__fmt mono">.{it.f}</span>
+              <span className="export-card__title">
+                {it.title} <small>{it.sub}</small>
+              </span>
+              <span className="export-card__body">{it.body}</span>
+            </button>
+          ))}
+          {selected && (
+            <label className="checkrow">
+              <input type="checkbox" checked={onlySelected} onChange={(e) => setOnlySelected(e.target.checked)} />
+              Only the selected body ({selectedName ?? "Body"})
+            </label>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* ───────────────────────────── Shortcuts ───────────────────────────── */
+
+export function ShortcutsDialog() {
+  const groups = new Map<string, typeof COMMANDS>();
+  for (const c of COMMANDS) {
+    if (!c.keys) continue;
+    groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
+  }
+  const mouse = [
+    ["Left-drag", "Orbit"],
+    ["Right-drag / middle-drag", "Pan"],
+    ["Wheel", "Zoom to cursor"],
+    ["Click", "Select (Shift adds)"],
+    ["Double-click", "Edit the feature"],
+    ["Right-click", "Quick actions (radial menu)"],
+    ["Drop a file", "Open .whittle, import STEP / STL"],
+    ["Ctrl+K", "Find any command"],
+  ];
+  return (
+    <Modal title="Keyboard & mouse" wide>
+      <div className="shortcuts">
+        <section>
+          <h3 className="eyebrow">Mouse</h3>
+          <dl>
+            {mouse.map(([k, v]) => (
+              <div key={k}>
+                <dt>
+                  <kbd>{k}</kbd>
+                </dt>
+                <dd>{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+        {[...groups].map(([g, cs]) => (
+          <section key={g}>
+            <h3 className="eyebrow">{g}</h3>
+            <dl>
+              {cs.map((c) => (
+                <div key={c.id}>
+                  <dt>
+                    <kbd>{c.keys}</kbd>
+                  </dt>
+                  <dd>{c.label}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+/* ───────────────────────────── Start screen ───────────────────────────── */
+
+function TemplateArt({ id }: { id: string }) {
+  // Small isometric line drawings, in the same hand as the icon set.
+  const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinejoin: "round" as const, strokeLinecap: "round" as const };
+  if (id === "plate")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <path d="M14 46 L64 22 L108 38 L58 62 Z" />
+        <path d="M14 46 V52 L58 68 V62 M58 68 L108 44 V38" opacity=".6" />
+        <ellipse cx="33" cy="45" rx="4" ry="2.2" />
+        <ellipse cx="62" cy="31" rx="4" ry="2.2" />
+        <ellipse cx="88" cy="40" rx="4" ry="2.2" />
+        <ellipse cx="60" cy="54" rx="4" ry="2.2" />
+        <path d="M52 44 L68 37" strokeWidth="5" opacity=".35" />
+      </svg>
+    );
+  if (id === "box")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <path d="M22 30 L62 14 L100 28 L60 44 Z" />
+        <path d="M30 31 L62 18.5 L92 29 L60 41 Z" opacity=".6" />
+        <path d="M22 30 V56 L60 72 V44 M60 72 L100 54 V28" />
+      </svg>
+    );
+  if (id === "knob")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <ellipse cx="60" cy="24" rx="24" ry="8" />
+        <ellipse cx="60" cy="24" rx="4" ry="1.6" opacity=".6" />
+        <path d="M36 24 V36 C36 44 34 48 32 52 M84 24 V36 C84 44 86 48 88 52" />
+        <path d="M32 52 A28 9 0 0 0 88 52" />
+      </svg>
+    );
+  return (
+    <svg viewBox="0 0 120 80" {...common}>
+      <path d="M30 56 L60 42 L90 56" opacity=".4" strokeDasharray="3 3" />
+      <path d="M60 18 V42" opacity=".4" strokeDasharray="3 3" />
+    </svg>
+  );
+}
+
+/** Relative time like "3 min ago" / "yesterday" / a date. */
+export function ago(ms: number): string {
+  const d = (Date.now() - ms) / 1000;
+  if (d < 60) return "just now";
+  if (d < 3600) return `${Math.round(d / 60)} min ago`;
+  if (d < 86400) return `${Math.round(d / 3600)} h ago`;
+  if (d < 2 * 86400) return "yesterday";
+  return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+const kb = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+interface ServerDesign {
+  id: string;
+  name: string;
+  size: number;
+  version: number;
+  hasThumbnail: boolean;
+  updatedAt: number;
+}
+
+/** Server: the signed-in user's designs. */
+function ServerLibrary() {
+  const [list, setList] = useState<ServerDesign[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const load = () =>
+    apiJson<ServerDesign[]>("/designs")
+      .then(setList)
+      .catch((e: Error) => setError(e.message));
+  useEffect(() => void load(), []);
+  const remove = async (d: ServerDesign) => {
+    if (!(await ask(`Delete "${d.name}" and all of its versions? This can't be undone.`, "Delete"))) return;
+    try {
+      await apiJson(`/designs/${encodeURIComponent(d.id)}`, { method: "DELETE" });
+      void load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const shown = (list ?? []).filter((d) => d.name.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <section className="library">
+      <div className="library__head">
+        <h3 className="eyebrow">Your designs</h3>
+        {(list?.length ?? 0) > 6 && (
+          <label className="parts__search">
+            <Icon name="search" size={14} />
+            <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+          </label>
+        )}
+      </div>
+      {error && <p className="note note--error">{error}</p>}
+      {list === null && !error && <p className="muted small">Loading…</p>}
+      {list?.length === 0 && <p className="muted small">Nothing saved yet. Designs you save appear here, with their full version history.</p>}
+      <div className="lib-grid">
+        {shown.map((d) => (
+          <div key={d.id} className="lib-card">
+            <button className="lib-card__open" onClick={() => void openServerDesign(d.id)} title={`Open ${d.name}`}>
+              <span className="lib-card__thumb">
+                {d.hasThumbnail ? <img src={`./api/designs/${encodeURIComponent(d.id)}/thumbnail?v=${d.version}`} alt="" loading="lazy" /> : <Icon name="cube" size={28} />}
+              </span>
+              <span className="lib-card__name">{d.name}</span>
+              <small className="muted">
+                {ago(d.updatedAt)} · v{d.version}
+              </small>
+            </button>
+            <button className="iconbtn iconbtn--small lib-card__del" aria-label={`Delete ${d.name}`} onClick={() => void remove(d)}>
+              <Icon name="trash" size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Desktop: recently opened files. */
+function RecentLibrary() {
+  const [list, setList] = useState<RecentFile[] | null>(null);
+  useEffect(() => void recentFiles().then(setList), []);
+  if (!list || list.length === 0) return null;
+  return (
+    <section className="library">
+      <h3 className="eyebrow">Recent</h3>
+      <ul className="recent">
+        {list.map((r) => (
+          <li key={r.path} className={r.exists ? "" : "is-missing"}>
+            <button className="recent__open" disabled={!r.exists} onClick={() => void openPath(r.path)} title={r.path}>
+              <Icon name="file" size={16} />
+              <span className="recent__name">{r.name}</span>
+              <small className="recent__path muted">{r.exists ? r.path : "Moved or deleted"}</small>
+              <small className="muted">{ago(r.openedAt)}</small>
+            </button>
+            <button
+              className="iconbtn iconbtn--small"
+              aria-label={`Remove ${r.name} from the list`}
+              title="Remove from list"
+              onClick={() => void forgetRecent(r.path).then(() => setList(list.filter((x) => x.path !== r.path)))}
+            >
+              <Icon name="close" size={12} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function Welcome() {
+  const recovered = useMemo(() => readAutosave(), []);
+  const platform = useApp((s) => s.platform.kind);
+  const close = () => useApp.setState({ panel: null });
+  return (
+    <Modal title="Welcome to Whittle" wide onClose={close}>
+      <div className="welcome">
+        <section className="welcome__start">
+          <h3 className="eyebrow">Start</h3>
+          <button className="start-card start-card--primary" onClick={() => void newDesign("mm")}>
+            <Icon name="file" />
+            <span>
+              <b>New design</b>
+              <small>Millimetres</small>
+            </span>
+          </button>
+          <button className="start-card" onClick={() => void newDesign("in")}>
+            <Icon name="file" />
+            <span>
+              <b>New design</b>
+              <small>Inches</small>
+            </span>
+          </button>
+          <button className="start-card" onClick={() => void openFromComputer()}>
+            <Icon name="folder" />
+            <span>
+              <b>{platform === "server" ? "Open from this computer" : "Open a file"}</b>
+              <small>.whittle</small>
+            </span>
+          </button>
+          {recovered && (
+            <button className="start-card start-card--recover" onClick={() => void loadDocumentConfirm(recovered.doc, recovered.fileName)}>
+              <Icon name="undo" />
+              <span>
+                <b>Continue where you left off</b>
+                <small>
+                  {recovered.doc.name} · {new Date(recovered.at).toLocaleString()}
+                </small>
+              </span>
+            </button>
+          )}
+          <button className="start-card" onClick={() => useApp.setState({ panel: "parts" })}>
+            <Icon name="library" />
+            <span>
+              <b>Start from a part</b>
+              <small>Gears, fasteners, brackets, enclosures…</small>
+            </span>
+          </button>
+          <button
+            className="start-card start-card--learn"
+            onClick={() =>
+              void newDesign("mm", "My first part").then((ok) => {
+                if (ok) useApp.setState({ coach: true, panel: null });
+              })
+            }
+          >
+            <Icon name="sparkStep" />
+            <span>
+              <b>Make your first part</b>
+              <small>A 2-minute guided start</small>
+            </span>
+          </button>
+        </section>
+        <div className="welcome__right">
+          {platform === "server" && <ServerLibrary />}
+          {platform === "desktop" && <RecentLibrary />}
+          <section className="welcome__templates">
+            <h3 className="eyebrow">Templates: real, editable designs</h3>
+            <div className="tpl-grid">
+              {TEMPLATES.map((t) => (
+                <button key={t.id} className="tpl" onClick={() => void loadDocumentConfirm(t.build(), null)}>
+                  <span className="tpl__art">
+                    <TemplateArt id={t.id} />
+                  </span>
+                  <span className="tpl__title">{t.title}</span>
+                  <span className="tpl__blurb">{t.blurb}</span>
+                </button>
+              ))}
+            </div>
+            <div className="welcome__keys">
+              <span>
+                <kbd>S</kbd> Sketch
+              </span>
+              <span>
+                <kbd>E</kbd> Extrude
+              </span>
+              <span>
+                <kbd>F</kbd> Fillet
+              </span>
+              <span>
+                <kbd>Ctrl K</kbd> Find anything
+              </span>
+            </div>
+          </section>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ───────────────────────────── Version history ───────────────────────────── */
+
+export function VersionsDialog() {
+  const [list, setList] = useState<VersionItem[] | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const platform = useApp((s) => s.platform.kind);
+  useEffect(() => {
+    listVersions()
+      .then(setList)
+      .catch((e: Error) => setError(e.message));
+  }, []);
+  const where = platform === "server" ? "on the server" : platform === "desktop" ? "on this computer" : "in this browser";
+  return (
+    <Modal title="Version history">
+      <div className="modal__body">
+        <p className="modal__lede">Every save keeps a version {where}. Restoring makes an old version current; the one it replaces stays in the list.</p>
+        {error && <p className="note note--error">{error}</p>}
+        {list === undefined && !error && <p className="muted">Loading…</p>}
+        {list === null && <p className="muted">Save this design first. After that, every save is kept here.</p>}
+        {list && list.length === 0 && <p className="muted">No earlier versions yet. They appear after you save again.</p>}
+        {list && list.length > 0 && (
+          <ol className="versions">
+            {list.map((v) => (
+              <li key={v.id} className={v.current ? "is-current" : ""}>
+                <span className="versions__when">
+                  <b>{ago(v.at)}</b>
+                  <small className="muted">
+                    {new Date(v.at).toLocaleString()} · {kb(v.size)}
+                    {v.author ? ` · ${v.author}` : ""}
+                  </small>
+                </span>
+                {v.current ? (
+                  <span className="pill">Current</span>
+                ) : (
+                  <span className="btnrow">
+                    <button className="btn btn--small btn--ghost" onClick={() => void openVersionAsCopy(v)} title="Open it as a separate, unsaved design">
+                      Open copy
+                    </button>
+                    <button className="btn btn--small" onClick={() => void restoreVersion(v)}>
+                      Restore
+                    </button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/* ───────────────────────────── Guided first part ───────────────────────────── */
+
+export function Coach() {
+  const s = useApp();
+  if (!s.coach) return null;
+  const doc = s.doc;
+  const sketches = doc.features.filter((f) => f.type === "sketch");
+  const hasShape = sketches.some((f) => f.type === "sketch" && f.entities.length > 0);
+  const extruded = doc.features.some((f) => f.type === "extrude");
+  const filleted = doc.features.some((f) => f.type === "fillet" && f.edges.length > 0) && !s.session;
+  const exported = false;
+  const steps = [
+    { done: sketches.length > 0 || s.mode.kind === "pickPlane", title: "Start a sketch", body: "Press S (or the Sketch button), then click the flat XY plane." },
+    { done: hasShape, title: "Draw a rectangle", body: "Click one corner, then the other. Or type 60, Tab, 40, Enter for an exact size." },
+    { done: hasShape && s.mode.kind !== "sketch", title: "Finish the sketch", body: "Press Esc or click Finish sketch (top right)." },
+    { done: extruded && !(s.session && doc.features.find((f) => f.id === s.session?.featureId)?.type === "extrude"), title: "Extrude it", body: "Press E, type a height (try 12), press Enter." },
+    { done: filleted, title: "Round the edges", body: "Click an edge (Shift-click for more), press F, set a radius, press Enter." },
+    { done: exported, title: "Share or make it", body: "Export: STEP for other CAD and machining, 3MF or STL for 3D printing." },
+  ];
+  const current = steps.findIndex((x) => !x.done);
+  return (
+    <aside className="coach" aria-label="Guided first part">
+      <header>
+        <b>Your first part</b>
+        <button className="iconbtn" onClick={() => useApp.setState({ coach: false })} aria-label="Close guide">
+          <Icon name="close" size={16} />
+        </button>
+      </header>
+      <ol>
+        {steps.map((st, i) => (
+          <li key={st.title} className={st.done ? "is-done" : i === current ? "is-current" : ""}>
+            <span className="coach__dot">{st.done ? <Icon name="check" size={12} /> : i + 1}</span>
+            <div>
+              <b>{st.title}</b>
+              {i === current && <p>{st.body}</p>}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {current === steps.length - 1 && (
+        <button className="btn btn--accent btn--small" onClick={() => useApp.setState({ panel: "export", coach: false })}>
+          Export now
+        </button>
+      )}
+    </aside>
+  );
+}

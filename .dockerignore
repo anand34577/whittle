@@ -1,0 +1,6 @@
+node_modules
+**/target
+apps/web/dist
+data
+test-results
+.git

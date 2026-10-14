@@ -1,0 +1,1133 @@
+/**
+ * The viewport engine: plain, imperative Three.js (no React in the render
+ * loop). React talks to it through a narrow API and callbacks.
+ *
+ * - Z-up world, turntable navigation that never rolls the horizon.
+ * - Renders on demand only (idle = 0% GPU).
+ * - Picking: raycast for faces, screen-space distance for edges (with
+ *   occlusion test), so edges are easy to hit even when thin.
+ */
+import * as THREE from "three";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import type { BodyMeta, Id, OriginPlane, Vec2, Vec3 } from "@whittle/core";
+import type { BodyResult, SketchFrame } from "@whittle/kernel";
+import type { Pick, ViewSettings } from "../state/store";
+import { lookById } from "./looks";
+import { VIEWPORT_THEMES, type ViewportTheme } from "./theme";
+
+export type CubeView = "front" | "back" | "left" | "right" | "top" | "bottom" | "iso";
+
+export interface PickFilter {
+  faces: boolean;
+  edges: boolean;
+  planes: boolean;
+  sketches: boolean;
+}
+
+export interface SketchDrawable {
+  id: Id;
+  frame: SketchFrame;
+  active: boolean;
+  /** Triangles of the solid regions (world space), drawn as a soft fill. */
+  fill?: Float32Array;
+  shapes: { id: Id; pts: Vec2[]; closed: boolean; construction: boolean; selected: boolean; hovered: boolean }[];
+}
+
+export interface SketchPointerEvent {
+  type: "move" | "down" | "up" | "leave";
+  p: Vec2;
+  button: number;
+  shift: boolean;
+  alt: boolean;
+  ctrl: boolean;
+  screen: Vec2;
+}
+
+export interface ViewportCallbacks {
+  onHover(p: Pick | null): void;
+  onClick(p: Pick | null, additive: boolean): void;
+  onDoubleClick(p: Pick | null): void;
+  onSketchPointer(e: SketchPointerEvent): void;
+  onCamera(): void;
+  /** Right-click without dragging: open the radial menu. */
+  onContext(p: Pick | null, screen: Vec2): void;
+}
+
+interface BodyView {
+  id: Id;
+  data: BodyResult;
+  mesh: THREE.Mesh;
+  edges: LineSegments2;
+  /** Section-view cap: back faces drawn flat so cut bodies look solid. */
+  cap?: THREE.Mesh;
+  visible: boolean;
+}
+
+const OVERHANG_COS = Math.cos((45 * Math.PI) / 180);
+
+const tmpV = new THREE.Vector3();
+const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+
+/** Turntable orbit around world Z. Represents any view, including top/bottom. */
+class Turntable {
+  target = new THREE.Vector3();
+  distance = 300;
+  theta = -Math.PI / 4; // azimuth around Z
+  phi = Math.PI / 3; // polar angle from +Z
+
+  apply(camera: THREE.PerspectiveCamera, ortho?: THREE.OrthographicCamera) {
+    const sp = Math.sin(this.phi);
+    const cp = Math.cos(this.phi);
+    const ct = Math.cos(this.theta);
+    const st = Math.sin(this.theta);
+    camera.position.set(this.target.x + this.distance * sp * ct, this.target.y + this.distance * sp * st, this.target.z + this.distance * cp);
+    camera.up.set(-cp * ct, -cp * st, sp);
+    camera.lookAt(this.target);
+    camera.near = Math.max(0.01, this.distance / 2000);
+    camera.far = this.distance * 200;
+    camera.updateProjectionMatrix();
+    if (ortho) {
+      // Same framing as the perspective view at the target distance.
+      const h = this.distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+      const w = h * camera.aspect;
+      ortho.left = -w;
+      ortho.right = w;
+      ortho.top = h;
+      ortho.bottom = -h;
+      ortho.position.copy(camera.position);
+      ortho.up.copy(camera.up);
+      ortho.lookAt(this.target);
+      ortho.near = -this.distance * 50;
+      ortho.far = this.distance * 200;
+      ortho.updateProjectionMatrix();
+    }
+  }
+
+  /** View direction (from target to camera) to theta/phi; `up` disambiguates top/bottom views. */
+  static anglesFor(dir: THREE.Vector3, up?: THREE.Vector3): { theta: number; phi: number } {
+    const d = dir.clone().normalize();
+    const phi = Math.acos(THREE.MathUtils.clamp(d.z, -1, 1));
+    let theta: number;
+    if (Math.abs(Math.sin(phi)) < 1e-4) {
+      // Looking straight along Z: choose theta so that the camera "up" matches.
+      const u = up ?? new THREE.Vector3(0, 1, 0);
+      const cp = Math.cos(phi);
+      theta = Math.atan2(-u.y / cp, -u.x / cp);
+    } else theta = Math.atan2(d.y, d.x);
+    return { theta, phi };
+  }
+}
+
+export class Viewport {
+  readonly renderer: THREE.WebGLRenderer;
+  private persp = new THREE.PerspectiveCamera(32, 1, 0.1, 100000);
+  private orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 100000);
+  private view: ViewSettings = { display: "edges", section: null, overhang: false, grid: true, ortho: false };
+  private lastBodies: { list: BodyResult[]; meta: Record<Id, BodyMeta> } = { list: [], meta: {} };
+  private measureGroup = new THREE.Group();
+  private fillGroup = new THREE.Group();
+  private shadow: THREE.Mesh;
+  private clip = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private scene = new THREE.Scene();
+  private orbit = new Turntable();
+  private theme: ViewportTheme = VIEWPORT_THEMES.graphite;
+  private bodies = new Map<Id, BodyView>();
+  private pickBodies: BodyView[] = [];
+  private world = new THREE.Group();
+  private overlay = new THREE.Group();
+  private sketchGroup = new THREE.Group();
+  private previewGroup = new THREE.Group();
+  private highlightGroup = new THREE.Group();
+  private grid = new THREE.Group();
+  private planes = new THREE.Group();
+  private headlight = new THREE.DirectionalLight(0xffffff, 1.6);
+  private hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
+  private raycaster = new THREE.Raycaster();
+  private lineMaterials = new Set<LineMaterial>();
+  private frame = 0;
+  private gridStep = 0;
+  private sketchFrame: SketchFrame | null = null;
+  private filter: PickFilter = { faces: true, edges: true, planes: false, sketches: true };
+  private sketchHit: { id: Id; pts: Vec3[][] }[] = [];
+  private anim: { from: Turntable; to: Turntable; t0: number; dur: number } | null = null;
+  private drag: { x: number; y: number; button: number; moved: boolean; mode: "orbit" | "pan" | "none" } | null = null;
+  private lastHoverKey = "";
+  private resizeObs: ResizeObserver;
+  private disposed = false;
+  private size = new THREE.Vector2(1, 1);
+  private sceneRadius = 100;
+
+  /** The active camera (perspective or orthographic). */
+  get camera(): THREE.PerspectiveCamera | THREE.OrthographicCamera {
+    return this.view.ortho ? this.orthoCam : this.persp;
+  }
+
+  private applyOrbit() {
+    this.orbit.apply(this.persp, this.orthoCam);
+  }
+
+  constructor(
+    private container: HTMLElement,
+    private cb: ViewportCallbacks,
+  ) {
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: false });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.NeutralToneMapping;
+    this.renderer.localClippingEnabled = true;
+    this.shadow = this.makeShadow();
+    container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.className = "viewport-canvas";
+    this.renderer.domElement.tabIndex = 0;
+
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+
+    this.persp.up.set(0, 0, 1);
+    this.scene.add(this.shadow, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.grid, this.planes, this.hemi, this.persp, this.orthoCam);
+    this.persp.add(this.headlight);
+    this.headlight.position.set(0.3, 0.6, 1);
+    const orthoLight = this.headlight.clone();
+    this.orthoCam.add(orthoLight);
+    this.grid.matrixAutoUpdate = false;
+    this.planes.visible = false;
+    this.setTheme("graphite");
+
+    this.orbit.distance = 320;
+    this.applyOrbit();
+
+    const el = this.renderer.domElement;
+    el.addEventListener("pointerdown", this.onPointerDown);
+    el.addEventListener("pointermove", this.onPointerMove);
+    el.addEventListener("pointerup", this.onPointerUp);
+    el.addEventListener("pointerleave", this.onPointerLeave);
+    el.addEventListener("wheel", this.onWheel, { passive: false });
+    el.addEventListener("dblclick", this.onDblClick);
+    el.addEventListener("contextmenu", (e) => e.preventDefault());
+
+    this.resizeObs = new ResizeObserver(() => this.resize());
+    this.resizeObs.observe(container);
+    this.resize();
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.resizeObs.disconnect();
+    cancelAnimationFrame(this.frame);
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
+  }
+
+  /* ───────────────────────── Rendering ───────────────────────── */
+
+  invalidate = () => {
+    if (this.frame || this.disposed) return;
+    this.frame = requestAnimationFrame(this.render);
+  };
+
+  private render = () => {
+    this.frame = 0;
+    if (this.anim) {
+      const t = Math.min(1, (performance.now() - this.anim.t0) / this.anim.dur);
+      const k = ease(t);
+      const { from, to } = this.anim;
+      this.orbit.target.lerpVectors(from.target, to.target, k);
+      this.orbit.distance = from.distance + (to.distance - from.distance) * k;
+      this.orbit.theta = from.theta + (to.theta - from.theta) * k;
+      this.orbit.phi = from.phi + (to.phi - from.phi) * k;
+      if (t >= 1) this.anim = null;
+      this.applyOrbit();
+      this.cb.onCamera();
+      this.invalidate();
+    }
+    this.updateGrid();
+    this.renderer.render(this.scene, this.camera);
+  };
+
+  private resize() {
+    const w = Math.max(1, this.container.clientWidth);
+    const h = Math.max(1, this.container.clientHeight);
+    this.size.set(w, h);
+    this.renderer.setSize(w, h, false);
+    this.persp.aspect = w / h;
+    this.applyOrbit();
+    for (const m of this.lineMaterials) m.resolution.set(w, h);
+    this.invalidate();
+  }
+
+  setTheme(name: keyof typeof VIEWPORT_THEMES) {
+    this.theme = VIEWPORT_THEMES[name];
+    const c = document.createElement("canvas");
+    c.width = 2;
+    c.height = 256;
+    const g = c.getContext("2d")!;
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, this.theme.bgTop);
+    grad.addColorStop(1, this.theme.bgBottom);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 2, 256);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    (this.scene.background as THREE.Texture | null)?.dispose();
+    this.scene.background = tex;
+    this.scene.environmentIntensity = this.theme.envIntensity;
+    this.hemi.color.set(name === "paper" ? "#ffffff" : "#f4efe6");
+    this.hemi.groundColor.set(name === "paper" ? "#b9b2a5" : "#3b3833");
+    for (const b of this.bodies.values()) (b.edges.material as LineMaterial).color.set(this.theme.edge);
+    (this.shadow.material as THREE.MeshBasicMaterial).opacity = name === "paper" ? 0.22 : 0.5;
+    this.gridStep = 0;
+    this.buildPlanes();
+    this.invalidate();
+  }
+
+  private lineMat(color: string, width: number, opts: Partial<{ dashed: boolean; opacity: number; depthTest: boolean }> = {}) {
+    const m = new LineMaterial({
+      color: new THREE.Color(color).getHex(),
+      linewidth: width,
+      dashed: opts.dashed ?? false,
+      dashSize: 3,
+      gapSize: 2,
+      transparent: (opts.opacity ?? 1) < 1,
+      opacity: opts.opacity ?? 1,
+      depthTest: opts.depthTest ?? true,
+    });
+    m.resolution.set(this.size.x, this.size.y);
+    this.lineMaterials.add(m);
+    return m;
+  }
+
+  private disposeObject(o: THREE.Object3D, keepGeometry = false) {
+    o.traverse((x) => {
+      const any = x as THREE.Mesh;
+      // Face highlights borrow the body's position buffer: detach it so disposing them doesn't drop it from the GPU.
+      if (x.userData.sharedPosition) any.geometry.deleteAttribute("position");
+      if (!keepGeometry) any.geometry?.dispose();
+      const mats = Array.isArray(any.material) ? any.material : any.material ? [any.material] : [];
+      for (const m of mats) {
+        if (m instanceof LineMaterial) this.lineMaterials.delete(m);
+        m.dispose();
+      }
+    });
+  }
+
+  private clearGroup(g: THREE.Group) {
+    for (const c of [...g.children]) {
+      this.disposeObject(c, c.userData.sharedGeometry === true);
+      g.remove(c);
+    }
+  }
+
+  /* ───────────────────────── Grid & planes ───────────────────────── */
+
+  private updateGrid() {
+    const dist = this.orbit.distance;
+    const raw = dist / 18;
+    const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = raw / pow >= 5 ? pow * 5 : raw / pow >= 2 ? pow * 2 : pow;
+    if (step === this.gridStep) return;
+    this.gridStep = step;
+    this.clearGroup(this.grid);
+    const n = 60;
+    const minor: number[] = [];
+    const major: number[] = [];
+    const ext = n * step;
+    for (let i = -n; i <= n; i++) {
+      if (i === 0) continue;
+      const arr = i % 5 === 0 ? major : minor;
+      arr.push(-ext, i * step, 0, ext, i * step, 0, i * step, -ext, 0, i * step, ext, 0);
+    }
+    const mk = (pos: number[], color: string, opacity: number) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false });
+      const l = new THREE.LineSegments(geo, mat);
+      l.renderOrder = -1;
+      l.raycast = () => {};
+      return l;
+    };
+    this.grid.add(mk(minor, this.theme.gridMinor, 0.9), mk(major, this.theme.gridMajor, 1));
+    this.grid.add(mk([-ext, 0, 0, ext, 0, 0], this.theme.axisX, 1), mk([0, -ext, 0, 0, ext, 0], this.theme.axisY, 1));
+  }
+
+  private setGridFrame(frame: SketchFrame | null) {
+    const m = new THREE.Matrix4();
+    if (frame) {
+      m.makeBasis(new THREE.Vector3(...frame.xDir), new THREE.Vector3(...frame.yDir), new THREE.Vector3(...frame.normal));
+      m.setPosition(...frame.origin);
+    }
+    this.grid.matrix.copy(m);
+    this.grid.matrixWorldNeedsUpdate = true;
+  }
+
+  private buildPlanes() {
+    this.clearGroup(this.planes);
+    const s = Math.max(40, this.sceneRadius * 0.9);
+    const defs: { plane: OriginPlane; normal: THREE.Vector3; up: THREE.Vector3 }[] = [
+      { plane: "XY", normal: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) },
+      { plane: "XZ", normal: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, 1) },
+      { plane: "YZ", normal: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 0, 1) },
+    ];
+    for (const d of defs) {
+      const geo = new THREE.PlaneGeometry(s, s);
+      const mat = new THREE.MeshBasicMaterial({ color: this.theme.plane, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false });
+      const mesh = new THREE.Mesh(geo, mat);
+      const x = new THREE.Vector3().crossVectors(d.up, d.normal);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.makeBasis(x, d.up, d.normal);
+      // Offset each plane so its corner sits at the origin.
+      mesh.matrix.setPosition(x.clone().multiplyScalar(s / 2).add(d.up.clone().multiplyScalar(s / 2)));
+      mesh.userData.plane = d.plane;
+      const border = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: this.theme.plane, transparent: true, opacity: 0.55 }));
+      border.raycast = () => {};
+      mesh.add(border);
+      this.planes.add(mesh);
+    }
+  }
+
+  setPlanesVisible(v: boolean) {
+    if (this.planes.visible !== v) {
+      this.planes.visible = v;
+      this.invalidate();
+    }
+  }
+
+  /* ───────────────────────── Bodies ───────────────────────── */
+
+  private makeBodyView(b: BodyResult, color: string, overlay: boolean, lookId?: string): BodyView {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(b.positions, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(b.normals, 3));
+    geo.setIndex(new THREE.BufferAttribute(b.indices, 1));
+    geo.computeBoundingSphere();
+    geo.computeBoundingBox();
+    const look = lookById(lookId);
+    const v = this.view;
+    const section = !overlay && !!v.section;
+    const clipping = section ? [this.clip] : [];
+    const xray = !overlay && v.display === "xray";
+    const opacity = xray ? Math.min(0.28, look.opacity) : look.opacity;
+    const overhang = !overlay && v.overhang;
+    if (overhang) geo.setAttribute("color", this.overhangColors(b, color));
+    const mat = new THREE.MeshStandardMaterial({
+      color: overhang ? "#ffffff" : color,
+      vertexColors: overhang,
+      roughness: look.roughness,
+      metalness: look.metalness,
+      transparent: opacity < 1,
+      opacity,
+      depthWrite: opacity >= 1,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+      side: section ? THREE.FrontSide : THREE.DoubleSide,
+      clippingPlanes: clipping,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.userData.bodyId = b.id;
+    const egeo = new LineSegmentsGeometry();
+    egeo.setPositions(b.edgePositions.length ? b.edgePositions : new Float32Array(6));
+    const edgeMat = overlay
+      ? this.lineMat(this.theme.edgeOverlay, 1.2, { opacity: 0.7 })
+      : this.lineMat(v.display === "wire" ? this.theme.sketch : this.theme.edge, v.display === "wire" ? 1.4 : 1.15);
+    edgeMat.clippingPlanes = clipping;
+    const edges = new LineSegments2(egeo, edgeMat);
+    edges.raycast = () => {};
+    let cap: THREE.Mesh | undefined;
+    if (overlay) {
+      mesh.visible = false;
+      edges.renderOrder = 5;
+    } else {
+      if (v.display === "wire") mat.visible = false;
+      if (v.display === "shaded") edges.visible = false;
+      if (section) {
+        const capMat = new THREE.MeshBasicMaterial({ color: this.theme.accent, side: THREE.BackSide, clippingPlanes: clipping, toneMapped: false });
+        cap = new THREE.Mesh(geo, capMat);
+        cap.userData.sharedGeometry = true;
+        cap.raycast = () => {};
+      }
+    }
+    return { id: b.id, data: b, mesh, edges, cap, visible: true };
+  }
+
+  /** Per-vertex colors: faces that point down steeper than 45° (off the bed) turn red. */
+  private overhangColors(b: BodyResult, color: string): THREE.BufferAttribute {
+    const base = new THREE.Color(color);
+    const warn = new THREE.Color("#e2553f");
+    const n = b.normals;
+    const p = b.positions;
+    const bed = b.bbox[0][2] + 0.05;
+    const out = new Float32Array(n.length);
+    for (let i = 0; i < n.length; i += 3) {
+      const down = n[i + 2]! < -OVERHANG_COS && p[i + 2]! > bed;
+      const c = down ? warn : base;
+      out[i] = c.r;
+      out[i + 1] = c.g;
+      out[i + 2] = c.b;
+    }
+    return new THREE.BufferAttribute(out, 3);
+  }
+
+  private dropView(v: BodyView, parent: THREE.Group) {
+    parent.remove(v.mesh, v.edges);
+    this.disposeObject(v.mesh);
+    this.disposeObject(v.edges);
+    if (v.cap) {
+      parent.remove(v.cap);
+      this.disposeObject(v.cap, true);
+    }
+  }
+
+  setBodies(list: BodyResult[], meta: Record<Id, BodyMeta>) {
+    this.lastBodies = { list, meta };
+    for (const v of this.bodies.values()) this.dropView(v, this.world);
+    this.bodies.clear();
+    for (const b of list) {
+      const m = meta[b.id];
+      const v = this.makeBodyView(b, m?.color ?? "#cfc8bb", false, m?.look);
+      v.visible = m?.visible !== false;
+      if (!v.visible) v.mesh.visible = v.edges.visible = false;
+      this.bodies.set(b.id, v);
+      this.world.add(v.mesh, v.edges);
+      if (v.cap) {
+        v.cap.visible = v.visible;
+        this.world.add(v.cap);
+      }
+    }
+    if (this.sketchFrame) this.setSketchFrame(this.sketchFrame);
+    this.updateSceneRadius();
+    this.invalidate();
+  }
+
+  /** Display settings: style, section, print check, grid, projection. */
+  setView(v: ViewSettings) {
+    const prev = this.view;
+    this.view = v;
+    if (v.section) {
+      const n = new THREE.Vector3();
+      n[v.section.axis] = 1;
+      if (v.section.flip) n.negate();
+      const p = new THREE.Vector3();
+      p[v.section.axis] = v.section.offset;
+      this.clip.setFromNormalAndCoplanarPoint(n, p);
+    }
+    const rebuild =
+      prev.display !== v.display || !!prev.section !== !!v.section || prev.overhang !== v.overhang;
+    if (rebuild) this.setBodies(this.lastBodies.list, this.lastBodies.meta);
+    this.grid.visible = v.grid;
+    if (prev.ortho !== v.ortho) {
+      this.applyOrbit();
+      this.cb.onCamera();
+    }
+    this.invalidate();
+  }
+
+  /** The section plane's span along its axis (for the slider). */
+  sectionRange(axis: "x" | "y" | "z"): [number, number] {
+    const box = this.sceneBox();
+    const i = axis === "x" ? "x" : axis === "y" ? "y" : "z";
+    return [box.min[i], box.max[i]];
+  }
+
+  private makeShadow(): THREE.Mesh {
+    const c = document.createElement("canvas");
+    c.width = c.height = 128;
+    const g = c.getContext("2d")!;
+    const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+    grad.addColorStop(0, "rgba(0,0,0,0.75)");
+    grad.addColorStop(0.45, "rgba(0,0,0,0.32)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.5, toneMapped: false }));
+    m.renderOrder = -2;
+    m.raycast = () => {};
+    m.visible = false;
+    return m;
+  }
+
+  private updateShadow() {
+    const box = new THREE.Box3();
+    for (const v of this.bodies.values()) if (v.visible && v.mesh.geometry.boundingBox) box.union(v.mesh.geometry.boundingBox);
+    if (box.isEmpty()) {
+      this.shadow.visible = false;
+      return;
+    }
+    const size = box.getSize(new THREE.Vector3());
+    this.shadow.visible = true;
+    this.shadow.scale.set(size.x * 1.7 + 6, size.y * 1.7 + 6, 1);
+    this.shadow.position.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.min.z - Math.max(0.02, size.z * 0.002));
+  }
+
+  /** The measure tool's dimension line (or nothing). */
+  setMeasure(segment: [Vec3, Vec3] | null) {
+    this.clearGroup(this.measureGroup);
+    if (segment) {
+      const geo = new LineSegmentsGeometry();
+      geo.setPositions([...segment[0], ...segment[1]]);
+      const line = new LineSegments2(geo, this.lineMat(this.theme.select, 2.2, { depthTest: false }));
+      line.renderOrder = 20;
+      this.measureGroup.add(line);
+      const r = this.orbit.distance * 0.006;
+      for (const p of segment) {
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 8), new THREE.MeshBasicMaterial({ color: this.theme.select, depthTest: false, toneMapped: false }));
+        dot.position.set(...p);
+        dot.renderOrder = 21;
+        this.measureGroup.add(dot);
+      }
+    }
+    this.invalidate();
+  }
+
+  /** Bodies used for picking while a feature previews (shown as an edge overlay only). */
+  setPickBodies(list: BodyResult[] | undefined) {
+    for (const v of this.pickBodies) this.dropView(v, this.overlay);
+    this.pickBodies = [];
+    for (const b of list ?? []) {
+      const v = this.makeBodyView(b, "#ffffff", true);
+      this.pickBodies.push(v);
+      this.overlay.add(v.mesh, v.edges);
+    }
+    this.invalidate();
+  }
+
+  private updateSceneRadius() {
+    const box = new THREE.Box3();
+    for (const v of this.bodies.values()) if (v.visible && v.mesh.geometry.boundingBox) box.union(v.mesh.geometry.boundingBox);
+    const r = box.isEmpty() ? 60 : box.getBoundingSphere(new THREE.Sphere()).radius;
+    this.updateShadow();
+    if (Math.abs(r - this.sceneRadius) / this.sceneRadius > 0.25) {
+      this.sceneRadius = r;
+      this.buildPlanes();
+    }
+  }
+
+  /* ───────────────────────── Highlights ───────────────────────── */
+
+  setHighlights(items: { pick: Pick; style: "hover" | "select" | "ref" }[]) {
+    this.clearGroup(this.highlightGroup);
+    for (const { pick, style } of items) {
+      const color = style === "hover" ? this.theme.hover : this.theme.select;
+      if (pick.kind === "face" || pick.kind === "edge" || pick.kind === "body") {
+        const v = this.findBody(pick.bodyId, this.pickBodies.length > 0);
+        if (!v) continue;
+        if (pick.kind === "face") {
+          const start = v.data.faceRanges[pick.index * 2];
+          const count = v.data.faceRanges[pick.index * 2 + 1];
+          if (start === undefined || count === undefined) continue;
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", v.mesh.geometry.getAttribute("position"));
+          geo.setIndex(new THREE.BufferAttribute(v.data.indices.slice(start, start + count), 1));
+          const mat = new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: style === "hover" ? 0.3 : 0.45,
+            depthWrite: false,
+            depthTest: this.pickBodies.length === 0,
+            side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1,
+          });
+          const m = new THREE.Mesh(geo, mat);
+          m.userData.sharedPosition = true;
+          m.raycast = () => {};
+          m.renderOrder = 9;
+          this.highlightGroup.add(m);
+        } else if (pick.kind === "edge") {
+          const s = v.data.edgeRanges[pick.index * 2];
+          const c = v.data.edgeRanges[pick.index * 2 + 1];
+          if (s === undefined || c === undefined) continue;
+          const geo = new LineSegmentsGeometry();
+          geo.setPositions(v.data.edgePositions.slice(s * 3, (s + c) * 3));
+          const line = new LineSegments2(geo, this.lineMat(color, style === "hover" ? 3 : 3.5, { depthTest: false }));
+          line.renderOrder = 10;
+          line.raycast = () => {};
+          this.highlightGroup.add(line);
+        } else {
+          const geo = new LineSegmentsGeometry();
+          geo.setPositions(v.data.edgePositions);
+          const line = new LineSegments2(geo, this.lineMat(color, 2.4));
+          line.raycast = () => {};
+          this.highlightGroup.add(line);
+        }
+      } else if (pick.kind === "plane") {
+        const mesh = this.planes.children.find((c) => c.userData.plane === pick.plane) as THREE.Mesh | undefined;
+        if (mesh) {
+          const m = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+          m.userData.sharedGeometry = true;
+          m.matrixAutoUpdate = false;
+          m.matrix.copy(mesh.matrix);
+          m.raycast = () => {};
+          this.highlightGroup.add(m);
+        }
+      }
+    }
+    this.invalidate();
+  }
+
+  private findBody(id: Id, preferPick: boolean): BodyView | undefined {
+    if (preferPick) {
+      const p = this.pickBodies.find((b) => b.id === id);
+      if (p) return p;
+    }
+    return this.bodies.get(id);
+  }
+
+  /* ───────────────────────── Sketches ───────────────────────── */
+
+  private segments(pts: Vec3[], closed: boolean): number[] {
+    const seg: number[] = [];
+    const n = closed ? pts.length : pts.length - 1;
+    for (let i = 0; i < n; i++) seg.push(...pts[i]!, ...pts[(i + 1) % pts.length]!);
+    return seg;
+  }
+
+  setSketches(list: SketchDrawable[]) {
+    this.clearGroup(this.sketchGroup);
+    this.clearGroup(this.fillGroup);
+    this.sketchHit = [];
+    for (const s of list) {
+      if (s.fill && s.fill.length >= 9) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(s.fill, 3));
+        const mat = new THREE.MeshBasicMaterial({
+          color: this.theme.accent,
+          transparent: true,
+          opacity: s.active ? 0.16 : 0.1,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          depthTest: !s.active,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+          toneMapped: false,
+        });
+        const fill = new THREE.Mesh(geo, mat);
+        fill.renderOrder = s.active ? 7 : 1;
+        fill.raycast = () => {};
+        this.fillGroup.add(fill);
+      }
+      const toWorld = this.frameMapper(s.frame);
+      const hit: Vec3[][] = [];
+      for (const sh of s.shapes) {
+        const pts = sh.pts.map(toWorld);
+        hit.push(pts);
+        if (pts.length < 2) continue;
+        const geo = new LineSegmentsGeometry();
+        geo.setPositions(this.segments(pts, sh.closed));
+        const t = this.theme;
+        const color = sh.selected ? t.select : sh.hovered ? t.hover : sh.construction ? t.construction : s.active ? t.sketchActive : t.sketch;
+        const line = new LineSegments2(geo, this.lineMat(color, s.active ? (sh.selected ? 2.6 : 1.9) : 1.3, { dashed: sh.construction, depthTest: !s.active }));
+        if (sh.construction) line.computeLineDistances();
+        line.renderOrder = s.active ? 8 : 2;
+        line.raycast = () => {};
+        this.sketchGroup.add(line);
+      }
+      if (!s.active) this.sketchHit.push({ id: s.id, pts: hit });
+    }
+    this.invalidate();
+  }
+
+  setSketchPreview(frame: SketchFrame | null, shapes: { pts: Vec2[]; closed: boolean }[], guides: [Vec2, Vec2][] = []) {
+    this.clearGroup(this.previewGroup);
+    if (!frame) return this.invalidate();
+    const toWorld = this.frameMapper(frame);
+    const add = (pts: Vec2[], closed: boolean, color: string, width: number, dashed = false) => {
+      if (pts.length < 2) return;
+      const geo = new LineSegmentsGeometry();
+      geo.setPositions(this.segments(pts.map(toWorld), closed));
+      const line = new LineSegments2(geo, this.lineMat(color, width, { dashed, depthTest: false }));
+      if (dashed) line.computeLineDistances();
+      line.renderOrder = 12;
+      this.previewGroup.add(line);
+    };
+    for (const s of shapes) add(s.pts, s.closed, this.theme.accent, 2);
+    for (const g of guides) add(g, false, this.theme.select, 1, true);
+    this.invalidate();
+  }
+
+  private frameMapper(f: SketchFrame) {
+    return ([x, y]: Vec2): Vec3 => [
+      f.origin[0] + f.xDir[0] * x + f.yDir[0] * y,
+      f.origin[1] + f.xDir[1] * x + f.yDir[1] * y,
+      f.origin[2] + f.xDir[2] * x + f.yDir[2] * y,
+    ];
+  }
+
+  /** Enter/leave sketch editing on a plane: grid moves onto it, bodies turn translucent. */
+  setSketchFrame(frame: SketchFrame | null) {
+    const was = this.sketchFrame;
+    this.sketchFrame = frame;
+    this.setGridFrame(frame);
+    if (!frame) {
+      // Restore each body's own finish.
+      if (was) this.setBodies(this.lastBodies.list, this.lastBodies.meta);
+      this.invalidate();
+      return;
+    }
+    this.world.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (m instanceof THREE.MeshStandardMaterial) {
+        m.transparent = true;
+        m.opacity = 0.32;
+        m.depthWrite = false;
+        m.needsUpdate = true;
+      }
+    });
+    this.invalidate();
+  }
+
+  /** Screen position (CSS px, relative to the canvas) of a sketch-plane point. */
+  sketchToScreen(p: Vec2, frame = this.sketchFrame): Vec2 | null {
+    if (!frame) return null;
+    return this.worldToScreen(this.frameMapper(frame)(p));
+  }
+
+  worldToScreen(w: Vec3): Vec2 {
+    tmpV.set(...w).project(this.camera);
+    return [((tmpV.x + 1) / 2) * this.size.x, ((1 - tmpV.y) / 2) * this.size.y];
+  }
+
+  /** World size of one screen pixel at the orbit target (for snapping tolerances). */
+  get pixelSize(): number {
+    const h = 2 * this.orbit.distance * Math.tan(THREE.MathUtils.degToRad(this.persp.fov / 2));
+    return h / this.size.y;
+  }
+
+  get gridSpacing(): number {
+    return this.gridStep || 10;
+  }
+
+  /* ───────────────────────── Picking ───────────────────────── */
+
+  setPickFilter(f: PickFilter) {
+    this.filter = f;
+  }
+
+  private ndc(e: { clientX: number; clientY: number }): THREE.Vector2 {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  }
+
+  private screen(e: { clientX: number; clientY: number }): Vec2 {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+
+  pick(e: { clientX: number; clientY: number }): Pick | null {
+    const usePick = this.pickBodies.length > 0;
+    const views = usePick ? this.pickBodies : [...this.bodies.values()].filter((v) => v.visible);
+    this.raycaster.setFromCamera(this.ndc(e), this.camera);
+    const meshes = views.map((v) => v.mesh);
+    if (usePick) for (const m of meshes) m.visible = true;
+    const hits = this.raycaster.intersectObjects(meshes, false);
+    if (usePick) for (const m of meshes) m.visible = false;
+    // In a section view, ignore the part of each body that's cut away.
+    const faceHit = this.view.section ? hits.find((h) => this.clip.distanceToPoint(h.point) >= 0) : hits[0];
+    const sp = this.screen(e);
+
+    // Edges first: they're thin, so they get a generous screen-space radius.
+    if (this.filter.edges) {
+      const edge = this.pickEdge(views, sp, faceHit?.distance ?? Infinity);
+      if (edge) return edge;
+    }
+    if (faceHit && faceHit.faceIndex != null) {
+      const bodyId = faceHit.object.userData.bodyId as Id;
+      const v = views.find((x) => x.id === bodyId)!;
+      const at: Vec3 = [faceHit.point.x, faceHit.point.y, faceHit.point.z];
+      if (this.filter.faces) {
+        const idx = this.faceOfTriangle(v.data.faceRanges, faceHit.faceIndex * 3);
+        if (idx >= 0) return { kind: "face", bodyId, index: idx, at };
+      }
+      return { kind: "body", bodyId, at };
+    }
+    if (this.filter.sketches) {
+      const s = this.pickSketch(sp);
+      if (s) return s;
+    }
+    if (this.filter.planes && this.planes.visible) {
+      const ph = this.raycaster.intersectObjects(this.planes.children, false)[0];
+      if (ph) return { kind: "plane", plane: ph.object.userData.plane as OriginPlane };
+    }
+    return null;
+  }
+
+  private faceOfTriangle(ranges: Int32Array, indexOffset: number): number {
+    for (let i = 0; i < ranges.length / 2; i++) {
+      const s = ranges[i * 2]!;
+      const c = ranges[i * 2 + 1]!;
+      if (indexOffset >= s && indexOffset < s + c) return i;
+    }
+    return -1;
+  }
+
+  private distToSegment(sp: Vec2, pa: Vec2, pb: Vec2): { d: number; t: number } {
+    const dx = pb[0] - pa[0];
+    const dy = pb[1] - pa[1];
+    const l2 = dx * dx + dy * dy || 1;
+    const t = THREE.MathUtils.clamp(((sp[0] - pa[0]) * dx + (sp[1] - pa[1]) * dy) / l2, 0, 1);
+    return { d: Math.hypot(pa[0] + dx * t - sp[0], pa[1] + dy * t - sp[1]), t };
+  }
+
+  private pickEdge(views: BodyView[], sp: Vec2, faceDist: number): Pick | null {
+    const radius = 7;
+    let best: { d: number; bodyId: Id; index: number; at: Vec3 } | null = null;
+    // Depth along the pick ray (works for perspective and orthographic cameras alike).
+    const ray = this.raycaster.ray;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const tol = this.orbit.distance * 0.004;
+    for (const v of views) {
+      const pos = v.data.edgePositions;
+      const ranges = v.data.edgeRanges;
+      for (let ei = 0; ei < ranges.length / 2; ei++) {
+        const s = ranges[ei * 2]!;
+        const c = ranges[ei * 2 + 1]!;
+        for (let k = s; k + 1 < s + c; k += 2) {
+          a.set(pos[k * 3]!, pos[k * 3 + 1]!, pos[k * 3 + 2]!);
+          b.set(pos[k * 3 + 3]!, pos[k * 3 + 4]!, pos[k * 3 + 5]!);
+          const { d, t } = this.distToSegment(sp, this.worldToScreen([a.x, a.y, a.z]), this.worldToScreen([b.x, b.y, b.z]));
+          if (d > radius || (best && d >= best.d)) continue;
+          // Hidden behind a face? (small tolerance: the edge lies on that face)
+          const on = a.clone().lerp(b, t);
+          if (on.clone().sub(ray.origin).dot(ray.direction) > faceDist + tol) continue;
+          if (this.view.section && this.clip.distanceToPoint(on) < 0) continue;
+          best = { d, bodyId: v.id, index: ei, at: [on.x, on.y, on.z] };
+        }
+      }
+    }
+    return best ? { kind: "edge", bodyId: best.bodyId, index: best.index, at: best.at } : null;
+  }
+
+  private pickSketch(sp: Vec2): Pick | null {
+    let best: { d: number; id: Id } | null = null;
+    for (const s of this.sketchHit) {
+      for (const pts of s.pts) {
+        for (let i = 0; i < pts.length; i++) {
+          const { d } = this.distToSegment(sp, this.worldToScreen(pts[i]!), this.worldToScreen(pts[(i + 1) % pts.length]!));
+          if (d < 6 && (!best || d < best.d)) best = { d, id: s.id };
+        }
+      }
+    }
+    return best ? { kind: "sketch", sketchId: best.id } : null;
+  }
+
+  /** Intersect the pointer ray with the active sketch plane (2D sketch coordinates). */
+  private sketchPoint(e: { clientX: number; clientY: number }): Vec2 | null {
+    const f = this.sketchFrame;
+    if (!f) return null;
+    this.raycaster.setFromCamera(this.ndc(e), this.camera);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(...f.normal), new THREE.Vector3(...f.origin));
+    const hit = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+    if (!hit) return null;
+    hit.sub(new THREE.Vector3(...f.origin));
+    return [hit.dot(new THREE.Vector3(...f.xDir)), hit.dot(new THREE.Vector3(...f.yDir))];
+  }
+
+  /* ───────────────────────── Pointer & navigation ───────────────────────── */
+
+  private sketchEvent(type: SketchPointerEvent["type"], e: PointerEvent): boolean {
+    if (!this.sketchFrame) return false;
+    const p = this.sketchPoint(e);
+    if (!p) return false;
+    this.cb.onSketchPointer({ type, p, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey, screen: this.screen(e) });
+    return true;
+  }
+
+  private onPointerDown = (e: PointerEvent) => {
+    this.renderer.domElement.setPointerCapture(e.pointerId);
+    this.renderer.domElement.focus({ preventScroll: true });
+    const inSketch = !!this.sketchFrame;
+    let mode: "orbit" | "pan" | "none" = "none";
+    if (e.button === 0) mode = inSketch ? "none" : "orbit";
+    else if (e.button === 1) mode = e.shiftKey ? "orbit" : "pan";
+    else if (e.button === 2) mode = inSketch ? "orbit" : "pan";
+    this.drag = { x: e.clientX, y: e.clientY, button: e.button, moved: false, mode };
+    this.cb.onContext(null, [-1, -1]);
+    this.anim = null;
+    if (inSketch && e.button === 0) this.sketchEvent("down", e);
+  };
+
+  private onPointerMove = (e: PointerEvent) => {
+    const d = this.drag;
+    if (d) {
+      const dx = e.clientX - d.x;
+      const dy = e.clientY - d.y;
+      if (!d.moved && Math.hypot(dx, dy) > 4) d.moved = true;
+      if (d.moved && d.mode !== "none") {
+        d.x = e.clientX;
+        d.y = e.clientY;
+        if (d.mode === "orbit") {
+          this.orbit.theta -= dx * 0.0075;
+          this.orbit.phi = THREE.MathUtils.clamp(this.orbit.phi - dy * 0.0075, 0.0001, Math.PI - 0.0001);
+        } else {
+          const px = this.pixelSize;
+          const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+          const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+          this.orbit.target.addScaledVector(right, -dx * px).addScaledVector(up, dy * px);
+        }
+        this.applyOrbit();
+        this.cb.onCamera();
+        this.invalidate();
+        return;
+      }
+    }
+    if (this.sketchFrame) {
+      this.sketchEvent("move", e);
+      return;
+    }
+    if (!d) this.hoverAt(e);
+  };
+
+  private hoverAt(e: { clientX: number; clientY: number }) {
+    const p = this.pick(e);
+    const key = JSON.stringify(p);
+    if (key !== this.lastHoverKey) {
+      this.lastHoverKey = key;
+      this.cb.onHover(p);
+    }
+  }
+
+  private onPointerUp = (e: PointerEvent) => {
+    const d = this.drag;
+    this.drag = null;
+    if (this.renderer.domElement.hasPointerCapture(e.pointerId)) this.renderer.domElement.releasePointerCapture(e.pointerId);
+    if (!d) return;
+    if (d.button === 2 && !d.moved) {
+      this.cb.onContext(this.sketchFrame ? null : this.pick(e), this.screen(e));
+      return;
+    }
+    if (this.sketchFrame) {
+      if (d.button === 0) this.sketchEvent("up", e);
+      return;
+    }
+    if (!d.moved && d.button === 0) this.cb.onClick(this.pick(e), e.shiftKey || e.ctrlKey || e.metaKey);
+  };
+
+  private onPointerLeave = (e: PointerEvent) => {
+    if (this.sketchFrame) this.sketchEvent("leave", e);
+    else if (this.lastHoverKey !== "null") {
+      this.lastHoverKey = "null";
+      this.cb.onHover(null);
+    }
+  };
+
+  private onDblClick = (e: MouseEvent) => {
+    if (this.sketchFrame) return;
+    this.cb.onDoubleClick(this.pick(e));
+  };
+
+  private onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    this.anim = null;
+    const factor = Math.pow(1.0015, e.deltaY * (e.deltaMode === 1 ? 33 : 1));
+    // Zoom toward the cursor: the point under the cursor stays put.
+    this.raycaster.setFromCamera(this.ndc(e), this.camera);
+    const viewDir = new THREE.Vector3().subVectors(this.orbit.target, this.camera.position).normalize();
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir, this.orbit.target);
+    const p = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+    const next = THREE.MathUtils.clamp(this.orbit.distance * factor, 0.5, 200000);
+    if (p) this.orbit.target.lerp(p, 1 - next / this.orbit.distance);
+    this.orbit.distance = next;
+    this.applyOrbit();
+    this.cb.onCamera();
+    this.invalidate();
+  };
+
+  /* ───────────────────────── Camera views ───────────────────────── */
+
+  private animateTo(to: Turntable, dur = 420) {
+    const from = new Turntable();
+    from.target.copy(this.orbit.target);
+    from.distance = this.orbit.distance;
+    from.theta = this.orbit.theta;
+    from.phi = this.orbit.phi;
+    const dt = to.theta - from.theta;
+    to.theta = from.theta + Math.atan2(Math.sin(dt), Math.cos(dt)); // shortest way round
+    this.anim = { from, to, t0: performance.now(), dur: matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : dur };
+    this.invalidate();
+  }
+
+  private sceneBox(): THREE.Box3 {
+    const box = new THREE.Box3();
+    for (const v of this.bodies.values()) if (v.visible && v.mesh.geometry.boundingBox) box.union(v.mesh.geometry.boundingBox);
+    if (box.isEmpty()) box.set(new THREE.Vector3(-40, -40, 0), new THREE.Vector3(40, 40, 30));
+    return box;
+  }
+
+  private fitDistance(radius: number) {
+    const vfov = THREE.MathUtils.degToRad(this.persp.fov);
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.persp.aspect);
+    return (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.08;
+  }
+
+  viewTo(view: CubeView | "home" | "fit") {
+    const sphere = this.sceneBox().getBoundingSphere(new THREE.Sphere());
+    const to = new Turntable();
+    to.target.copy(sphere.center);
+    to.distance = this.fitDistance(sphere.radius);
+    const dirs: Record<CubeView, [THREE.Vector3, THREE.Vector3?]> = {
+      front: [new THREE.Vector3(0, -1, 0)],
+      back: [new THREE.Vector3(0, 1, 0)],
+      left: [new THREE.Vector3(-1, 0, 0)],
+      right: [new THREE.Vector3(1, 0, 0)],
+      top: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)],
+      bottom: [new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, -1, 0)],
+      iso: [new THREE.Vector3(1, -1.25, 0.95)],
+    };
+    if (view === "fit") {
+      to.theta = this.orbit.theta;
+      to.phi = this.orbit.phi;
+    } else {
+      const [dir, up] = dirs[view === "home" ? "iso" : view];
+      const a = Turntable.anglesFor(dir, up);
+      to.theta = a.theta;
+      to.phi = THREE.MathUtils.clamp(a.phi, 0.0001, Math.PI - 0.0001);
+    }
+    this.animateTo(to);
+  }
+
+  /** Look straight at a sketch plane. */
+  viewNormal(frame: SketchFrame) {
+    const to = new Turntable();
+    const r = Math.max(60, this.sceneBox().getBoundingSphere(new THREE.Sphere()).radius);
+    to.target.set(...frame.origin);
+    to.distance = this.fitDistance(r);
+    const a = Turntable.anglesFor(new THREE.Vector3(...frame.normal), new THREE.Vector3(...frame.yDir));
+    to.theta = a.theta;
+    to.phi = THREE.MathUtils.clamp(a.phi, 0.0001, Math.PI - 0.0001);
+    this.animateTo(to);
+  }
+
+  /** A PNG of the current view at `scale` × the screen resolution. */
+  image(scale = 2): string {
+    const pr = this.renderer.getPixelRatio();
+    this.renderer.setPixelRatio(Math.min(4, pr * scale));
+    this.renderer.setSize(this.size.x, this.size.y, false);
+    for (const m of this.lineMaterials) m.resolution.set(this.size.x * scale, this.size.y * scale);
+    this.renderer.render(this.scene, this.camera);
+    const url = this.renderer.domElement.toDataURL("image/png");
+    this.renderer.setPixelRatio(pr);
+    this.renderer.setSize(this.size.x, this.size.y, false);
+    for (const m of this.lineMaterials) m.resolution.set(this.size.x, this.size.y);
+    this.invalidate();
+    return url;
+  }
+
+  /** PNG thumbnail of the current view (used in saved files). */
+  thumbnail(size = 256): string {
+    this.renderer.render(this.scene, this.camera);
+    const src = this.renderer.domElement;
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    const s = Math.min(src.width, src.height);
+    c.getContext("2d")!.drawImage(src, (src.width - s) / 2, (src.height - s) / 2, s, s, 0, 0, size, size);
+    return c.toDataURL("image/png");
+  }
+}

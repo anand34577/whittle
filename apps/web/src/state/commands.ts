@@ -1,0 +1,291 @@
+/**
+ * One registry for every command: the toolbar, the command palette, the
+ * radial menu and the keyboard shortcuts all read from here, so they can
+ * never disagree.
+ */
+import type { IconName } from "../ui/icons";
+import {
+  addPrimitive,
+  importModel,
+  startCombine,
+  startEdgeFeature,
+  startExtrude,
+  startHole,
+  startLoft,
+  startMirror,
+  startMove,
+  startPattern,
+  startRevolve,
+  startShell,
+  startSketch,
+} from "./actions";
+import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
+import { exportSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
+import { duplicateEntity, mirrorEntity, rotateEntity } from "./sketchOps";
+import {
+  type AppState,
+  type DisplayMode,
+  cancelSession,
+  commitSession,
+  confirmDeleteFeature,
+  deleteEntity,
+  finishSketch,
+  mutate,
+  redo,
+  requestView,
+  setSketchTool,
+  setTheme,
+  setView,
+  sketchMutate,
+  undo,
+  useApp,
+} from "./store";
+
+export interface Command {
+  id: string;
+  label: string;
+  group: string;
+  icon?: IconName;
+  /** Display string, e.g. "Ctrl+Z". */
+  keys?: string;
+  /** Extra search words (synonyms), so "round edges" finds Fillet. */
+  keywords?: string;
+  hint?: string;
+  /** Shorter label for toolbar buttons. */
+  short?: string;
+  when?: (s: AppState) => boolean;
+  /** Toggle state, for buttons that stay pressed. */
+  on?: (s: AppState) => boolean;
+  run: () => void;
+}
+
+const inModel = (s: AppState) => s.mode.kind === "model" || s.mode.kind === "measure";
+const inSketch = (s: AppState) => s.mode.kind === "sketch";
+const hasEntity = (s: AppState) => inSketch(s) && !!s.selectedEntity;
+const hasBodies = (s: AppState) => (s.regen?.bodies.length ?? 0) > 0;
+const get = useApp.getState;
+
+/** Leave measure mode before starting another command. */
+const model = (fn: () => void) => () => {
+  if (get().mode.kind === "measure") useApp.setState({ mode: { kind: "model" }, measure: [] });
+  fn();
+};
+
+const display = (d: DisplayMode, label: string, keywords: string): Command => ({
+  id: `display-${d}`,
+  label,
+  group: "View",
+  icon: d === "wire" ? "wire" : d === "xray" ? "xray" : d === "shaded" ? "shaded" : "cube",
+  keywords: "display style render " + keywords,
+  on: (s) => s.view.display === d,
+  run: () => setView({ display: d }),
+});
+
+export const COMMANDS: Command[] = [
+  // Create
+  { id: "sketch", label: "Sketch", group: "Create", icon: "sketch", keys: "S", keywords: "draw 2d profile drawing", hint: "Draw a 2D profile on a plane or flat face", when: inModel, run: model(startSketch) },
+  { id: "extrude", label: "Extrude", group: "Create", icon: "extrude", keys: "E", keywords: "push pull pad boss height thickness", hint: "Turn a sketch into a solid by pulling it", when: inModel, run: model(startExtrude) },
+  { id: "revolve", label: "Revolve", group: "Create", icon: "revolve", keys: "R", keywords: "lathe spin turn rotate around axis vase", hint: "Spin a sketch around an axis", when: inModel, run: model(startRevolve) },
+  { id: "loft", label: "Loft", group: "Create", icon: "loft", keywords: "blend transition morph between profiles", hint: "Blend smoothly between two or more sketches", when: inModel, run: model(startLoft) },
+  { id: "hole", label: "Hole", group: "Create", icon: "hole", keys: "D", keywords: "drill screw bolt counterbore countersink m3 m4 bore", hint: "Drill holes on a face: simple, counterbored or countersunk", when: (s) => inModel(s) && hasBodies(s), run: model(startHole) },
+  { id: "box", label: "Box", group: "Shapes", icon: "box", keywords: "cube block primitive quick shape", hint: "Add a box you can size directly", when: inModel, run: model(() => addPrimitive("box")) },
+  { id: "cylinder", label: "Cylinder", group: "Shapes", icon: "cylinder", keywords: "rod post peg primitive quick shape", hint: "Add a cylinder", when: inModel, run: model(() => addPrimitive("cylinder")) },
+  { id: "sphere", label: "Sphere", group: "Shapes", icon: "sphere", keywords: "ball dome primitive quick shape", hint: "Add a sphere", when: inModel, run: model(() => addPrimitive("sphere")) },
+  { id: "cone", label: "Cone", group: "Shapes", icon: "cone", keywords: "taper funnel frustum spike primitive", hint: "Add a cone or tapered cylinder", when: inModel, run: model(() => addPrimitive("cone")) },
+  { id: "torus", label: "Torus", group: "Shapes", icon: "torus", keywords: "ring donut o-ring primitive", hint: "Add a ring", when: inModel, run: model(() => addPrimitive("torus")) },
+  { id: "tube", label: "Tube", group: "Shapes", icon: "tube", keywords: "pipe sleeve spacer hollow cylinder bushing primitive", hint: "Add a hollow cylinder", when: inModel, run: model(() => addPrimitive("tube")) },
+  { id: "parts", label: "Parts library", short: "Parts", group: "Create", icon: "library", keys: "P", keywords: "gear nut bolt washer bracket standoff hinge insert ready made catalog", hint: "Insert ready-made, editable parts", when: inModel, run: model(() => useApp.setState({ panel: "parts" })) },
+  { id: "import", label: "Import STEP / STL", short: "Import", group: "Create", icon: "import", keywords: "open insert step stp stl mesh reference", hint: "Bring in a part from another CAD tool or a mesh", when: inModel, run: model(importModel) },
+  // Modify
+  { id: "fillet", label: "Fillet", group: "Modify", icon: "fillet", keys: "F", keywords: "round edges rounded smooth radius", hint: "Round off sharp edges", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeature("fillet")) },
+  { id: "chamfer", label: "Chamfer", group: "Modify", icon: "chamfer", keywords: "bevel edges angle cut corner", hint: "Bevel edges with a flat cut", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeature("chamfer")) },
+  { id: "shell", label: "Shell", group: "Modify", icon: "shell", keywords: "hollow wall thickness enclosure box case cup", hint: "Hollow out a body, leaving walls", when: (s) => inModel(s) && hasBodies(s), run: model(startShell) },
+  { id: "move", label: "Move / Copy", group: "Modify", icon: "move", keys: "M", keywords: "translate rotate position place duplicate copy transform", hint: "Move or rotate a body, or make a moved copy", when: (s) => inModel(s) && hasBodies(s), run: model(startMove) },
+  { id: "combine", label: "Combine", group: "Modify", icon: "combine", keys: "J", keywords: "boolean join merge union subtract cut intersect", hint: "Join, cut or intersect bodies", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startCombine) },
+  { id: "mirror", label: "Mirror", group: "Modify", icon: "mirror", keywords: "symmetry flip copy reflect", hint: "Mirror a body across an origin plane", when: (s) => inModel(s) && hasBodies(s), run: model(startMirror) },
+  { id: "pattern", label: "Pattern", group: "Modify", icon: "pattern", keywords: "array repeat copies linear circular", hint: "Repeat a body in a row or around an axis", when: (s) => inModel(s) && hasBodies(s), run: model(startPattern) },
+  // Inspect
+  {
+    id: "measure",
+    label: "Measure",
+    group: "Inspect",
+    icon: "measure",
+    keys: "I",
+    keywords: "distance dimension ruler caliper size diameter angle inspect",
+    hint: "Click one or two things to measure them",
+    when: (s) => s.mode.kind === "model" || s.mode.kind === "measure",
+    on: (s) => s.mode.kind === "measure",
+    run: () => {
+      const s = get();
+      if (s.session) commitSession();
+      useApp.setState({ mode: s.mode.kind === "measure" ? { kind: "model" } : { kind: "measure" }, measure: [], selection: [] });
+    },
+  },
+  {
+    id: "section",
+    label: "Section view",
+    short: "Section",
+    group: "Inspect",
+    icon: "section",
+    keywords: "cut away cross section clip slice inside",
+    hint: "Slice the view to see inside (doesn't change the model)",
+    on: (s) => !!s.view.section,
+    run: () => setView({ section: get().view.section ? null : { axis: "y", offset: 0, flip: false } }),
+  },
+  {
+    id: "overhang",
+    label: "Print check",
+    group: "Inspect",
+    icon: "overhang",
+    keywords: "3d print overhang support analysis printable",
+    hint: "Show faces that will need support when 3D printing",
+    on: (s) => s.view.overhang,
+    run: () => setView({ overhang: !get().view.overhang }),
+  },
+  display("edges", "Shaded with edges", "solid default"),
+  display("shaded", "Shaded", "smooth no edges"),
+  display("wire", "Wireframe", "lines mesh"),
+  display("xray", "X-ray", "transparent see through ghost"),
+  { id: "grid", label: "Grid", group: "View", icon: "grid", keywords: "floor lines show hide", on: (s) => s.view.grid, run: () => setView({ grid: !get().view.grid }) },
+  { id: "ortho", label: "Orthographic", group: "View", icon: "ortho", keywords: "perspective parallel projection camera", on: (s) => s.view.ortho, run: () => setView({ ortho: !get().view.ortho }) },
+  { id: "screenshot", label: "Save image", group: "View", icon: "camera", keywords: "screenshot png picture render capture", run: () => void saveScreenshot() },
+  { id: "show-all", label: "Show all bodies", group: "View", icon: "eye", keywords: "unhide reveal", run: () => mutate("Show all", (d) => void Object.values(d.bodies).forEach((b) => (b.visible = true))) },
+  // Sketch tools
+  { id: "tool-line", label: "Line", group: "Sketch", icon: "line", keys: "L", keywords: "polyline polygon outline profile", hint: "Click points; click the first point to close", when: inSketch, run: () => setSketchTool("polyline") },
+  { id: "tool-rect", label: "Rectangle", group: "Sketch", icon: "rect", keys: "R", keywords: "square box", hint: "Two corners", when: inSketch, run: () => setSketchTool("rect") },
+  { id: "tool-circle", label: "Circle", group: "Sketch", icon: "circle", keys: "C", keywords: "round hole diameter", hint: "Center, then radius", when: inSketch, run: () => setSketchTool("circle") },
+  { id: "tool-ellipse", label: "Ellipse", group: "Sketch", icon: "ellipse", keys: "E", keywords: "oval egg", hint: "Center, then a corner of its box", when: inSketch, run: () => setSketchTool("ellipse") },
+  { id: "tool-polygon", label: "Polygon", group: "Sketch", icon: "polygon", keys: "P", keywords: "hexagon nut sides triangle", hint: "Center, then a corner", when: inSketch, run: () => setSketchTool("polygon") },
+  { id: "tool-slot", label: "Slot", group: "Sketch", icon: "slot", keys: "O", keywords: "oblong obround", hint: "Two centers", when: inSketch, run: () => setSketchTool("slot") },
+  { id: "tool-text", label: "Text", group: "Sketch", icon: "text", keys: "T", keywords: "label lettering engrave emboss name tag font", hint: "Click where the text starts", when: inSketch, run: () => setSketchTool("text") },
+  { id: "tool-gear", label: "Gear", group: "Sketch", icon: "gear", keys: "G", keywords: "spur cog teeth involute", hint: "Center, then drag the size", when: inSketch, run: () => setSketchTool("gear") },
+  { id: "import-svg", label: "Import SVG into sketch", short: "SVG", group: "Sketch", icon: "vector", keywords: "logo trace vector illustrator inkscape figma outline artwork drawing image", hint: "Bring in a logo or outline as editable shapes", when: inSketch, run: importSvgIntoSketch },
+  { id: "export-sketch-svg", label: "Export sketch as SVG", group: "File", icon: "drawing", keywords: "laser cut vinyl cricut plotter 2d drawing vector", hint: "True-size 2D drawing for laser cutters, vinyl cutters and plotters", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "svg") },
+  { id: "export-sketch-dxf", label: "Export sketch as DXF", group: "File", icon: "drawing", keywords: "cnc router laser cam 2d drawing autocad", hint: "2D drawing for CNC, CAM and other CAD", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "dxf") },
+  { id: "tool-select", label: "Select", group: "Sketch", icon: "select", keys: "V", keywords: "move pick edit", hint: "Select and drag shapes", when: inSketch, run: () => setSketchTool("select") },
+  { id: "duplicate", label: "Duplicate shape", short: "Duplicate", group: "Sketch", icon: "duplicate", keys: "Ctrl+D", keywords: "copy clone", when: hasEntity, run: () => duplicateEntity() },
+  { id: "mirror-shape-y", label: "Mirror shape left/right", short: "Mirror", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy", when: hasEntity, run: () => mirrorEntity("y") },
+  { id: "mirror-shape-x", label: "Mirror shape up/down", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy", when: hasEntity, run: () => mirrorEntity("x") },
+  { id: "rotate-shape", label: "Rotate shape 90°", short: "Rotate 90°", group: "Sketch", icon: "rotate", keys: "Shift+R", keywords: "turn spin", when: hasEntity, run: () => rotateEntity(90) },
+  {
+    id: "construction",
+    label: "Toggle construction",
+    short: "Construction",
+    group: "Sketch",
+    icon: "construction",
+    keys: "X",
+    keywords: "reference helper guide",
+    hint: "Construction shapes guide you but don't make solids",
+    when: hasEntity,
+    run: () => {
+      const id = get().selectedEntity;
+      sketchMutate("Toggle construction", (sk) => {
+        const e = sk.entities.find((x) => x.id === id);
+        if (e) e.construction = !e.construction;
+      });
+    },
+  },
+  { id: "finish-sketch", label: "Finish sketch", group: "Sketch", icon: "finish", keys: "Esc", keywords: "done exit close stop", when: inSketch, run: finishSketch },
+  // Document
+  { id: "ok", label: "OK (apply)", group: "Edit", icon: "check", keys: "Enter", when: (s) => !!s.session && s.mode.kind === "model", run: commitSession },
+  { id: "cancel", label: "Cancel", group: "Edit", icon: "close", keys: "Esc", when: (s) => !!s.session && s.mode.kind === "model", run: cancelSession },
+  { id: "undo", label: "Undo", group: "Edit", icon: "undo", keys: "Ctrl+Z", run: undo },
+  { id: "redo", label: "Redo", group: "Edit", icon: "redo", keys: "Ctrl+Shift+Z", run: redo },
+  {
+    id: "delete",
+    label: "Delete selection",
+    group: "Edit",
+    icon: "trash",
+    keys: "Del",
+    keywords: "remove erase",
+    when: (s) => (s.mode.kind === "sketch" ? !!s.selectedEntity : s.selection.some((p) => p.kind === "sketch" || p.kind === "body")),
+    run: () => {
+      const s = get();
+      if (s.mode.kind === "sketch" && s.selectedEntity) return deleteEntity(s.selectedEntity);
+      const p = s.selection.find((x) => x.kind === "sketch" || x.kind === "body");
+      const id = p?.kind === "sketch" ? p.sketchId : p?.kind === "body" ? p.bodyId : undefined;
+      if (id) void confirmDeleteFeature(id);
+    },
+  },
+  {
+    id: "hide",
+    label: "Hide body",
+    group: "View",
+    icon: "eyeOff",
+    keywords: "hide body",
+    when: (s) => s.selection.some((p) => p.kind === "body" || p.kind === "face" || p.kind === "edge"),
+    run: () => {
+      const ids = get().selection.flatMap((p) => (p.kind === "body" || p.kind === "face" || p.kind === "edge" ? [p.bodyId] : []));
+      mutate("Hide body", (d) => ids.forEach((id) => d.bodies[id] && (d.bodies[id]!.visible = false)));
+      useApp.setState({ selection: [] });
+    },
+  },
+  {
+    id: "isolate",
+    label: "Isolate body",
+    group: "View",
+    icon: "isolate",
+    keywords: "show only focus solo",
+    when: (s) => s.selection.some((p) => p.kind === "body" || p.kind === "face" || p.kind === "edge"),
+    run: () => {
+      const keep = new Set(get().selection.flatMap((p) => (p.kind === "body" || p.kind === "face" || p.kind === "edge" ? [p.bodyId] : [])));
+      mutate("Isolate", (d) => Object.entries(d.bodies).forEach(([id, b]) => (b.visible = keep.has(id))));
+    },
+  },
+  { id: "params", label: "Parameters", group: "Document", icon: "params", keywords: "variables dimensions named values formula", hint: "Named values that drive your design", run: () => useApp.setState({ panel: "params" }) },
+  { id: "new", label: "New design", group: "File", icon: "file", keywords: "blank start", run: () => newDesign() },
+  { id: "new-inch", label: "New design (inches)", group: "File", icon: "file", keywords: "imperial blank", run: () => newDesign("in") },
+  { id: "open", label: "Open…", group: "File", icon: "open", keys: "Ctrl+O", run: () => void openDesign() },
+  { id: "save", label: "Save", group: "File", icon: "save", keys: "Ctrl+S", run: () => void saveDesign() },
+  { id: "save-as", label: "Save as…", group: "File", icon: "save", keys: "Ctrl+Shift+S", hint: "Save under a new name (a separate design)", run: () => void saveDesign(true) },
+  { id: "open-local", label: "Open from this computer…", group: "File", icon: "folder", keywords: "upload import whittle file disk", when: (s) => s.platform.kind === "server", run: () => void openFromComputer() },
+  { id: "download-copy", label: "Save a copy to this computer", group: "File", icon: "export", keywords: "download backup whittle file", when: (s) => s.platform.kind === "server", run: () => void downloadCopy() },
+  { id: "history", label: "Version history", group: "File", icon: "history", keywords: "versions restore previous older backup revert undo save", hint: "Every save is kept: look back and restore", run: () => useApp.setState({ panel: "versions" }) },
+  { id: "account", label: "Account", group: "File", icon: "users", keywords: "sign out logout password user profile", when: (s) => s.platform.kind === "server" && !!s.platform.user, run: () => useApp.setState({ panel: "account" }) },
+  { id: "users", label: "Manage users", group: "File", icon: "users", keywords: "admin accounts people team", when: (s) => s.platform.kind === "server" && !!s.platform.user?.isAdmin && s.platform.config.auth === "required", run: () => useApp.setState({ panel: "users" }) },
+  { id: "export", label: "Export…", group: "File", icon: "export", keywords: "step stl 3mf print slicer download cad cnc", hint: "STEP for other CAD and machining, 3MF / STL for 3D printing", run: () => useApp.setState({ panel: "export" }) },
+  { id: "export-step", label: "Export STEP", short: "STEP", group: "File", icon: "export", keywords: "cad exchange fusion solidworks onshape freecad cnc machining", hint: "Exact geometry for other CAD tools, CNC and manufacturing", run: () => void exportDesign("step") },
+  { id: "export-3mf", label: "Export 3MF", short: "3MF", hint: "Mesh with units and colors, for 3D-printing slicers", group: "File", icon: "print", keywords: "3d print slicer bambu prusa orca cura", run: () => void exportDesign("3mf") },
+  { id: "export-stl", label: "Export STL", short: "STL", group: "File", icon: "export", keywords: "3d print slicer mesh", hint: "Universal mesh format", run: () => void exportDesign("stl") },
+  // View
+  { id: "view-home", label: "Home view", group: "View", icon: "home", keys: "H", keywords: "reset camera iso", run: () => requestView("home") },
+  { id: "view-fit", label: "Fit to view", group: "View", icon: "fit", keys: "Shift+H", keywords: "zoom all frame", run: () => requestView("fit") },
+  { id: "theme-paper", label: "Paper theme (light)", group: "View", icon: "sun", keywords: "light mode bright", run: () => setTheme("paper") },
+  { id: "theme-graphite", label: "Graphite theme (dark)", group: "View", icon: "moon", keywords: "dark mode night", run: () => setTheme("graphite") },
+  { id: "shortcuts", label: "Keyboard shortcuts", group: "Help", icon: "keyboard", keys: "?", keywords: "keys hotkeys help", run: () => useApp.setState({ panel: "shortcuts" }) },
+  { id: "coach", label: "Guided first part", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started", run: () => useApp.setState({ coach: true, panel: null }) },
+  { id: "welcome", label: "Start screen & templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
+];
+
+export const commandById = (id: string) => COMMANDS.find((c) => c.id === id)!;
+
+export function isAvailable(c: Command, s = get()): boolean {
+  return !c.when || c.when(s);
+}
+
+/** Map a key event to a command id, given the current mode. */
+export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
+  const mod = e.ctrlKey || e.metaKey;
+  const k = e.key.toLowerCase();
+  if (mod) {
+    if (k === "z" && e.shiftKey) return "redo";
+    if (k === "z") return "undo";
+    if (k === "y") return "redo";
+    if (k === "s" && e.shiftKey) return "save-as";
+    if (k === "s") return "save";
+    if (k === "o") return "open";
+    if (k === "d" && s.mode.kind === "sketch") return "duplicate";
+    return null;
+  }
+  if (e.altKey) return null;
+  if (e.key === "Delete" || e.key === "Backspace") return "delete";
+  if (e.key === "?") return "shortcuts";
+  if (s.mode.kind === "sketch") {
+    if (e.shiftKey && k === "r") return "rotate-shape";
+    const map: Record<string, string> = { l: "tool-line", r: "tool-rect", c: "tool-circle", e: "tool-ellipse", p: "tool-polygon", o: "tool-slot", t: "tool-text", g: "tool-gear", v: "tool-select", x: "construction" };
+    return map[k] ?? null;
+  }
+  if (e.shiftKey && k === "h") return "view-fit";
+  const map: Record<string, string> = { s: "sketch", e: "extrude", r: "revolve", f: "fillet", h: "view-home", d: "hole", m: "move", j: "combine", i: "measure", p: "parts" };
+  return map[k] ?? null;
+}

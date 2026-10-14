@@ -1,0 +1,104 @@
+/*
+ * Whittle design tokens: "Drafting Table".
+ * Neutral graphite/paper bases, ONE signal accent (marking orange), and
+ * blueprint cyan reserved strictly for selection and constraints.
+ * Tier 1 = primitives, tier 2 = semantic tokens (what components use).
+ */
+
+:root {
+  --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+
+  --r-1: 2px;
+  --r-2: 3px;
+  --r-3: 4px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  --h-title: 40px;
+  --h-toolbar: 52px;
+  --h-timeline: 58px;
+  --h-status: 28px;
+  --w-browser: 244px;
+  --w-panel: 300px;
+}
+
+/* ── Graphite (dark, default) ───────────────────────────────────── */
+:root,
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --bg-0: oklch(0.165 0.005 75);
+  --bg-1: oklch(0.2 0.006 75);
+  --bg-2: oklch(0.235 0.007 75);
+  --bg-3: oklch(0.275 0.008 75);
+  --bg-inset: oklch(0.145 0.005 75);
+  --line: oklch(0.3 0.008 75);
+  --line-soft: oklch(0.255 0.007 75);
+  --line-strong: oklch(0.4 0.01 75);
+  --text-1: oklch(0.93 0.012 85);
+  --text-2: oklch(0.75 0.012 80);
+  --text-3: oklch(0.57 0.012 80);
+  --accent: oklch(0.73 0.17 50);
+  --accent-hover: oklch(0.78 0.16 52);
+  --accent-ink: oklch(0.2 0.04 50);
+  --accent-soft: oklch(0.73 0.17 50 / 0.15);
+  --select: oklch(0.79 0.11 215);
+  --select-soft: oklch(0.79 0.11 215 / 0.16);
+  --ok: oklch(0.76 0.13 150);
+  --warn: oklch(0.83 0.14 85);
+  --danger: oklch(0.69 0.17 25);
+  --danger-soft: oklch(0.69 0.17 25 / 0.14);
+  --shadow: 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 8px 24px oklch(0 0 0 / 0.35);
+  --shadow-pop: 0 12px 40px oklch(0 0 0 / 0.5), 0 0 0 1px var(--line);
+  --tick: oklch(0.93 0.012 85 / 0.14);
+}
+
+/* ── Paper (light) ──────────────────────────────────────────────── */
+[data-theme="paper"] {
+  color-scheme: light;
+  --bg-0: oklch(0.935 0.009 85);
+  --bg-1: oklch(0.965 0.007 85);
+  --bg-2: oklch(0.985 0.005 85);
+  --bg-3: oklch(0.92 0.01 85);
+  --bg-inset: oklch(0.95 0.008 85);
+  --line: oklch(0.86 0.01 85);
+  --line-soft: oklch(0.9 0.009 85);
+  --line-strong: oklch(0.75 0.012 85);
+  --text-1: oklch(0.23 0.012 70);
+  --text-2: oklch(0.42 0.012 70);
+  --text-3: oklch(0.58 0.012 75);
+  --accent: oklch(0.64 0.18 45);
+  --accent-hover: oklch(0.59 0.18 43);
+  --accent-ink: oklch(0.99 0.01 85);
+  --accent-soft: oklch(0.64 0.18 45 / 0.13);
+  --select: oklch(0.55 0.13 235);
+  --select-soft: oklch(0.55 0.13 235 / 0.13);
+  --ok: oklch(0.55 0.13 150);
+  --warn: oklch(0.62 0.14 75);
+  --danger: oklch(0.56 0.19 27);
+  --danger-soft: oklch(0.56 0.19 27 / 0.1);
+  --shadow: 0 1px 2px oklch(0.3 0.02 70 / 0.08), 0 8px 24px oklch(0.3 0.02 70 / 0.08);
+  --shadow-pop: 0 12px 40px oklch(0.3 0.02 70 / 0.18), 0 0 0 1px var(--line);
+  --tick: oklch(0.23 0.012 70 / 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+  }
+}
