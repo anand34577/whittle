@@ -32,9 +32,10 @@ async fn app(tweak: impl FnOnce(&mut Config)) -> App {
     tweak(&mut cfg);
     let state = build_state(cfg).await.unwrap();
     if std::env::var("WHITTLE_TEST_DATABASE_URL").is_ok() {
-        // Shared database: start from a clean slate.
-        for t in ["design_versions", "designs", "sessions", "users"] {
-            sqlx::query(&format!("DELETE FROM {t}")).execute(&state.db).await.unwrap();
+        // Shared database: start from a clean slate, keeping the built-in
+        // `local` user that build_state just ensured for no-login mode.
+        for q in ["DELETE FROM design_versions", "DELETE FROM designs", "DELETE FROM sessions", "DELETE FROM users WHERE id <> 'local'"] {
+            sqlx::query(q).execute(&state.db).await.unwrap();
         }
     }
     App { router: router(state), _dir: TempDir(dir) }
