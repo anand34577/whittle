@@ -15,6 +15,7 @@ import {
   makeChamfer,
   makeCoil,
   makeCombine,
+  makeConstructionPlane,
   makeDraft,
   makeOffsetFace,
   makeOffset,
@@ -137,6 +138,7 @@ export function createSketchOn(plane: PlaneRef) {
 
 export function pickSketchPlane(p: Pick) {
   if (p.kind === "plane") return createSketchOn({ kind: "origin", plane: p.plane as OriginPlane, offset: "0" });
+  if (p.kind === "cplane") return createSketchOn({ kind: "construction", plane: p.id, offset: "0" });
   if (p.kind === "face") {
     const ref = faceRefFromPick(p);
     if (!ref) return;
@@ -354,6 +356,21 @@ export function startDraft() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+/** A new construction plane: 10 mm off the selected face, plane or construction plane (else the XY plane). */
+export function startConstructionPlane() {
+  const { selection, doc } = get();
+  const face = selection.map((p) => faceRefFromPick(p)).find((x): x is FaceRef => !!x && x.surface === "PLANE");
+  const cp = selection.find((p) => p.kind === "cplane");
+  const op = selection.find((p) => p.kind === "plane");
+  const base: PlaneRef = face
+    ? { kind: "face", face, offset: "10" }
+    : cp?.kind === "cplane"
+      ? { kind: "construction", plane: cp.id, offset: "10" }
+      : { kind: "origin", plane: op?.kind === "plane" ? op.plane : "XY", offset: "10" };
+  const f = makeConstructionPlane(doc, base);
+  beginNewFeature(f, `New ${f.name}`);
+}
+
 /** Press/Pull: starts with any flat faces already selected. */
 export function startOffsetFace() {
   const faces = get()
@@ -392,6 +409,8 @@ export function samePick(a: Pick, b: Pick): boolean {
       return a.bodyId === (b as typeof a).bodyId;
     case "plane":
       return a.plane === (b as typeof a).plane;
+    case "cplane":
+      return a.id === (b as typeof a).id;
     case "sketch":
       return a.sketchId === (b as typeof a).sketchId;
   }
@@ -401,11 +420,11 @@ export function samePick(a: Pick, b: Pick): boolean {
 export function handlePick(p: Pick | null, additive: boolean) {
   const { mode, session, doc, selection } = get();
   if (mode.kind === "pickPlane") {
-    if (p && (p.kind === "plane" || p.kind === "face")) pickSketchPlane(p);
+    if (p && (p.kind === "plane" || p.kind === "cplane" || p.kind === "face")) pickSketchPlane(p);
     return;
   }
   if (mode.kind === "measure") {
-    if (!p || p.kind === "plane" || p.kind === "sketch") return set({ measure: [] });
+    if (!p || p.kind === "plane" || p.kind === "cplane" || p.kind === "sketch") return set({ measure: [] });
     const m = get().measure;
     set({ measure: m.length >= 2 ? [p] : [...m, p] });
     return;

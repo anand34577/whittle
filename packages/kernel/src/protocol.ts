@@ -79,6 +79,8 @@ export interface RegenResult {
   seq: number;
   bodies: BodyResult[];
   sketches: SketchFrame[];
+  /** Construction planes, for display and picking. */
+  planes: SketchFrame[];
   status: FeatureStatus[];
   /** Bodies as they were just before pickBefore (for picking while a feature previews). */
   pickBodies?: BodyResult[];

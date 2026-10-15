@@ -89,6 +89,8 @@ export function hintFor(s: AppState): string {
         return "Positive grows the body, negative shrinks it (clearances for fits and printing) · Enter to finish";
       case "scale":
         return "Type a factor (2 = twice the size) · Enter to finish";
+      case "cplane":
+        return "Set the offset and tilt · then pick this plane when starting a sketch · Enter to finish";
       case "offsetFace":
         return f.faces.length === 0 ? "Click the flat faces to push or pull" : "Type a distance: positive pulls out, negative pushes in · Enter to finish";
       case "draft":

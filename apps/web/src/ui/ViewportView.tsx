@@ -567,6 +567,11 @@ export function ViewportView() {
     vp.setSketches(list);
   }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature]);
 
+  // Construction planes.
+  useEffect(() => {
+    vp?.setConstructionPlanes(regen?.planes ?? []);
+  }, [vp, regen]);
+
   // Reference pictures: the edited sketch's always, others unless hidden.
   useEffect(() => {
     if (!vp || !regen) return;

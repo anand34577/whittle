@@ -23,6 +23,8 @@ import type {
   SplitFeature,
   OffsetFeature,
   ScaleFeature,
+  ConstructionPlaneFeature,
+  PlaneRef,
   DraftFeature,
   OffsetFaceFeature,
 } from "@whittle/core";
@@ -692,6 +694,46 @@ function DraftEditor({ f }: { f: DraftFeature }) {
   );
 }
 
+function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
+  const features = useApp((s) => s.doc.features);
+  const before = features.slice(0, Math.max(0, features.findIndex((x) => x.id === f.id))).filter((x) => x.type === "cplane");
+  const p = f.plane;
+  const set = (label: string, recipe: (pl: PlaneRef) => PlaneRef) => upd(f, label, (d) => void (d.type === "cplane" && (d.plane = recipe(d.plane))));
+  const value = p.kind === "origin" ? p.plane : p.kind === "construction" ? p.plane : "face";
+  return (
+    <>
+      {p.kind === "face" ? (
+        <p className="field__note">On a flat model face. Offset moves it along the face normal.</p>
+      ) : (
+        <Select
+          label="Based on"
+          value={value}
+          onChange={(v) => set("Base", (pl) => (v === "XY" || v === "XZ" || v === "YZ" ? { kind: "origin", plane: v, offset: pl.offset } : { kind: "construction", plane: v, offset: pl.offset }))}
+          options={[
+            ...(["XY", "XZ", "YZ"] as const).map((o) => ({ value: o as string, label: `${o} plane`, icon: "plane" as const })),
+            ...before.map((c) => ({ value: c.id, label: c.name, icon: "plane" as const })),
+          ]}
+        />
+      )}
+      <ExprInput label="Offset" kind="length" value={p.offset} autoFocus hint="Distance along the plane's normal" onChange={(v) => set("Offset", (pl) => ({ ...pl, offset: v }))} />
+      {p.kind === "origin" && (
+        <>
+          <ExprInput label="Tilt angle" kind="angle" value={p.angle ?? "0"} hint="Rotate the plane about one of its own axes" onChange={(v) => set("Tilt", (pl) => (pl.kind === "origin" ? { ...pl, angle: v } : pl))} />
+          <Segmented
+            label="Tilt about"
+            value={p.tilt ?? "x"}
+            options={[
+              { value: "x", label: "X axis" },
+              { value: "y", label: "Y axis" },
+            ]}
+            onChange={(v) => set("Tilt axis", (pl) => (pl.kind === "origin" ? { ...pl, tilt: v } : pl))}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 function OffsetFaceEditor({ f }: { f: OffsetFaceFeature }) {
   const n = f.faces.length;
   return (
@@ -724,6 +766,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <ScaleEditor f={f} />;
     case "offsetFace":
       return <OffsetFaceEditor f={f} />;
+    case "cplane":
+      return <ConstructionPlaneEditor f={f} />;
     case "draft":
       return <DraftEditor f={f} />;
     case "hole":

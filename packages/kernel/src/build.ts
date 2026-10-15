@@ -63,7 +63,7 @@ import {
   measureShapeVolumeProperties,
 } from "replicad";
 import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
-import type { CoilFeature, DraftFeature, OffsetFaceFeature, SweepFeature } from "@whittle/core";
+import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
@@ -341,6 +341,41 @@ function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id
   return;
 }
 
+/** The frame of an origin plane (optionally tilted), a flat face, or a construction plane, moved by its offset. */
+function planeFrame(id: Id, plane: PlaneRef, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchBuilt>, ev: Evaluator): { frame: SketchFrame; warning?: string } {
+  const offset = ev.num(plane.offset, "length", "Offset");
+  if (plane.kind === "origin") {
+    const o = ORIGIN_FRAMES[plane.plane]!;
+    let { xDir, yDir, normal } = o;
+    const tilt = plane.angle ? ev.num(plane.angle, "angle", "Tilt") : 0;
+    if (Math.abs(tilt) > 1e-12) {
+      if (plane.tilt === "y") {
+        normal = rotateAbout(normal, yDir, tilt);
+        xDir = rotateAbout(xDir, yDir, tilt);
+      } else {
+        normal = rotateAbout(normal, xDir, tilt);
+        yDir = rotateAbout(yDir, xDir, tilt);
+      }
+    }
+    return { frame: { id, origin: scale(normal, offset), xDir, yDir, normal } };
+  }
+  if (plane.kind === "construction") {
+    const base = sketches.get(plane.plane)?.frame;
+    if (!base) throw new FeatureError("The construction plane this is based on is missing. Pick a new plane.");
+    return { frame: { id, origin: add(base.origin, scale(base.normal, offset)), xDir: base.xDir, yDir: base.yDir, normal: base.normal } };
+  }
+  const body = bodyForRefs(bodies, plane.face.bodyId);
+  const res = resolveFace(body, plane.face);
+  if (!res) throw new FeatureError("The face this plane was on is gone. Pick a new plane.");
+  if (res.item.geomType !== "PLANE") throw new FeatureError("Planes need a flat face.");
+  const info = faceInfo(res.item);
+  const { xDir, yDir } = frameAxes(info.normal);
+  return {
+    frame: { id, origin: add(planeOrigin(info.center, info.normal), scale(info.normal, offset)), xDir, yDir, normal: info.normal },
+    warning: res.uncertain ? "The face moved; please check it's still the right one." : undefined,
+  };
+}
+
 function bodyForRefs(bodies: Map<Id, Shape3D>, bodyId: Id): Shape3D {
   const b = bodies.get(bodyId);
   if (!b) throw new FeatureError("The body this feature was applied to no longer exists. Re-pick the edges or faces.");
@@ -445,6 +480,11 @@ export class Builder {
       // Copy the fill: the cached array must survive being transferred to the UI.
       if (s) sketches.push({ ...s.frame, fill: s.fill ? s.fill.slice() : undefined, solution: s.solution });
     }
+    const planes: SketchFrame[] = [];
+    for (const f of doc.features.slice(0, end)) {
+      const s = f.type === "cplane" ? prev.sketches.get(f.id) : undefined;
+      if (s) planes.push({ ...s.frame });
+    }
     let pickBodies: BodyResult[] | undefined;
     if (pickBefore) {
       const idx = doc.features.findIndex((f) => f.id === pickBefore);
@@ -458,7 +498,7 @@ export class Builder {
         }
       }
     }
-    return { bodies, sketches, status: statuses, pickBodies, ms: performance.now() - t0, rebuilt };
+    return { bodies, sketches, planes, status: statuses, pickBodies, ms: performance.now() - t0, rebuilt };
   }
 
   /** The final body shapes of the active timeline (for export). */
@@ -534,34 +574,15 @@ export class Builder {
   /** Mutates the body/sketch maps; returns a warning message, if any. */
   private apply(f: Feature, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchBuilt>, ev: Evaluator): string | undefined {
     switch (f.type) {
+      case "cplane": {
+        const { frame, warning } = planeFrame(f.id, f.plane, bodies, sketches, ev);
+        sketches.set(f.id, { frame, drawing: null });
+        return warning;
+      }
+
       case "sketch": {
-        let frame: SketchFrame;
-        let warning: string | undefined;
-        const offset = ev.num(f.plane.offset, "length", "Offset");
-        if (f.plane.kind === "origin") {
-          const o = ORIGIN_FRAMES[f.plane.plane]!;
-          let { xDir, yDir, normal } = o;
-          const tilt = f.plane.angle ? ev.num(f.plane.angle, "angle", "Tilt") : 0;
-          if (Math.abs(tilt) > 1e-12) {
-            if (f.plane.tilt === "y") {
-              normal = rotateAbout(normal, yDir, tilt);
-              xDir = rotateAbout(xDir, yDir, tilt);
-            } else {
-              normal = rotateAbout(normal, xDir, tilt);
-              yDir = rotateAbout(yDir, xDir, tilt);
-            }
-          }
-          frame = { id: f.id, origin: scale(normal, offset), xDir, yDir, normal };
-        } else {
-          const body = bodyForRefs(bodies, f.plane.face.bodyId);
-          const res = resolveFace(body, f.plane.face);
-          if (!res) throw new FeatureError("The face this sketch was on is gone. Edit the sketch to pick a new plane.");
-          if (res.item.geomType !== "PLANE") throw new FeatureError("Sketches need a flat face.");
-          if (res.uncertain) warning = "The sketch face moved; please check it's still on the right face.";
-          const info = faceInfo(res.item);
-          const { xDir, yDir } = frameAxes(info.normal);
-          frame = { id: f.id, origin: add(planeOrigin(info.center, info.normal), scale(info.normal, offset)), xDir, yDir, normal: info.normal };
-        }
+        const { frame, warning: planeWarning } = planeFrame(f.id, f.plane, bodies, sketches, ev);
+        let warning = planeWarning;
         let drawing: Drawing | null = null;
         let error: string | undefined;
         let solution: SketchSolution | undefined;

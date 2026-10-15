@@ -34,7 +34,9 @@ export type PlaneRef =
       angle?: Expr;
       tilt?: "x" | "y";
     }
-  | { kind: "face"; face: FaceRef; offset: Expr };
+  | { kind: "face"; face: FaceRef; offset: Expr }
+  /** A named construction plane (see ConstructionPlaneFeature). */
+  | { kind: "construction"; plane: Id; offset: Expr };
 
 /**
  * A persistent reference to a face. Rather than an index (which changes
@@ -211,6 +213,12 @@ interface FeatureBase {
   id: Id;
   name: string;
   suppressed?: boolean;
+}
+
+/** A reusable plane (offset, tilted, or on a face) that sketches and other planes can sit on. */
+export interface ConstructionPlaneFeature extends FeatureBase {
+  type: "cplane";
+  plane: PlaneRef;
 }
 
 export interface SketchFeature extends FeatureBase {
@@ -473,6 +481,7 @@ export type Feature =
   | OffsetFeature
   | ScaleFeature
   | DraftFeature
+  | ConstructionPlaneFeature
   | OffsetFaceFeature
   | HoleFeature
   | LoftFeature

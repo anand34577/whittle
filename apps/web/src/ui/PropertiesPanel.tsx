@@ -48,6 +48,7 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   scale: "scale",
   draft: "draft",
   offsetFace: "move",
+  cplane: "plane",
 };
 
 const ENTITY_LABELS: Record<SketchEntity["type"], string> = {
@@ -514,7 +515,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
         <div>
           <h2>{sketch.name}</h2>
           <p className="muted">
-            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : "On a model face"} · {sketch.entities.length} shape{sketch.entities.length === 1 ? "" : "s"}
+            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : sketch.plane.kind === "construction" ? "On a construction plane" : "On a model face"} · {sketch.entities.length} shape{sketch.entities.length === 1 ? "" : "s"}
           </p>
         </div>
       </header>

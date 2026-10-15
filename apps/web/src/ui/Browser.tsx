@@ -29,6 +29,7 @@ export function Browser() {
   const ev = documentEvaluator(doc);
   const bodies = regen?.bodies ?? [];
   const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch");
+  const cplanes = doc.features.slice(0, end).filter((f) => f.type === "cplane");
   const isSel = (fn: (p: (typeof selection)[number]) => boolean) => selection.some(fn);
 
   return (
@@ -63,6 +64,18 @@ export function Browser() {
               <span className="tree__name">{pl} plane</span>
               <span className="tree__action">Sketch</span>
             </button>
+          ))}
+          {cplanes.map((c) => (
+            <div key={c.id} className="tree__row" title="Sketch on this plane">
+              <button className="tree__main" onClick={() => createSketchOn({ kind: "construction", plane: c.id, offset: "0" })} onDoubleClick={() => editFeature(c.id)}>
+                <Icon name="plane" size={16} />
+                <span className="tree__name">{c.name}</span>
+                <span className="tree__action">Sketch</span>
+              </button>
+              <button className="tree__eye" title="Edit plane" aria-label="Edit plane" onClick={() => editFeature(c.id)}>
+                <Icon name="edit" size={15} />
+              </button>
+            </div>
           ))}
         </Section>
 

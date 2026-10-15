@@ -173,6 +173,9 @@ export class Viewport {
   private highlightGroup = new THREE.Group();
   private grid = new THREE.Group();
   private planes = new THREE.Group();
+  /** User-made construction planes: always shown faintly, pickable when choosing a sketch plane. */
+  private cplanes = new THREE.Group();
+  private cplaneFrames: SketchFrame[] = [];
   private headlight = new THREE.DirectionalLight(0xffffff, 1.6);
   private hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
   private raycaster = new THREE.Raycaster();
@@ -220,7 +223,7 @@ export class Viewport {
     pmrem.dispose();
 
     this.persp.up.set(0, 0, 1);
-    this.scene.add(this.shadow, this.imageGroup, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.grid, this.planes, this.hemi, this.persp, this.orthoCam);
+    this.scene.add(this.shadow, this.imageGroup, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.grid, this.planes, this.cplanes, this.hemi, this.persp, this.orthoCam);
     this.persp.add(this.headlight);
     this.headlight.position.set(0.3, 0.6, 1);
     const orthoLight = this.headlight.clone();
@@ -424,6 +427,26 @@ export class Viewport {
       mesh.add(border);
       this.planes.add(mesh);
     }
+  }
+
+  setConstructionPlanes(frames: SketchFrame[]) {
+    this.cplaneFrames = frames;
+    this.clearGroup(this.cplanes);
+    const s = Math.max(30, this.sceneRadius * 0.5);
+    for (const f of frames) {
+      const geo = new THREE.PlaneGeometry(s, s);
+      const mat = new THREE.MeshBasicMaterial({ color: this.theme.plane, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.makeBasis(new THREE.Vector3(...f.xDir), new THREE.Vector3(...f.yDir), new THREE.Vector3(...f.normal));
+      mesh.matrix.setPosition(...f.origin);
+      mesh.userData.cplane = f.id;
+      const border = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: this.theme.plane, transparent: true, opacity: 0.6 }));
+      border.raycast = () => {};
+      mesh.add(border);
+      this.cplanes.add(mesh);
+    }
+    this.invalidate();
   }
 
   setPlanesVisible(v: boolean) {
@@ -959,7 +982,8 @@ export class Viewport {
       if (s) return s;
     }
     if (this.filter.planes && this.planes.visible) {
-      const ph = this.raycaster.intersectObjects(this.planes.children, false)[0];
+      const ph = this.raycaster.intersectObjects([...this.planes.children, ...this.cplanes.children], false)[0];
+      if (ph?.object.userData.cplane) return { kind: "cplane", id: ph.object.userData.cplane as Id };
       if (ph) return { kind: "plane", plane: ph.object.userData.plane as OriginPlane };
     }
     return null;

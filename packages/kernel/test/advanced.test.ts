@@ -21,6 +21,7 @@ import {
   makeDraft,
   makeExtrude,
   makeOffset,
+  makeConstructionPlane,
   makeOffsetFace,
   makePipe,
   makePrimitive,
@@ -146,6 +147,28 @@ describe("tilted sketch planes", () => {
     expect(max[1] - min[1]).toBeCloseTo(10, 3);
     expect(max[2] - min[2]).toBeCloseTo(10, 3);
     expect(min[1]).toBeCloseTo(-10, 3);
+  });
+});
+
+describe("construction planes", () => {
+  it("places a sketch on an offset, tilted plane built on another plane", () => {
+    const doc = newDocument();
+    const base = push(doc, makeConstructionPlane(doc, { kind: "origin", plane: "XY", offset: "10" }));
+    const up = push(doc, makeConstructionPlane(doc, { kind: "construction", plane: base.id, offset: "5" }));
+    const s = sketch(doc, [square(10)], { kind: "construction", plane: up.id, offset: "0" });
+    push(doc, makeExtrude(doc, s.id) as ExtrudeFeature, true);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    expect(r.planes).toHaveLength(2);
+    const [min, max] = r.bodies[0]!.bbox;
+    expect(min[2]).toBeCloseTo(15, 3);
+    expect(max[2]).toBeGreaterThan(15);
+  });
+
+  it("reports a missing base plane", () => {
+    const doc = newDocument();
+    const p = push(doc, makeConstructionPlane(doc, { kind: "construction", plane: "gone", offset: "0" }));
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === p.id)?.state).toBe("error");
   });
 });
 

@@ -5,7 +5,9 @@ import type { Feature, Id, WhittleDocument } from "./model";
 export function featureInputs(f: Feature): Id[] {
   switch (f.type) {
     case "sketch":
-      return f.plane.kind === "face" ? [f.plane.face.bodyId] : [];
+      return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
+    case "cplane":
+      return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
     case "extrude":
     case "revolve":
       return [f.sketch, ...(f.target ? [f.target] : [])];

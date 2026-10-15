@@ -34,6 +34,7 @@ export type Pick =
   | { kind: "edge"; bodyId: Id; index: number; at?: Vec3 }
   | { kind: "body"; bodyId: Id; at?: Vec3 }
   | { kind: "plane"; plane: OriginPlane }
+  | { kind: "cplane"; id: Id }
   | { kind: "sketch"; sketchId: Id };
 
 /**

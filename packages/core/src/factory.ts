@@ -68,6 +68,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   scale: "Scale",
   draft: "Draft",
   offsetFace: "Press/Pull",
+  cplane: "Plane",
 };
 
 /** "Extrude 3" — next free numbered name for a feature type. */
@@ -225,6 +226,10 @@ export function makeDraft(doc: WhittleDocument): Feature {
 
 export function makeOffsetFace(doc: WhittleDocument): Feature {
   return { id: uid("of"), type: "offsetFace", name: nextName(doc, "Press/Pull"), faces: [], distance: "2" };
+}
+
+export function makeConstructionPlane(doc: WhittleDocument, plane: PlaneRef): Feature {
+  return { id: uid("cp"), type: "cplane", name: nextName(doc, "Plane"), plane };
 }
 
 export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {
