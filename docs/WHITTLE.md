@@ -419,6 +419,22 @@ Every shape also has X, Y, Z position and the Result options.
 
 ---
 
+## 5b. Construction, curves, surfaces and assemblies
+
+**Construct** (toolbar group): planes (offset or tilted, midplane, through 3 points or 2 edges, at an angle to an edge, tangent to a round face, along a path), axes (through a cylinder, 2 points, 2 planes, an edge, perpendicular to a face) and points (at a corner, 2 edges, 3 planes, a circle's center, an edge and a plane). Planes can be sketched on; axes and points are references that patterns, mirrors, splits and joints can use.
+
+**More solid tools:** Rib (a thin wall from a line), Web, Emboss and Engrave (a sketch raised from or sunk into a face), Thread on a face (a real helical groove on a rod or in a hole), Boundary Fill (keep the overlap regions of bodies), Align (snap one body's face to another's), Replace Face (bring flat faces to a plane or another face), Delete Face (remove a hole, pocket, boss, fillet or chamfer and heal the gap), Split Faces, silhouette (widest outline) split, variable-radius fillets, pattern along a path or around a construction axis, branching pipes and Insert design (bring in the bodies of another `.whittle` file).
+
+**3D curves:** 3D sketch (through clicked points), Include 3D geometry (copy model edges), Intersection curve (where two faces meet) and Project to surface. Sweeps, pipes and path patterns can follow them.
+
+**Sketch extras:** control-point spline, elliptical arc, 2- and 3-tangent circles, stretch, Intersect (the model's outline where it crosses the sketch plane) and DXF import.
+
+**Surfaces:** Extrude, Revolve, Sweep and Loft can output a surface (sides only; open lines work). The Surface group adds Patch, Ruled, Offset, Trim, Untrim, Extend, Stitch (a closed set becomes a solid), Unstitch, Merge, Reverse normal and Thicken. Surface bodies have no volume.
+
+**Assemblies:** bodies can be grouped into components (they move together under joints) and grounded. Joints are rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with optional limits, a joint origin (construction axis and point), a drive slider with Play, motion links (a joint that follows another by a ratio) and collision warnings.
+
+**Inspect extras:** Interference (overlapping bodies, marked with red boxes), Minimum radius (inside corners a cutter can't reach), Curvature map, Accessibility from above and Color by component.
+
 ## 6. Parts library
 
 Open it with **P**, the toolbar's **Parts** button, or **Start from a part** on the start screen. Filter by category (Mechanical, Fasteners, Enclosures, Everyday) or search.
@@ -821,10 +837,9 @@ Both browser suites pass against the dev server and the production build with no
 ## 19. Known limitations
 
 - **Sketch constraints** work on solver geometry (points, lines, arcs, circles), not on whole shapes such as rectangles or text; there are no symmetric, midpoint or collinear constraints yet (use two Coincident-on-line constraints for collinear). Outlines where three or more lines meet at one point are treated as open paths. Sketches with more than 80 points are coloured as a whole rather than piece by piece.
-- **Not yet available:** sweep, threads, draft, thicken and split.
-- **Construction geometry:** only origin planes, face planes and offsets; no angled planes or axes.
+- **Not yet available:** Form (T-spline) sculpting, sheet metal, plastic features (boss, snap fit, lip), mesh repair and conversion, surface fillets, and Delete Face on an opening that isn't flat.
 - **Timeline:** steps can't be reordered.
-- **Assemblies:** none; Whittle designs parts, which can be placed as several bodies in one design.
+- **Assemblies:** components, ground and joints exist, but there is no contact-driven motion study (collisions only warn) and no exploded views.
 - **STL import:** limited to 40,000 triangles; very dense meshes should be simplified first.
 - **Gears:** only involute spur gears (no helical or internal).
 - **Fonts:** one family (IBM Plex Sans, regular and bold), Latin characters.
