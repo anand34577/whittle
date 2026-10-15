@@ -5,6 +5,7 @@ import { hintFor } from "../state/hints";
 import { history, mutate, setTheme, useApp } from "../state/store";
 import { AccountButton } from "./Account";
 import { type Profile, THEMES } from "../state/prefs";
+import { Popover } from "./controls";
 import { Icon } from "./icons";
 
 /* ───────────────────────────── Title bar ───────────────────────────── */
@@ -125,30 +126,19 @@ function ToolButton({ c, active, big }: { c: Command; active?: boolean; big?: bo
   );
 }
 
-/** Every command of a group, with hints, in a dropdown. */
+/** Every command of a group, with hints, in a dropdown that stays inside the window and scrolls. */
 function GroupMenu({ label, ids }: { label: string; ids: string[] }) {
   const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const state = useApp();
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    const key = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", key);
-    return () => {
-      window.removeEventListener("pointerdown", close);
-      window.removeEventListener("keydown", key);
-    };
-  }, [open]);
   return (
-    <div className="groupmenu" ref={ref}>
-      <button className={`groupmenu__btn ${open ? "is-open" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">
+    <div className="groupmenu">
+      <button ref={setAnchor} className={`groupmenu__btn ${open ? "is-open" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">
         {label}
         <Icon name="chevronDown" size={12} />
       </button>
-      {open && (
-        <div className="groupmenu__pop" role="menu">
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} className="groupmenu__pop" placement="bottom-start">
+        <div role="menu">
           {ids.map((id) => {
             const c = commandById(id);
             const enabled = isAvailable(c, state);
@@ -173,7 +163,7 @@ function GroupMenu({ label, ids }: { label: string; ids: string[] }) {
             );
           })}
         </div>
-      )}
+      </Popover>
     </div>
   );
 }
@@ -207,6 +197,12 @@ function toolsFor(profile: Profile | null) {
   };
 }
 
+/** Vertical wheel scrolls an overflowing toolbar sideways. */
+const wheelX = (e: React.WheelEvent<HTMLElement>) => {
+  const el = e.currentTarget;
+  if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY;
+};
+
 export function Toolbar() {
   const mode = useApp((s) => s.mode);
   const profile = useApp((s) => s.prefs.profile);
@@ -215,13 +211,13 @@ export function Toolbar() {
   if (mode.kind === "sketch") {
     const active = mode.tool === "select" ? "tool-select" : mode.tool === "polyline" ? "tool-line" : `tool-${mode.tool}`;
     return (
-      <div className={`toolbar toolbar--sketch ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Sketch tools">
+      <div className={`toolbar toolbar--sketch ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Sketch tools" onWheel={wheelX}>
         <div className="toolbar__mode">
           <span className="pill pill--accent">Sketch</span>
         </div>
-        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3"]} activeId={active} />
+        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-conic"]} activeId={active} />
         <Group label="Special" ids={["tool-project", "tool-text", "tool-gear", "import-image", "import-svg"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
-        <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
+        <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
         <Group
           label="Constrain"
           ids={profile === "engineer" || profile === "designer" ? ["tool-segment", "tool-arc", "tool-spline", "tool-pcircle", "tool-dimension", "tool-sfillet", "tool-schamfer", "tool-trim", "tool-extend"] : ["tool-segment", "tool-spline", "tool-dimension", "tool-sfillet"]}
@@ -236,7 +232,7 @@ export function Toolbar() {
     );
   }
   return (
-    <div className={`toolbar ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Modeling tools">
+    <div className={`toolbar ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Modeling tools" onWheel={wheelX}>
       <div className="toolgroup toolgroup--primary">
         <div className="toolgroup__tools">
           <ToolButton c={commandById("sketch")} active={mode.kind === "pickPlane"} big />

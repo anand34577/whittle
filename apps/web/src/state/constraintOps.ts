@@ -41,6 +41,7 @@ import {
   trimGeometry,
 } from "@whittle/core";
 import { promptDialog } from "./dialogs";
+import { breakLine, moveGeometry, rectPattern, scaleGeometry } from "@whittle/core";
 import { smartSketchOn } from "./prefs";
 import { type Pick, findFeature, sketchMutate, toast, useApp } from "./store";
 
@@ -464,4 +465,56 @@ export function setCircleRadius(id: Id, r: number) {
     },
     "radius" + id,
   );
+}
+
+/* ───────── Move / scale / grid pattern / break (asks for numbers in the document's units) ───────── */
+
+/** Ask for one or more comma-separated lengths or numbers; null when cancelled or invalid. */
+async function askNumbers(title: string, label: string, initial: string, message: string, kinds: ("length" | "number")[]): Promise<number[] | null> {
+  const ev = () => documentEvaluator(useApp.getState().doc);
+  const parse = (t: string): number[] | string => {
+    const parts = t.split(",").map((x) => x.trim());
+    if (parts.length !== kinds.length) return `Give ${kinds.length} value${kinds.length > 1 ? "s" : ""}, separated by commas`;
+    const out: number[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const r = ev().eval(parts[i]!, kinds[i] === "length" ? "length" : "number");
+      if (!r.ok) return r.error;
+      out.push(r.value);
+    }
+    return out;
+  };
+  const v = await promptDialog({ title, label, message, initial, validate: (t) => (typeof parse(t) === "string" ? (parse(t) as string) : null) });
+  if (v === null) return null;
+  const r = parse(v);
+  return typeof r === "string" ? null : r;
+}
+
+/** Move the selected geometry, or add a moved copy. Distances are in mm after evaluation. */
+export async function moveSelection(copy: boolean) {
+  const sel = sketchSelection();
+  const u = useApp.getState().doc.units;
+  const r = await askNumbers(copy ? "Copy" : "Move", `X, Y distance (${u})`, "10, 0", "How far along the sketch's X and Y. Negative goes the other way.", ["length", "length"]);
+  if (r) copyEdit(copy ? "Copy" : "Move", (sk) => moveGeometry(sk, sel, r[0]!, r[1]!, copy));
+}
+
+/** Scale the selected geometry about the sketch origin. */
+export async function scaleSelection() {
+  const sel = sketchSelection();
+  const r = await askNumbers("Scale", "Scale factor", "2", "1 keeps the size; 2 doubles it; 0.5 halves it. Scales about the sketch origin.", ["number"]);
+  if (r) copyEdit("Scale", (sk) => scaleGeometry(sk, sel, r[0]!, [0, 0]));
+}
+
+/** Copies in a grid: columns, rows, and the gap between them. */
+export async function gridPatternSelection() {
+  const sel = sketchSelection();
+  const u = useApp.getState().doc.units;
+  const r = await askNumbers("Rectangular pattern", `Columns, rows, X gap, Y gap (gaps in ${u})`, "3, 2, 20, 20", "The original is the first cell. Gaps are measured between copies.", ["number", "number", "length", "length"]);
+  if (r) copyEdit("Rectangular pattern", (sk) => rectPattern(sk, sel, Math.round(r[0]!), Math.round(r[1]!), r[2]!, r[3]!));
+}
+
+/** Split the first selected line where the second selected line crosses it. */
+export function breakSelection() {
+  const sel = sketchSelection();
+  if (sel.length !== 2) return void toast("info", "Select the line to split, then the line that crosses it.");
+  copyEdit("Break", (sk) => breakLine(sk, sel[0]!, sel[1]!));
 }

@@ -4,6 +4,11 @@
 .popover {
   position: fixed;
   z-index: 200;
+  /* never taller than the window; scroll inside instead of running off-screen */
+  max-height: calc(100vh - 16px);
+  max-width: calc(100vw - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--r-3);

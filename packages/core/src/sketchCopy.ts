@@ -123,6 +123,75 @@ export function circularPattern(sk: Geo, ids: Id[], count: number, centre: Vec2 
   return undefined;
 }
 
+/** A grid of copies: `nx` columns by `ny` rows, `dx`/`dy` apart (the original is the first cell). */
+export function rectPattern(sk: Geo, ids: Id[], nx: number, ny: number, dx: number, dy: number): string | undefined {
+  if (nx < 1 || ny < 1 || nx * ny < 2) return "A pattern needs at least two cells.";
+  if ((nx > 1 && Math.abs(dx) < 1e-9) || (ny > 1 && Math.abs(dy) < 1e-9)) return "The copies need a gap between them.";
+  for (let j = 0; j < ny; j++)
+    for (let i = 0; i < nx; i++) {
+      if (i === 0 && j === 0) continue;
+      if (!copyThrough(sk, ids, ([x, y]) => [x + dx * i, y + dy * j])) return "Select the geometry to repeat first.";
+    }
+  return undefined;
+}
+
+/** Move the selection by (dx, dy), or leave it and add a moved copy. */
+export function moveGeometry(sk: Geo, ids: Id[], dx: number, dy: number, copy: boolean): string | undefined {
+  if (Math.abs(dx) + Math.abs(dy) < 1e-9) return "The move distance must not be zero.";
+  if (copy) return copyThrough(sk, ids, ([x, y]) => [x + dx, y + dy]) ? undefined : "Select the geometry to copy first.";
+  const { points } = closure(sk, ids);
+  if (!points.size) return "Select the geometry to move first.";
+  for (const g of sk.geometry ?? []) {
+    if (g.type === "point" && points.has(g.id)) {
+      g.x += dx;
+      g.y += dy;
+    }
+  }
+  return undefined;
+}
+
+/** Scale the selection by `k` about `base`. Distances and radii that sit wholly inside it scale too. */
+export function scaleGeometry(sk: Geo, ids: Id[], k: number, base: Vec2): string | undefined {
+  if (!(k > 0) || Math.abs(k - 1) < 1e-9) return "Give a scale factor above zero and not 1.";
+  const { curves, points } = closure(sk, ids);
+  if (!points.size) return "Select the geometry to scale first.";
+  for (const g of sk.geometry ?? []) {
+    if (g.type === "point" && points.has(g.id)) {
+      g.x = base[0] + (g.x - base[0]) * k;
+      g.y = base[1] + (g.y - base[1]) * k;
+    }
+  }
+  const inside = new Set<Id>([...points, ...curves.map((c) => c.id)]);
+  for (const c of curves) if (c.type === "circle") c.r *= k;
+  for (const c of sk.constraints ?? []) {
+    if ((c.type === "distance" || c.type === "radius") && c.value !== undefined && c.refs.every((r) => inside.has(r) || r === "origin")) c.value = `(${c.value})*${k}`;
+  }
+  return undefined;
+}
+
+/** Split a line where another line crosses it, so each half can be trimmed, moved or dimensioned on its own. */
+export function breakLine(sk: Geo, lineId: Id, cutterId: Id): string | undefined {
+  const g = geomById(sk, lineId);
+  const h = geomById(sk, cutterId);
+  if (g?.type !== "line" || h?.type !== "line") return "Pick the line to split, then the line that crosses it.";
+  const [a, b, c, d] = [pointAt(sk, g.a), pointAt(sk, g.b), pointAt(sk, h.a), pointAt(sk, h.b)];
+  const r: Vec2 = [b[0] - a[0], b[1] - a[1]];
+  const q: Vec2 = [d[0] - c[0], d[1] - c[1]];
+  const den = r[0] * q[1] - r[1] * q[0];
+  if (Math.abs(den) < 1e-12) return "Those lines are parallel.";
+  const t = ((c[0] - a[0]) * q[1] - (c[1] - a[1]) * q[0]) / den;
+  if (t < 1e-6 || t > 1 - 1e-6) return "The lines don't cross inside the first one.";
+  const p = addPoint(sk, [a[0] + r[0] * t, a[1] + r[1] * t], g.construction);
+  const second = uid("l");
+  sk.geometry!.push({ id: second, type: "line", a: p, b: g.b, ...(g.construction ? { construction: true } : {}) });
+  g.b = p;
+  addConstraint(sk, "coincident", [p, cutterId]);
+  for (const k of [...(sk.constraints ?? [])]) {
+    if (k.refs.length === 1 && k.refs[0] === lineId && (k.type === "horizontal" || k.type === "vertical")) addConstraint(sk, k.type, [second]);
+  }
+  return undefined;
+}
+
 /* ───────────────────────── Offset ───────────────────────── */
 
 type Line = Extract<SketchGeom, { type: "line" }>;

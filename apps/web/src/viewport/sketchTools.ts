@@ -31,8 +31,34 @@ export interface SnapInfo {
 }
 
 /** Tools that draw constraint-driven geometry. */
-const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "pcircle", "spline"]);
+const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "carc", "conic", "pcircle", "spline"]);
 /** Tools that take three clicks (the rest of the simple shapes take two). */
+/** Counter-clockwise arc about `c` from `s`, ending on the ray toward `e`. */
+function centerArc(c: Vec2, s: Vec2, e: Vec2): { start: Vec2; end: Vec2; through: Vec2 } | null {
+  const r = Math.hypot(s[0] - c[0], s[1] - c[1]);
+  if (r < 1e-6) return null;
+  const a0 = Math.atan2(s[1] - c[1], s[0] - c[0]);
+  let sweep = Math.atan2(e[1] - c[1], e[0] - c[0]) - a0;
+  while (sweep <= 1e-6) sweep += 2 * Math.PI;
+  const at = (t: number): Vec2 => [c[0] + r * Math.cos(a0 + t), c[1] + r * Math.sin(a0 + t)];
+  return { start: s, end: at(sweep), through: at(sweep / 2) };
+}
+
+/** Points on a conic from `s` to `e` whose tangents meet at `apex`; rho 0.5 is a parabola. */
+function conicPoints(s: Vec2, e: Vec2, apex: Vec2, rho: number, n = 12): Vec2[] {
+  const w = rho / (1 - rho);
+  const out: Vec2[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const a = (1 - t) * (1 - t);
+    const b = 2 * w * t * (1 - t);
+    const c = t * t;
+    const k = a + b + c;
+    out.push([(a * s[0] + b * apex[0] + c * e[0]) / k, (a * s[1] + b * apex[1] + c * e[1]) / k]);
+  }
+  return out;
+}
+
 const THREE_POINT = new Set<SketchTool>(["rect3", "circle3"]);
 
 export interface DimField {
@@ -256,6 +282,11 @@ export class SketchController {
     }
   }
 
+  private conicRho() {
+    const t = this.typed.a;
+    return t !== undefined && t > 0.01 && t < 0.99 ? t : 0.5;
+  }
+
   private previewShapes(): { pts: Vec2[]; closed: boolean }[] {
     const c = this.cursor;
     if (!c || this.points.length === 0 || this.tool === "select" || this.tool === "text") return [];
@@ -268,6 +299,15 @@ export class SketchController {
     if (this.tool === "pcircle") {
       const r = Math.hypot(this.secondPoint(a, c)[0] - a[0], this.secondPoint(a, c)[1] - a[1]);
       return r > 0 ? [{ pts: geomOutline({ id: "", type: "circle", c: a, r, construction: false }), closed: true }] : [];
+    }
+    if (this.tool === "conic") {
+      if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
+      if (this.points.length === 2) return [{ pts: conicPoints(a, this.points[1]!, c, this.conicRho(), 24), closed: false }, { pts: [a, c, this.points[1]!], closed: false }];
+    }
+    if (this.tool === "carc") {
+      if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
+      const arc = centerArc(a, this.points[1]!, c);
+      return [{ pts: [a, this.points[1]!], closed: false }, ...(arc ? [{ pts: [...arcPoints(arc.start, arc.end, arc.through, 32), arc.end], closed: false }] : [])];
     }
     if (this.tool === "arc") {
       if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
@@ -351,6 +391,27 @@ export class SketchController {
         const uy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
         return makeEntity("circle", [ux, uy], a);
       }
+      case "polygonC": {
+        // Circumscribed: the second point is the middle of an edge, so the radius is the apothem.
+        const e = makeEntity("polygon", a, b);
+        if (e.type !== "polygon") return null;
+        const half = Math.PI / 6;
+        e.r = fmt(Math.hypot(b[0] - a[0], b[1] - a[1]) / Math.cos(half));
+        e.angle = fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI - 30);
+        return e;
+      }
+      case "polygonE": {
+        // Edge polygon: the two points are one edge; the polygon grows to the left of a -> b.
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 1e-6) return null;
+        const R = len / (2 * Math.sin(Math.PI / 6));
+        const apo = R * Math.cos(Math.PI / 6);
+        const c: Vec2 = [(a[0] + b[0]) / 2 - ((b[1] - a[1]) / len) * apo, (a[1] + b[1]) / 2 + ((b[0] - a[0]) / len) * apo];
+        const e = makeEntity("polygon", c, a);
+        if (e.type !== "polygon") return null;
+        e.r = fmt(R);
+        return e;
+      }
       default:
         return makeEntity(this.tool as EntityType, a, b);
     }
@@ -367,6 +428,7 @@ export class SketchController {
       return [{ key: "a", label: "H", value: h, at: p3 }];
     }
     if (this.tool === "circle3") return [];
+    if (this.tool === "conic") return this.points.length === 2 ? [{ key: "a", label: "ρ", value: this.conicRho(), at: c }] : [];
     const a = this.multi || this.tool === "segment" ? this.points[this.points.length - 1]! : this.points[0]!;
     const b = this.secondPoint(a, c);
     switch (this.tool) {
@@ -562,6 +624,17 @@ export class SketchController {
     const at = (i: number) => this.refs[i] ?? this.points[i]!;
     if (this.tool === "pcircle" && this.points.length === 2) {
       this.env.addCircle(at(0), Math.hypot(p[0] - this.points[0]![0], p[1] - this.points[0]![1]));
+      this.reset();
+    } else if (this.tool === "conic" && this.points.length === 3) {
+      // Start, end, apex; a typed value (0.01 to 0.99) sets rho.
+      const [s0, e0, a0] = this.points as [Vec2, Vec2, Vec2];
+      this.env.addSpline([s0, ...conicPoints(s0, e0, a0, this.conicRho()).slice(1, -1), e0], false);
+      this.reset();
+    } else if (this.tool === "carc" && this.points.length === 3) {
+      // Center, start, then the end direction (counter-clockwise from the start).
+      const [c0, s0, e0] = this.points as [Vec2, Vec2, Vec2];
+      const arc = centerArc(c0, s0, e0);
+      if (arc) this.env.addArc(arc.start, arc.end, arc.through);
       this.reset();
     } else if (this.tool === "arc" && this.points.length === 3) {
       // Start, end, then a point the arc passes through.
