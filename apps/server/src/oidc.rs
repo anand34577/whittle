@@ -30,6 +30,9 @@ use crate::{auth, db, random_token, Shared};
 
 const PENDING_TTL: Duration = Duration::from_secs(10 * 60);
 const METADATA_TTL: Duration = Duration::from_secs(60 * 60);
+/// Sign-ins that may be waiting for their provider at once (unauthenticated callers can start them).
+const MAX_PENDING: usize = 1000;
+const STATE_COOKIE: &str = "whittle_oidc_state";
 
 struct Pending {
     verifier: PkceCodeVerifier,
@@ -128,8 +131,18 @@ pub async fn start(State(s): State<Shared>, headers: axum::http::HeaderMap, Quer
     let (url, csrf, nonce) = req.set_pkce_challenge(challenge).url();
     let mut pending = s.oidc.pending.lock().await;
     pending.retain(|_, p| p.at.elapsed() < PENDING_TTL);
+    if pending.len() >= MAX_PENDING {
+        return fail("Too many sign-ins are in progress. Try again in a few minutes.");
+    }
     pending.insert(csrf.secret().clone(), Pending { verifier, nonce, return_to: safe_return(q.return_to), at: Instant::now(), link_user });
-    Redirect::to(url.as_str()).into_response()
+    // The callback only accepts the response in the browser that started the sign-in, so a link an
+    // attacker obtained from their own sign-in can't be used to sign a victim into the attacker's account.
+    let secure = if s.config.secure_cookies { "; Secure" } else { "" };
+    let cookie = format!("{STATE_COOKIE}={}; Path=/api/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=600{secure}", csrf.secret());
+    match header::HeaderValue::from_str(&cookie) {
+        Ok(v) => ([(header::SET_COOKIE, v)], Redirect::to(url.as_str())).into_response(),
+        Err(_) => fail("Couldn't start the sign-in"),
+    }
 }
 
 #[derive(Deserialize)]
@@ -140,11 +153,30 @@ pub struct CallbackQuery {
     error_description: Option<String>,
 }
 
-pub async fn callback(State(s): State<Shared>, Query(q): Query<CallbackQuery>) -> Response {
-    match finish(&s, q).await {
-        Ok((cookie, to)) => ([(header::SET_COOKIE, cookie)], Redirect::to(&to)).into_response(),
-        Err(e) => fail(&e),
+pub async fn callback(State(s): State<Shared>, headers: axum::http::HeaderMap, Query(q): Query<CallbackQuery>) -> Response {
+    let bound = headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, _)| *k == STATE_COOKIE)
+        .map(|(_, v)| v.to_owned());
+    // The state cookie is single-use: clear it whatever happens.
+    let secure = if s.config.secure_cookies { "; Secure" } else { "" };
+    let clear = header::HeaderValue::from_str(&format!("{STATE_COOKIE}=; Path=/api/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=0{secure}"));
+    let mut res = if bound.is_some() && bound == q.state {
+        match finish(&s, q).await {
+            Ok((cookie, to)) => ([(header::SET_COOKIE, cookie)], Redirect::to(&to)).into_response(),
+            Err(e) => fail(&e),
+        }
+    } else {
+        fail("This sign-in wasn't started in this browser. Please try again.")
+    };
+    if let Ok(c) = clear {
+        res.headers_mut().append(header::SET_COOKIE, c);
     }
+    res
 }
 
 async fn finish(s: &Shared, q: CallbackQuery) -> Result<(axum::http::HeaderValue, String), String> {

@@ -412,7 +412,7 @@ async fn administrators_edit_merge_link_and_transfer() {
 
 #[tokio::test]
 async fn settings_and_password_reset() {
-    let app = app(|_| {}).await;
+    let app = app(|c| c.public_url = Some("https://cad.example.com".into())).await;
     let (ada, ada_id) = with_admin(&app).await;
     // No email server yet: no self-service reset.
     assert_eq!(call(&app, Method::GET, "/api/config", None, None, false, &[]).await.json()["passwordReset"], false);

@@ -342,6 +342,28 @@ kbd {
   position: sticky;
   right: 0;
 }
+/* The tools scroll sideways on narrow windows; Finish sketch, Library and Export stay put. */
+.toolbar__scroll {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.toolbar__scroll > * {
+  flex-shrink: 0;
+}
+.toolbar__fixed {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+}
+.toolbar__finish {
+  flex: none;
+  margin-left: var(--sp-2);
+}
 .toolbar--sketch {
   background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg-1);
   border-bottom-color: color-mix(in oklch, var(--accent) 45%, var(--line));
@@ -668,6 +690,10 @@ kbd {
 .context-bar {
   padding: 3px;
   gap: 2px;
+  /* stay clear of the view cube on narrow windows */
+  max-width: calc(100% - 200px);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 @keyframes drop {
   from {
@@ -676,6 +702,7 @@ kbd {
   }
 }
 .context-bar__btn {
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 6px;

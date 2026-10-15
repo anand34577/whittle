@@ -58,6 +58,8 @@ export interface ViewSettings {
   analysis: "overhang" | "draft" | "zebra" | "curvature" | "access" | null;
   grid: boolean;
   ortho: boolean;
+  /** Exploded view: 0 (together) to 1 (fully apart). A display effect only; the model is untouched. */
+  explode?: number;
 }
 
 export interface Session {
@@ -226,6 +228,11 @@ export function replaceDocument(doc: WhittleDocument, fileName: string | null) {
     selection: [],
     hover: null,
     selectedEntity: null,
+    // Marks and picks from the previous design mean nothing in this one.
+    sketchSel: [],
+    sketchStep: 0,
+    interference: [],
+    measure: [],
     historyTick: get().historyTick + 1,
     regen: null,
   });
@@ -323,6 +330,11 @@ export function setBodyOp(id: Id, op: "new" | "join" | "cut" | "intersect") {
     const f = d.features.find((x) => x.id === id);
     if (!f || !isBodyFeature(f as Feature)) return;
     (f as { op: string }).op = op;
+    // A sketch on a face points out of the body: cutting should go into it, and joining back out.
+    if (f.type === "extrude" && f.extent === "one") {
+      const sk = d.features.find((x) => x.id === f.sketch);
+      if (sk?.type === "sketch" && sk.plane.kind === "face") f.flip = op === "cut";
+    }
   });
 }
 

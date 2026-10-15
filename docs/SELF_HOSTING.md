@@ -238,7 +238,9 @@ Set it in **Administration → Sign-in & email** (or with the `WHITTLE_SMTP_*` v
 | **None (unencrypted)** | 25 | A local relay (Postfix on the same host), a LAN mail server, test servers such as MailHog or Mailpit. Messages and any SMTP password travel unencrypted, so use it only on a trusted network. |
 
 Internal servers with self-signed certificates: turn on **Accept self-signed certificates**. Links in
-emails use `WHITTLE_PUBLIC_URL`, or the address people browse to when it isn't set.
+emails use `WHITTLE_PUBLIC_URL`. "Forgot password?" is only offered when it is set, because otherwise the link would be built from the
+request's `Host` header, which the person asking controls. (Emails an administrator triggers, such as
+invitations, fall back to the address the administrator is browsing.)
 
 ## Managing accounts from the command line
 

@@ -105,7 +105,7 @@ struct PublicConfig {
     needs_setup: bool,
     max_upload_bytes: usize,
     max_versions: i64,
-    /// "Forgot password?" works (email is set up and passwords are allowed).
+    /// "Forgot password?" works (email is set up, a public address is configured and passwords are allowed).
     password_reset: bool,
     /// New accounts need an email address.
     require_email: bool,
@@ -125,7 +125,7 @@ async fn public_config(State(s): State<Shared>) -> ApiResult<Json<PublicConfig>>
         needs_setup,
         max_upload_bytes: s.config.max_upload_bytes,
         max_versions: s.config.max_versions,
-        password_reset: s.config.auth_local && st.smtp.configured(),
+        password_reset: s.config.auth_local && s.config.public_url.is_some() && st.smtp.configured(),
         require_email: !s.config.auth_none && st.require_email(),
         ai: s.config.ai,
     }))

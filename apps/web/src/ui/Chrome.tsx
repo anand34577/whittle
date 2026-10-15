@@ -230,10 +230,11 @@ export function Toolbar() {
   if (mode.kind === "sketch") {
     const active = mode.tool === "select" ? "tool-select" : mode.tool === "polyline" ? "tool-line" : `tool-${mode.tool}`;
     return (
-      <div className={`toolbar toolbar--sketch ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Sketch tools" onWheel={wheelX}>
+      <div className={`toolbar toolbar--sketch ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Sketch tools">
         <div className="toolbar__mode">
           <span className="pill pill--accent">Sketch</span>
         </div>
+        <div className="toolbar__scroll" onWheel={wheelX}>
         <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic", "tool-cspline", "tool-earc", "tool-tan2c", "tool-tan3c"]} activeId={active} />
         <Group label="Insert" ids={[]} more={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg", "import-dxf", "calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} />
         <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-stretch", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
@@ -243,15 +244,16 @@ export function Toolbar() {
           more={["tool-segment", "tool-arc", "tool-spline", "tool-pcircle", "tool-dimension", "tool-gpoint", "tool-sfillet", "tool-schamfer", "tool-trim", "tool-extend", ...CONSTRAINT_COMMANDS]}
           activeId={active}
         />
-        <div className="toolbar__spacer" />
-        <button className="btn btn--accent" onClick={commandById("finish-sketch").run} data-tour="finish-sketch">
+        </div>
+        <button className="btn btn--accent toolbar__finish" onClick={commandById("finish-sketch").run} data-tour="finish-sketch">
           <Icon name="finish" size={18} /> Finish sketch
         </button>
       </div>
     );
   }
   return (
-    <div className={`toolbar ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Modeling tools" onWheel={wheelX}>
+    <div className={`toolbar ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Modeling tools">
+      <div className="toolbar__scroll" onWheel={wheelX}>
       <div className="toolgroup toolgroup--primary">
         <div className="toolgroup__tools">
           <ToolButton c={commandById("sketch")} active={mode.kind === "pickPlane"} big />
@@ -263,15 +265,17 @@ export function Toolbar() {
       <Group label="Surface" ids={[]} more={["surface-patch", "surface-stitch", "surface-thicken", "surface-trim", "surface-ruled", "surface-offset", "surface-untrim", "surface-extend", "surface-unstitch", "surface-merge", "surface-reverse"]} />
       <Group label="Shapes" ids={[]} more={["box", "cylinder", "sphere", "cone", "torus", "tube", "spring"]} />
       <Group label="Modify" ids={modify.primary} more={modify.more} />
-      <Group label="Inspect" ids={["measure", "section"]} more={["#Check the model", "interference", "clear-interference", "min-radius", "overhang", "draft-analysis", "#Surface quality", "curvature", "zebra", "accessibility", "#Look", "component-colors", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />
-      <div className="toolbar__spacer" />
-      <div className="toolgroup toolgroup--feature">
-        <div className="toolgroup__tools">
-          <ToolButton c={commandById("parts")} />
-        </div>
-        <span className="toolgroup__label">Library</span>
+      <Group label="Inspect" ids={["measure", "section"]} more={["#Check the model", "interference", "clear-interference", "explode", "min-radius", "overhang", "draft-analysis", "#Surface quality", "curvature", "zebra", "accessibility", "#Look", "component-colors", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />
       </div>
-      <Group label="Export" ids={["export"]} more={["export-step", "export-3mf", "export-stl", "screenshot", "history"]} />
+      <div className="toolbar__fixed">
+        <div className="toolgroup toolgroup--feature">
+          <div className="toolgroup__tools">
+            <ToolButton c={commandById("parts")} />
+          </div>
+          <span className="toolgroup__label">Library</span>
+        </div>
+        <Group label="Export" ids={["export"]} more={["export-step", "export-3mf", "export-stl", "screenshot", "history"]} />
+      </div>
     </div>
   );
 }

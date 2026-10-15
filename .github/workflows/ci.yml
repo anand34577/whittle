@@ -96,10 +96,11 @@ jobs:
           node tests/e2e/pictures.mjs http://localhost:4173/ test-results/pictures
           node tests/e2e/shapes.mjs http://localhost:4173/ test-results/shapes
           node tests/e2e/sketching.mjs http://localhost:4173/ test-results/sketching
+          node tests/e2e/audit.mjs http://localhost:4173/ test-results/audit
       - name: Self-hosted server (accounts, storage, versions)
         run: |
           cargo build --locked --manifest-path apps/server/Cargo.toml
-          WHITTLE_DATA=$(mktemp -d) WHITTLE_WEB=apps/web/dist WHITTLE_BIND=127.0.0.1:8099 apps/server/target/debug/whittle-server &
+          WHITTLE_DATA=$(mktemp -d) WHITTLE_WEB=apps/web/dist WHITTLE_BIND=127.0.0.1:8099 WHITTLE_PUBLIC_URL=http://127.0.0.1:8099 apps/server/target/debug/whittle-server &
           npx --yes wait-on@8 -t 60000 http://127.0.0.1:8099/api/health
           node tests/e2e/server.mjs http://127.0.0.1:8099/ test-results/server
       - uses: actions/upload-artifact@v4

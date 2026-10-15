@@ -24,7 +24,11 @@ export interface Quantity {
   dim: Dim;
   /** True when no unit was ever attached (e.g. `12` or `3 * 4`). */
   bare: boolean;
+  /** Built from pi or tau, so in an angle context it means radians (`pi / 2` is 90°, not 1.57°). */
+  radians?: boolean;
 }
+
+const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 
 type Node =
   | { t: "num"; value: number; unit?: string; pos: number }
@@ -144,7 +148,7 @@ export function parse(src: string): Node {
     if (t.k === "num") {
       const node: Node = { t: "num", value: parseFloat(t.v), pos: t.pos };
       const u = peek();
-      if (u.k === "id" && u.v in UNIT_LITERALS) {
+      if (u.k === "id" && has(UNIT_LITERALS, u.v)) {
         next();
         node.unit = u.v;
       }
@@ -189,7 +193,7 @@ export function referencedNames(src: string): string[] {
   const names = new Set<string>();
   const walk = (n: Node): void => {
     if (n.t === "id") {
-      if (!(n.name in CONSTANTS) && !(n.name in UNIT_LITERALS)) names.add(n.name);
+      if (!has(CONSTANTS, n.name) && !has(UNIT_LITERALS, n.name)) names.add(n.name);
     } else if (n.t === "call") n.args.forEach(walk);
     else if (n.t === "un") walk(n.arg);
     else if (n.t === "bin") {
@@ -215,6 +219,7 @@ const NONE: Dim = { len: 0, ang: 0 };
 /** Give a bare number the unit implied by `dim`, using the display units. */
 function adopt(q: Quantity, dim: Dim, ctx: EvalContext): Quantity {
   if (!q.bare || isDimensionless(dim)) return q;
+  if (q.radians && dim.len === 0 && dim.ang === 1) return { value: q.value, dim, bare: false };
   let factor: number;
   if (dim.len === 1 && dim.ang === 0) factor = LENGTH_TO_MM[ctx.lengthUnit];
   else if (dim.len === 0 && dim.ang === 1) factor = Math.PI / 180;
@@ -232,12 +237,14 @@ function sameDims(a: Quantity, b: Quantity, ctx: EvalContext, what: string): [Qu
 }
 
 function angleArg(q: Quantity, ctx: EvalContext, fn: string): number {
+  if (q.radians && (q.bare || isDimensionless(q.dim))) return q.value;
   if (q.bare) return adopt(q, KIND_DIM.angle, ctx).value;
   if (dimEquals(q.dim, KIND_DIM.angle) || isDimensionless(q.dim)) return q.value;
   throw new ExprError(`${fn}() needs an angle, got ${describeDim(q.dim)}`);
 }
 
 /** A bare number scaled by a plain ratio (pi, sin(30), a count) stays bare, so `10 * pi` still adopts the field's unit. */
+const keepsRadians = (a: Quantity, b: Quantity) => (a.radians || b.radians) && isDimensionless(a.dim) && isDimensionless(b.dim) ? true : undefined;
 const scalesBare = (a: Quantity, b: Quantity) => (a.bare || isDimensionless(a.dim)) && (b.bare || isDimensionless(b.dim)) && (a.bare || b.bare);
 
 function evalBinary(n: Extract<Node, { t: "bin" }>, ctx: EvalContext): Quantity {
@@ -246,15 +253,16 @@ function evalBinary(n: Extract<Node, { t: "bin" }>, ctx: EvalContext): Quantity 
   switch (n.op) {
     case "+":
       [a, b] = sameDims(a, b, ctx, "add");
-      return { value: a.value + b.value, dim: a.dim, bare: a.bare && b.bare };
+      return { value: a.value + b.value, dim: a.dim, bare: a.bare && b.bare, radians: keepsRadians(a, b) };
     case "-":
       [a, b] = sameDims(a, b, ctx, "subtract");
-      return { value: a.value - b.value, dim: a.dim, bare: a.bare && b.bare };
+      return { value: a.value - b.value, dim: a.dim, bare: a.bare && b.bare, radians: keepsRadians(a, b) };
     case "*":
       return {
         value: a.value * b.value,
         dim: { len: a.dim.len + b.dim.len, ang: a.dim.ang + b.dim.ang },
         bare: scalesBare(a, b),
+        radians: keepsRadians(a, b),
       };
     case "/":
       if (b.value === 0) throw new ExprError("Division by zero", n.pos);
@@ -262,6 +270,7 @@ function evalBinary(n: Extract<Node, { t: "bin" }>, ctx: EvalContext): Quantity 
         value: a.value / b.value,
         dim: { len: a.dim.len - b.dim.len, ang: a.dim.ang - b.dim.ang },
         bare: scalesBare(a, b),
+        radians: keepsRadians(a, b),
       };
     case "^": {
       if (!isDimensionless(b.dim)) throw new ExprError("Exponents must be plain numbers", n.pos);
@@ -282,7 +291,7 @@ function evalNode(n: Node, ctx: EvalContext): Quantity {
       return { value: n.value * u.factor, dim: u.dim, bare: false };
     }
     case "id": {
-      if (n.name in CONSTANTS) return { value: CONSTANTS[n.name]!, dim: NONE, bare: false };
+      if (has(CONSTANTS, n.name)) return { value: CONSTANTS[n.name]!, dim: NONE, bare: false, radians: true };
       const q = ctx.lookup(n.name);
       if (!q) throw new ExprError(`There's no parameter called "${n.name}"`, n.pos);
       return q;
@@ -339,9 +348,14 @@ function callFn(name: string, args: Quantity[], ctx: EvalContext, pos: number): 
       return { ...args[0]!, value: Math.abs(args[0]!.value) };
     case "round":
     case "floor":
-    case "ceil":
+    case "ceil": {
       arity(1);
-      return { ...args[0]!, value: Math[name](args[0]!.value) };
+      // Round in the units people read: `round(1.4 in)` is 1 in, not 36 mm.
+      const a = args[0]!;
+      const unit = a.dim.len === 1 && a.dim.ang === 0 ? LENGTH_TO_MM[ctx.lengthUnit] : a.dim.len === 0 && a.dim.ang === 1 ? Math.PI / 180 : 1;
+      const r = Math[name](a.value / unit) * unit;
+      return { ...a, value: r };
+    }
     case "min":
     case "max": {
       if (args.length < 1) throw new ExprError(`${name}() needs at least one value`, pos);
@@ -366,6 +380,7 @@ export function evaluate(src: string | number, kind: QuantityKind, ctx: EvalCont
     let q = evalNode(parse(src), ctx);
     const want = KIND_DIM[kind];
     if (q.bare) q = adopt(q, want, ctx);
+    else if (q.radians && isDimensionless(q.dim) && dimEquals(want, KIND_DIM.angle)) q = { value: q.value, dim: want, bare: false };
     if (!dimEquals(q.dim, want)) {
       return {
         ok: false,

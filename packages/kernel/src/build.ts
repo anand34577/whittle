@@ -11,6 +11,7 @@
 import {
   type BodyOp,
   type Evaluator,
+  type FaceRef,
   type Feature,
   type HoleFeature,
   type Id,
@@ -72,7 +73,7 @@ import { constructFrame } from "./construct";
 import { surfaceTool, prismSurface, revolveSurface } from "./surface";
 import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
-import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
+import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
 
 interface SketchBuilt {
   frame: SketchFrame;
@@ -318,6 +319,22 @@ export function lastBody(bodies: Map<Id, Shape3D>): Id | undefined {
 }
 
 /** Apply a body operation (new / join / cut / intersect) for a tool shape. */
+/** Fuse many shapes pairwise, so the work grows with log(n) layers rather than n ever-bigger fuses. */
+function fuseTree(shapes: Shape3D[]): Shape3D {
+  if (shapes.length === 1) return shapes[0]!;
+  const mid = shapes.length >> 1;
+  return fuseTree(shapes.slice(0, mid)).fuse(fuseTree(shapes.slice(mid)));
+}
+
+/** Volume of a solid, or 0 for shapes that have none (surfaces). */
+function safeVolume(s: Shape3D): number {
+  try {
+    return measureShapeVolumeProperties(s).volume;
+  } catch {
+    return 0;
+  }
+}
+
 export function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
   if (op === "new") {
     bodies.set(featureId, tool);
@@ -338,15 +355,21 @@ export function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, tar
   }
   const ids = target ? [target] : [...bodies.keys()];
   let touched = 0;
+  let changed = 0;
   for (const id of ids) {
     const body = bodies.get(id)!;
     if (!bboxOverlap(body, tool)) continue;
     touched++;
-    bodies.set(id, clean(op === "cut" ? body.cut(tool) : body.intersect(tool)));
+    const before = op === "cut" ? safeVolume(body) : 0;
+    const out = clean(op === "cut" ? body.cut(tool) : body.intersect(tool));
+    bodies.set(id, out);
+    // A cut that only grazes a face leaves the volume as it was.
+    if (op !== "cut" || Math.abs(safeVolume(out) - before) > Math.max(1e-6, before * 1e-9)) changed++;
   }
   if (touched === 0) {
     throw new FeatureError(op === "cut" ? "The cut doesn't touch any body. Try flipping its direction." : "The shapes don't overlap.");
   }
+  if (op === "cut" && changed === 0) return "The cut removed nothing: it only touches the body. Try Flip direction, or reach further into it.";
   return;
 }
 
@@ -526,9 +549,62 @@ export class Builder {
   /** Build the active timeline, reusing cached steps. */
   /** The document being built (joints read components and other joints from it). */
   private curDoc: WhittleDocument | null = null;
+  /** The snapshots of the walk in progress (one per feature built so far), for feature patterns. */
+  private walkSnaps: Snapshot[] = [];
+
+  /**
+   * Repeat earlier features: whatever each one added to or cut from a body is copied by
+   * copiesOf and joined or cut again, in timeline order, so a boss with a hole repeats as a boss with a hole.
+   */
+  private repeatFeatures(bodies: Map<Id, Shape3D>, ids: Id[], selfId: Id, copiesOf: (s: Shape3D) => Shape3D[]): void {
+    const feats = this.curDoc!.features;
+    const selfIndex = feats.findIndex((x) => x.id === selfId);
+    const sources = ids
+      .map((id) => feats.findIndex((x) => x.id === id))
+      .filter((i) => i >= 0 && i < selfIndex)
+      .sort((a, b) => a - b);
+    if (sources.length === 0) throw new FeatureError("Pick the earlier features to repeat.", undefined, true);
+    for (const i of sources) {
+      const after = this.walkSnaps[i];
+      const before = i > 0 ? this.walkSnaps[i - 1] : undefined;
+      const name = feats[i]!.name;
+      if (!after || after.status.state === "suppressed") continue;
+      if (after.status.state === "error" || after.status.state === "incomplete") throw new FeatureError(`${name} has a problem, so it can't be repeated.`);
+      let any = false;
+      for (const [bodyId, nowShape] of after.bodies) {
+        const was = before?.bodies.get(bodyId);
+        if (!was) {
+          // A feature that makes a new body has no body to repeat into.
+          throw new FeatureError(`${name} makes a new body. Repeat features that join to or cut a body, or pattern the body itself.`);
+        }
+        const added = clean(nowShape.cut(was));
+        const removed = clean(was.cut(nowShape));
+        const addedV = safeVolume(added);
+        const removedV = safeVolume(removed);
+        if (addedV < 1e-9 && removedV < 1e-9) continue;
+        any = true;
+        let acc = bodies.get(bodyId);
+        if (!acc) throw new FeatureError(`The body that ${name} changed no longer exists.`);
+        const adds = addedV >= 1e-9 ? copiesOf(added) : [];
+        const rems = removedV >= 1e-9 ? copiesOf(removed) : [];
+        if (rems.length === 0) acc = acc.fuse(fuseTree(adds));
+        else if (adds.length === 0) acc = acc.cut(fuseTree(rems));
+        else {
+          // Both added and removed: keep each copy's order (a copy's cut may reach an earlier copy's addition).
+          for (let k = 0; k < Math.max(adds.length, rems.length); k++) {
+            if (adds[k]) acc = acc.fuse(adds[k]!);
+            if (rems[k]) acc = acc.cut(rems[k]!);
+          }
+        }
+        bodies.set(bodyId, clean(acc));
+      }
+      if (!any) throw new FeatureError(`${name} didn't change any body, so there is nothing to repeat.`);
+    }
+  }
 
   private walk(doc: WhittleDocument) {
     this.curDoc = doc;
+    this.walkSnaps = [];
     const compSig = JSON.stringify(Object.entries(doc.bodies).map(([k, m]) => [k, m.component, m.grounded]));
     const ev = createEvaluator(doc.parameters, doc.units);
     const paramSig = JSON.stringify([...ev.params.entries()]) + doc.units;
@@ -543,6 +619,7 @@ export class Builder {
     };
     let rebuilt = 0;
     const nextCache: Snapshot[] = [];
+    this.walkSnaps = nextCache;
 
     for (let i = 0; i < end; i++) {
       const f = doc.features[i]!;
@@ -676,9 +753,14 @@ export class Builder {
         if (!profile && !surf) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : "The sketch has no closed shapes yet. Draw a rectangle or circle first.");
         let tool: Shape3D;
         if (f.type === "extrude") {
-          const d = f.extent === "through" ? throughDistance(bodies, sk.frame) : ev.num(f.distance, "length", "Distance");
+          const d =
+            f.extent === "through"
+              ? throughDistance(bodies, sk.frame)
+              : f.extent === "face"
+                ? distanceToFace(bodies, f.toFace, sk.frame)
+                : ev.num(f.distance, "length", "Distance");
           if (Math.abs(d) < 1e-6) throw new FeatureError("The distance can't be zero.");
-          const sign = f.flip ? -1 : 1;
+          const sign = f.flip && f.extent !== "face" ? -1 : 1;
           let frame = sk.frame;
           let dist = d * sign;
           if (f.extent === "symmetric") {
@@ -936,13 +1018,18 @@ export class Builder {
       }
 
       case "mirror": {
-        const id = f.bodyId ?? lastBody(bodies);
-        if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to mirror.");
-        const src = bodies.get(id)!;
         const off = f.offset ? ev.num(f.offset, "length", "Offset") : 0;
         const ref = f.planeRef ? sketches.get(f.planeRef)?.frame : undefined;
         if (f.planeRef && !ref) throw new FeatureError("The construction plane is missing. Pick another plane.");
-        const copy = ref ? src.clone().mirror(ref.normal, add(ref.origin, scale(ref.normal, off))) : src.clone().mirror(f.plane, scale(MIRROR_NORMALS[f.plane], off));
+        const mirrorOf = (s: Shape3D) => (ref ? s.clone().mirror(ref.normal, add(ref.origin, scale(ref.normal, off))) : s.clone().mirror(f.plane, scale(MIRROR_NORMALS[f.plane], off)));
+        if (f.features?.length) {
+          this.repeatFeatures(bodies, f.features, f.id, (s) => [mirrorOf(s)]);
+          return;
+        }
+        const id = f.bodyId ?? lastBody(bodies);
+        if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to mirror.");
+        const src = bodies.get(id)!;
+        const copy = mirrorOf(src);
         if (f.merge) {
           bodies.set(id, clean(src.fuse(copy)));
         } else bodies.set(f.id, copy);
@@ -950,39 +1037,47 @@ export class Builder {
       }
 
       case "pattern": {
+        const featureMode = !!f.features?.length;
         const id = f.bodyId ?? lastBody(bodies);
-        if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to pattern.");
+        if (!featureMode && (!id || !bodies.has(id))) throw new FeatureError("Pick a body to pattern.");
         const count = ev.num(f.count, "count", "Count");
         if (count < 2 || count > 200) throw new FeatureError("The count must be between 2 and 200.");
-        const src = bodies.get(id)!;
         const axisFrame = f.axisRef ? sketches.get(f.axisRef)?.frame : undefined;
         if (f.axisRef && !axisFrame) throw new FeatureError("The construction axis is missing. Pick another axis.");
         const axis = axisFrame ? axisFrame.normal : AXES[f.axis];
         const axisAt: Vec3 = axisFrame ? axisFrame.origin : [0, 0, 0];
-        const copies: Shape3D[] = [];
-        if (f.pattern === "path") copies.push(...patternOnPath(f, src, sketches, ev));
-        else if (f.pattern === "linear") {
-          const spacing = ev.num(f.spacing, "length", "Spacing");
-          const count2 = f.count2 ? Math.round(ev.num(f.count2, "count", "Second count")) : 1;
-          if (count2 < 1 || count * count2 > 400) throw new FeatureError("A grid can have at most 400 copies.");
-          if (count2 > 1 && f.axis2 === f.axis) throw new FeatureError("Pick a different second direction.");
-          const axis2 = AXES[f.axis2 ?? (f.axis === "x" ? "y" : "x")];
-          const spacing2 = count2 > 1 ? ev.num(f.spacing2 ?? f.spacing, "length", "Second spacing") : 0;
-          for (let j = 0; j < count2; j++) {
-            for (let i = 0; i < count; i++) {
-              if (i || j) copies.push(src.clone().translate(add(scale(axis, spacing * i), scale(axis2, spacing2 * j))));
+        // The copies of one shape, in a fixed order (the original is left alone).
+        const copiesOf = (src: Shape3D): Shape3D[] => {
+          const copies: Shape3D[] = [];
+          if (f.pattern === "path") copies.push(...patternOnPath(f, src, sketches, ev));
+          else if (f.pattern === "linear") {
+            const spacing = ev.num(f.spacing, "length", "Spacing");
+            const count2 = f.count2 ? Math.round(ev.num(f.count2, "count", "Second count")) : 1;
+            if (count2 < 1 || count * count2 > 400) throw new FeatureError("A grid can have at most 400 copies.");
+            if (count2 > 1 && f.axis2 === f.axis) throw new FeatureError("Pick a different second direction.");
+            const axis2 = AXES[f.axis2 ?? (f.axis === "x" ? "y" : "x")];
+            const spacing2 = count2 > 1 ? ev.num(f.spacing2 ?? f.spacing, "length", "Second spacing") : 0;
+            for (let j = 0; j < count2; j++) {
+              for (let i = 0; i < count; i++) {
+                if (i || j) copies.push(src.clone().translate(add(scale(axis, spacing * i), scale(axis2, spacing2 * j))));
+              }
             }
+          } else {
+            const total = deg(ev.num(f.angle, "angle", "Angle"));
+            const full = Math.abs(Math.abs(total) - 360) < 1e-6;
+            const stepDeg = full ? total / count : total / (count - 1);
+            for (let i = 1; i < count; i++) copies.push(src.clone().rotate(stepDeg * i, axisAt, axis));
           }
-        } else {
-          const total = deg(ev.num(f.angle, "angle", "Angle"));
-          const full = Math.abs(Math.abs(total) - 360) < 1e-6;
-          const stepDeg = full ? total / count : total / (count - 1);
-          for (let i = 1; i < count; i++) copies.push(src.clone().rotate(stepDeg * i, axisAt, axis));
+          return copies;
+        };
+        if (featureMode) {
+          this.repeatFeatures(bodies, f.features!, f.id, copiesOf);
+          return;
         }
+        const src = bodies.get(id!)!;
+        const copies = copiesOf(src);
         if (f.merge) {
-          let acc = src;
-          for (const c of copies) acc = acc.fuse(c);
-          bodies.set(id, clean(acc));
+          bodies.set(id!, clean(src.fuse(fuseTree(copies))));
         } else {
           bodies.set(f.id, makeCompound(copies) as Shape3D);
         }
@@ -1022,7 +1117,7 @@ export class Builder {
       case "import": {
         const shape = this.imports.get(importKey(f));
         if (!shape) throw new FeatureError(this.importErrors.get(importKey(f)) ?? FRIENDLY.import!);
-        const s = ev.num(f.scale, "count", "Scale");
+        const s = ev.num(f.scale, "number", "Scale");
         if (s <= 0) throw new FeatureError("The scale must be greater than zero.");
         bodies.set(f.id, Math.abs(s - 1) > 1e-12 ? shape.clone().scale(s, [0, 0, 0]) : shape.clone());
         return;
@@ -1084,6 +1179,20 @@ export class Builder {
 const MIRROR_NORMALS: Record<"XY" | "XZ" | "YZ", Vec3> = { XY: [0, 0, 1], XZ: [0, 1, 0], YZ: [1, 0, 0] };
 
 /** Long enough to pass through every body from the sketch plane. */
+/** The signed distance along the sketch's normal to a flat face's plane (negative when the face is behind the sketch). */
+function distanceToFace(bodies: Map<Id, Shape3D>, ref: FaceRef | undefined, frame: SketchFrame): number {
+  if (!ref) throw new FeatureError("Click the face to extrude up to.", undefined, true);
+  const res = resolveFace(bodyForRefs(bodies, ref.bodyId), ref);
+  if (!res) throw new FeatureError("The face to extrude up to no longer exists. Click another face.");
+  const info = faceInfo(res.item);
+  if (info.surface !== "PLANE") throw new FeatureError("Extruding up to a face needs a flat face.");
+  const along = dot(frame.normal, info.normal);
+  if (Math.abs(along) < 1e-6) throw new FeatureError("That face is parallel to the sketch's direction, so the extrusion would never reach it. Click a face that faces across it.");
+  const t = dot(subv(info.center, frame.origin), info.normal) / along;
+  if (Math.abs(t) < 1e-6) throw new FeatureError("The sketch is already on that face, so there's no distance to extrude.");
+  return t;
+}
+
 function throughDistance(bodies: Map<Id, Shape3D>, frame: SketchFrame): number {
   if (bodies.size === 0) throw new FeatureError("There's nothing to go through yet. Create a body first, or use a distance.");
   let far = 0;

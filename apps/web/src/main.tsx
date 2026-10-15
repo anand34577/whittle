@@ -15,9 +15,11 @@ import { App } from "./App";
 import { useApp } from "./state/store";
 import { designApi } from "./state/designApi";
 import { dimensionPick } from "./state/constraintOps";
+import { COMMANDS } from "./state/commands";
+import { handlePick } from "./state/actions";
 
 // Debugging, end-to-end tests and scripting: `await whittle.api.run("get_design", {})`.
-(window as unknown as { whittle: unknown }).whittle = { useApp, api: designApi, dimensionPick };
+(window as unknown as { whittle: unknown }).whittle = { useApp, api: designApi, dimensionPick, commands: COMMANDS, handlePick };
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -151,7 +151,7 @@ pub async fn backup(config: &Config, file: &Path) -> Result<String, String> {
     let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     for f in &files {
         let rel = f.strip_prefix(&config.data).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
-        if rel.ends_with(".pending") || rel.contains(".tmp") {
+        if rel.contains(".pending") || rel.contains(".tmp") {
             continue;
         }
         zip.start_file(rel, stored).map_err(|e| e.to_string())?;
@@ -276,7 +276,7 @@ pub async fn doctor(config: &Config) -> (String, bool) {
         check(Some(reachable), format!("single sign-on provider reachable ({url})"));
     }
     if config.public_url.is_none() {
-        check(None, "WHITTLE_PUBLIC_URL isn't set; links in emails use the address people browse to".into());
+        check(None, "WHITTLE_PUBLIC_URL isn't set: \"Forgot password?\" stays off, and links in emails sent by administrators use the address they browse to".into());
     }
     (lines.join("\n"), ok)
 }
