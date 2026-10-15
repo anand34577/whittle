@@ -148,3 +148,17 @@ describe("inspect", () => {
     expect(rods[0]!.concave).toBe(false);
   });
 });
+
+describe("contact sets", () => {
+  it("warns when a driven joint runs the part into another body", () => {
+    const doc = newDocument();
+    const a = box(doc);
+    box(doc, ["30", "0", "0"]);
+    const clear = joint(doc, a.id, "slider", { axis: "x", distance: "5", collide: true });
+    expect(status(regen(doc), clear.id).state).toBe("ok");
+    clear.distance = "25";
+    const r = regen(doc);
+    expect(status(r, clear.id).state).toBe("warning");
+    expect(status(r, clear.id).message).toMatch(/Collision/);
+  });
+});

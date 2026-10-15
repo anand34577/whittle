@@ -272,7 +272,7 @@ export function startCombine() {
 export function importModel() {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".step,.stp,.stl";
+  input.accept = ".step,.stp,.stl,.whittle";
   input.onchange = () => {
     const file = input.files?.[0];
     if (file) void importFile(file);
@@ -282,8 +282,8 @@ export function importModel() {
 
 export async function importFile(file: File) {
   const ext = file.name.toLowerCase().split(".").pop();
-  const format = ext === "stl" ? "stl" : ext === "step" || ext === "stp" ? "step" : null;
-  if (!format) return toast("warn", "Only STEP (.step, .stp) and STL files can be imported.");
+  const format = ext === "stl" ? "stl" : ext === "step" || ext === "stp" ? "step" : ext === "whittle" ? "whittle" : null;
+  if (!format) return toast("warn", "Only STEP (.step, .stp), STL and Whittle (.whittle) files can be inserted.");
   if (file.size > 40 * 1024 * 1024) return toast("warn", "That file is larger than 40 MB. Try a simplified version.");
   const bytes = new Uint8Array(await file.arrayBuffer());
   let bin = "";

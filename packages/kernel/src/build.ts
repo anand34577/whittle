@@ -21,6 +21,7 @@ import {
   type WhittleDocument,
   activeEnd,
   createEvaluator,
+  deserializeDocument,
   entityOutline,
   expandSketch,
   frameAxes,
@@ -66,7 +67,7 @@ import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } 
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { constructFrame } from "./construct";
-import { CELL_INFO, alignBody, curveTool, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
+import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
 
@@ -459,7 +460,14 @@ export class Builder {
       const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
       const blob = new Blob([bytes]);
       try {
-        this.imports.set(key, f.format === "step" ? ((await importSTEP(blob)) as Shape3D) : stlToShape(bytes));
+        if (f.format === "whittle") {
+          const sub = deserializeDocument(bytes);
+          const nested = new Builder();
+          await nested.prepareImports(sub);
+          const shapes = [...nested.shapes(sub).values()];
+          if (!shapes.length) throw new Error("That design has no bodies to bring in.");
+          this.imports.set(key, (shapes.length === 1 ? shapes[0]! : makeCompound(shapes)) as Shape3D);
+        } else this.imports.set(key, f.format === "step" ? ((await importSTEP(blob)) as Shape3D) : stlToShape(bytes));
       } catch (e) {
         this.importErrors.set(key, e instanceof Error && !/^\d+$/.test(e.message) ? e.message : FRIENDLY.import!);
       }
@@ -780,9 +788,10 @@ export class Builder {
       case "split": {
         const id = f.bodyId ?? lastBody(bodies);
         if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to split.");
-        const off = ev.num(f.offset, "length", "Offset");
+        let off = ev.num(f.offset, "length", "Offset");
         const ref = f.planeRef ? sketches.get(f.planeRef)?.frame : undefined;
         if (f.planeRef && !ref) throw new FeatureError("The construction plane is missing. Pick another plane.");
+        if (f.silhouette) off = widestSection(bodies.get(id)!, ref ? planeFromFrame(ref) : f.plane);
         const parts = bodies.get(id)!.split(ref ? planeFromFrame(ref) : f.plane, off);
         const above = parts.positive as Shape3D | null;
         const below = parts.negative as Shape3D | null;
@@ -853,12 +862,15 @@ export class Builder {
           list.push(res.item);
           byBody.set(ref.bodyId, list);
         }
+        const end = f.type === "fillet" && f.radius2 ? ev.num(f.radius2, "length", "End radius") : null;
+        if (end !== null && end <= 0) throw new FeatureError("The end radius must be greater than zero.");
+        const ratio = end !== null ? end / value : 1;
         const run = (size: number): Map<Id, Shape3D> => {
           const out = new Map<Id, Shape3D>();
           for (const [id, edges] of byBody) {
             const body = bodies.get(id)!;
-            const pickFn = (e: Edge) => (edges.some((x) => x.isSame(e)) ? size : null);
-            out.set(id, f.type === "fillet" ? body.fillet(pickFn) : body.chamfer(pickFn));
+            const pickFn = (e: Edge): number | [number, number] | null => (edges.some((x) => x.isSame(e)) ? (end !== null ? [size, size * ratio] : size) : null);
+            out.set(id, f.type === "fillet" ? body.fillet(pickFn) : body.chamfer(pickFn as (e: Edge) => number | null));
           }
           return out;
         };
@@ -1193,6 +1205,13 @@ export function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator):
   return w;
 }
 
+/** Every open line in a path sketch (a branching pipe follows them all); a lone outline counts as one path. */
+function sketchPaths(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire[] {
+  const opens = f.entities.filter((e) => e.type === "polyline" && e.open && !e.construction);
+  if (opens.length < 2) return [sketchPath(f, frame, ev)];
+  return opens.map((e) => sketchPath({ ...f, entities: [e] }, frame, ev));
+}
+
 /** A round or square tube along a path: the section is made here, square to the path at its start. */
 function pipeTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator): Shape3D {
   const pipe = f.pipe!;
@@ -1203,14 +1222,19 @@ function pipeTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator
   if (size <= 0) throw new FeatureError("The pipe size must be greater than zero.");
   if (wall < 0 || wall * 2 >= size) throw new FeatureError("The wall must be at least zero and less than half the size.");
   const config = { frenet: false, transitionMode: "round" as const };
+  const wires = path.wire ? [path.wire] : sketchPaths(path.source!, path.frame, ev);
   const solid = (d: number): Shape3D => {
-    const wire = path.wire ?? sketchPath(path.source!, path.frame, ev);
-    const at = wire.startPoint;
-    const plane = new Plane(at, null, wire.tangentAt(0));
-    const h = d / 2;
-    const draw = pipe.shape === "circle" ? drawCircle(h) : polyDrawing([[-h, -h], [h, -h], [h, h], [-h, h]]);
-    const section = (draw.sketchOnPlane(plane) as unknown as AnySketch).wire!;
-    return genericSweep(section, wire, config) as Shape3D;
+    let all: Shape3D | null = null;
+    for (const wire of wires) {
+      const at = wire.startPoint;
+      const plane = new Plane(at, null, wire.tangentAt(0));
+      const h = d / 2;
+      const draw = pipe.shape === "circle" ? drawCircle(h) : polyDrawing([[-h, -h], [h, -h], [h, h], [-h, h]]);
+      const section = (draw.sketchOnPlane(plane) as unknown as AnySketch).wire!;
+      const one = genericSweep(section, wire, config) as Shape3D;
+      all = all ? all.fuse(one) : one;
+    }
+    return all!;
   };
   try {
     let out = solid(size);

@@ -61,6 +61,33 @@ export function joinKeepingFaces(a: Shape3D, b: Shape3D): Shape3D {
   }
 }
 
+/** The plane offset where a body is widest across (its parting line along that plane's normal). */
+export function widestSection(body: Shape3D, plane: Parameters<Shape3D["split"]>[0]): number {
+  const [lo, hi] = body.boundingBox.bounds;
+  const reach = Math.max(...lo.map(Math.abs), ...hi.map(Math.abs)) * 1.0;
+  const n = 40;
+  const vols: { h: number; v: number }[] = [];
+  for (let i = 0; i <= n; i++) {
+    const h = -reach + (2 * reach * i) / n;
+    try {
+      const parts = body.split(plane, h);
+      const neg = parts.negative as Shape3D | null;
+      vols.push({ h, v: neg ? volume(neg) : parts.positive ? 0 : volume(body) });
+    } catch {
+      /* plane misses the body */
+    }
+  }
+  let best = { h: 0, area: -1 };
+  for (let i = 1; i + 1 < vols.length; i++) {
+    const area = (vols[i + 1]!.v - vols[i - 1]!.v) / (vols[i + 1]!.h - vols[i - 1]!.h);
+    // Ignore planes that miss the body (volume constant 0 or total).
+    if (vols[i - 1]!.v === vols[i + 1]!.v) continue;
+    if (area > best.area) best = { h: vols[i]!.h, area };
+  }
+  if (best.area < 0) throw new FeatureError("The plane doesn't cross this body.");
+  return best.h;
+}
+
 /** Cells of the last Boundary Fill per feature, for the editor. */
 export const CELL_INFO = new Map<Id, { volume: number; center: Vec3 }[]>();
 
@@ -442,9 +469,31 @@ export function applyJoint(f: JointFeature, bodies: Map<Id, Shape3D>, sketches: 
     else if (f.joint === "planar") t = add(scale(xDir, v.dist), scale(yDir, v.dist2));
     return t.some((c) => Math.abs(c) > 1e-12) ? o.translate(t) : o;
   };
-  for (const b of componentBodies(doc, id)) {
+  const group = componentBodies(doc, id);
+  for (const b of group) {
     const s = bodies.get(b);
     if (s && b !== f.fixedId && !doc.bodies[b]?.grounded) bodies.set(b, move(s));
+  }
+  if (f.collide && !warning) {
+    for (const [other, shape] of bodies) {
+      if (group.includes(other) || other === f.fixedId) continue;
+      for (const g of group) {
+        const mine = bodies.get(g);
+        if (!mine) continue;
+        const [alo, ahi] = mine.boundingBox.bounds;
+        const [blo, bhi] = shape.boundingBox.bounds;
+        if ([0, 1, 2].some((k) => ahi[k]! < blo[k]! - 1e-6 || bhi[k]! < alo[k]! - 1e-6)) continue;
+        try {
+          if (volume(mine.intersect(shape) as Shape3D) > 1e-3) {
+            warning = `Collision: ${doc.bodies[g]?.name ?? "the moving body"} runs into ${doc.bodies[other]?.name ?? "another body"}.`;
+            break;
+          }
+        } catch {
+          /* touching only */
+        }
+      }
+      if (warning) break;
+    }
   }
   return warning;
 }

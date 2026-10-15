@@ -250,7 +250,11 @@ function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
         )}
       </div>
       {f.type === "fillet" ? (
-        <ExprInput label="Radius" kind="length" value={f.radius} autoFocus min={0} onChange={(v) => upd(f, "Radius", (d) => void ((d as FilletFeature).radius = v))} />
+        <>
+          <ExprInput label={f.radius2 ? "Start radius" : "Radius"} kind="length" value={f.radius} autoFocus min={0} onChange={(v) => upd(f, "Radius", (d) => void ((d as FilletFeature).radius = v))} />
+          <Toggle label="Variable radius" hint="The radius changes along each edge, from the start radius to the end radius" checked={!!f.radius2} onChange={(on) => upd(f, "Variable", (d) => void ((d as FilletFeature).radius2 = on ? String(Number.parseFloat(f.radius) * 2 || 2) : undefined))} />
+          {f.radius2 && <ExprInput label="End radius" kind="length" value={f.radius2} min={0} onChange={(v) => upd(f, "End radius", (d) => void ((d as FilletFeature).radius2 = v))} />}
+        </>
       ) : (
         <ExprInput label="Distance" kind="length" value={f.distance} autoFocus min={0} onChange={(v) => upd(f, "Distance", (d) => void ((d as ChamferFeature).distance = v))} />
       )}
@@ -665,6 +669,7 @@ function SplitEditor({ f }: { f: SplitFeature }) {
       />
       <ExprInput label="Offset" kind="length" value={f.offset} autoFocus onChange={(v) => upd(f, "Offset", (d) => void (d.offset = v))} />
       <Toggle label="Only split the faces" checked={!!f.facesOnly} onChange={(v) => upd(f, "Split faces", (d) => void (d.facesOnly = v))} />
+      <Toggle label="At the widest outline" hint="Cut where the body is widest across the plane's normal: the parting line for a mould" checked={!!f.silhouette} onChange={(v) => upd(f, "Silhouette", (d) => void (d.silhouette = v))} />
       {!f.facesOnly && <Segmented
         label="Keep"
         value={f.keep}
@@ -1113,6 +1118,7 @@ function JointEditor({ f }: { f: JointFeature }) {
           unit={mainIsTurn ? "degrees" : "length"}
         />
       )}
+      {t !== "rigid" && <Toggle label="Warn on collisions" hint="Flag the joint when the moving part runs into another body" checked={!!f.collide} onChange={(v) => set("Collisions", (d) => void (d.collide = v))} />}
       {t !== "rigid" && !ball && (
         <>
           <Toggle label="Limit the travel" checked={f.limited} onChange={(v) => set("Limits", (d) => void (d.limited = v))} />

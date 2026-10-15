@@ -233,3 +233,75 @@ describe("split faces, path and axis patterns", () => {
     expect(r.bodies.find((x) => x.id === mi.id)!.bbox[0][0]).toBeCloseTo(28, 3);
   });
 });
+
+describe("variable radius fillet", () => {
+  it("rounds an edge with a radius that grows along it", async () => {
+    const { makeFillet } = await import("@whittle/core");
+    const volumeWith = (r1: string, r2?: string) => {
+      const doc = newDocument();
+      const b = prim(doc, "box", { width: "20", depth: "20", height: "20" });
+      const body = regen(doc).bodies[0]!;
+      const e = body.edges.find((x) => Math.abs(x.tangent[2]) > 0.99)!;
+      const f = push(doc, makeFillet(doc) as import("@whittle/core").FilletFeature);
+      f.edges = [{ bodyId: b.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length }];
+      f.radius = r1;
+      if (r2) f.radius2 = r2;
+      const r = regen(doc);
+      expect(status(r, f.id).state, status(r, f.id).message).toBe("ok");
+      return r.bodies[0]!.volume;
+    };
+    const small = volumeWith("2");
+    const big = volumeWith("4");
+    const varied = volumeWith("2", "4");
+    expect(varied).toBeLessThan(small);
+    expect(varied).toBeGreaterThan(big);
+  });
+});
+
+describe("silhouette split, branching pipes and derived designs", () => {
+  it("splits a sphere at its widest outline", () => {
+    const doc = newDocument();
+    const s = prim(doc, "sphere", { radius: "10" });
+    const sp = push(doc, makeSplit(doc, s.id) as SplitFeature);
+    sp.plane = "XY";
+    sp.silhouette = true;
+    sp.keep = "both";
+    const r = regen(doc);
+    expect(status(r, sp.id).state, status(r, sp.id).message).toBe("ok");
+    expect(r.bodies).toHaveLength(2);
+    // Each half is about half the sphere (an off-center cut would be lopsided).
+    const [a, b] = r.bodies.map((x) => x.volume);
+    expect(Math.abs(a! - b!) / (a! + b!)).toBeLessThan(0.08);
+  });
+
+  it("a pipe follows every open line of its sketch", async () => {
+    const { makePipe } = await import("@whittle/core");
+    const doc = newDocument();
+    const s = sketch(doc, [
+      { id: uid("e"), type: "polyline", open: true, points: [["0", "0"], ["30", "0"]] },
+      { id: uid("e"), type: "polyline", open: true, points: [["0", "0"], ["0", "30"]] },
+    ]);
+    const p = push(doc, makePipe(doc, s.id) as import("@whittle/core").SweepFeature, true);
+    p.pipe = { shape: "circle", size: "4", wall: "0" };
+    const r = regen(doc);
+    expect(status(r, p.id).state, status(r, p.id).message).toBe("ok");
+    // Two 30 mm rods of 4 mm diameter (they share an end, so nearly nothing overlaps).
+    expect(r.bodies[0]!.volume).toBeGreaterThan(2 * Math.PI * 4 * 30 * 0.9);
+  });
+
+  it("brings in another design's bodies", async () => {
+    const { serializeDocument, makeImport } = await import("@whittle/core");
+    const sub = newDocument();
+    prim(sub, "box", { width: "10", depth: "10", height: "10" });
+    const bytes = serializeDocument(sub);
+    let bin = "";
+    for (const b of bytes) bin += String.fromCharCode(b);
+    const doc = newDocument();
+    const imp = push(doc, makeImport(doc, "part.whittle", "whittle", btoa(bin)), true);
+    const builder = new Builder();
+    await builder.prepareImports(doc);
+    const r = builder.regen(doc, "final");
+    expect(status(r, imp.id).state, status(r, imp.id).message).toBe("ok");
+    expect(r.bodies[0]!.volume).toBeCloseTo(1000, 0);
+  });
+});

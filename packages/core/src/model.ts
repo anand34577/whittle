@@ -381,6 +381,8 @@ export interface FilletFeature extends FeatureBase {
   type: "fillet";
   edges: EdgeRef[];
   radius: Expr;
+  /** Variable radius: the radius at the end of each edge (the start uses `radius`). */
+  radius2?: Expr;
 }
 
 export interface ChamferFeature extends FeatureBase {
@@ -517,6 +519,8 @@ export interface SplitFeature extends FeatureBase {
   keep: "both" | "above" | "below";
   /** Only cut the faces along the plane; keep one body. */
   facesOnly?: boolean;
+  /** Cut where the body is widest along the plane's normal (a mould parting line); the offset is ignored. */
+  silhouette?: boolean;
   /** Split along a construction plane instead of an origin plane. */
   planeRef?: Id;
 }
@@ -569,6 +573,8 @@ export interface JointFeature extends FeatureBase {
   distance2?: Expr;
   angle2?: Expr;
   angle3?: Expr;
+  /** Contact set: warn when the moving body (or its component) runs into another body. */
+  collide?: boolean;
   /** Motion link: this joint's main value follows another joint's (degrees or length) times a ratio. */
   link?: { joint: Id; ratio: Expr };
   /** Where the joint axis passes through: the moving body's center, or a point. */
@@ -604,7 +610,8 @@ export interface CombineFeature extends FeatureBase {
 /** A body imported from a STEP or STL file (embedded in the design). */
 export interface ImportFeature extends FeatureBase {
   type: "import";
-  format: "step" | "stl";
+  /** "whittle" brings in every body of another Whittle design (a derived copy). */
+  format: "step" | "stl" | "whittle";
   fileName: string;
   /** Base64 file contents. */
   data: string;
