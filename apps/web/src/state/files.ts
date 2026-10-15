@@ -78,6 +78,13 @@ function download(bytes: Uint8Array, name: string, mime: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+/** Save the design's parameters as a CSV file (name, formula, kind, value, note). */
+export function exportParametersCsv(rows: string[][], designName: string) {
+  const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const csv = [["Name", "Formula", "Kind", "Value", "Note"], ...rows].map((r) => r.map(cell).join(",")).join("\r\n");
+  download(new TextEncoder().encode(csv), `${safeName(designName)}-parameters.csv`, "text/csv");
+}
+
 export function safeName(name: string) {
   return name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "design";
 }

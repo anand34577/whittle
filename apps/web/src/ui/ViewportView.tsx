@@ -22,7 +22,7 @@ import {
   trim,
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace } from "../state/actions";
-import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure } from "../state/measure";
@@ -360,7 +360,9 @@ export function ViewportView() {
           addLines(pts, closed, (p) => (typeof p === "string" ? pointAt(o!.sk, p, o!.sol) : p));
         },
         addArc: addArcGeometry,
+        addTangentArc: addTangentArcGeometry,
         addCircle: addCircleGeometry,
+        addTangentCircle: addTangentCircleGeometry,
         addSpline: addSplineGeometry,
         addPoint: addFreePoint,
         corner: cornerAt,
@@ -477,8 +479,14 @@ export function ViewportView() {
     if (mode.kind === "pickPlane") filter = { faces: true, edges: false, planes: true, sketches: false };
     else if (mode.kind === "measure") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "fillet" || f?.type === "chamfer") filter = { faces: false, edges: true, planes: false, sketches: false };
-    else if (f?.type === "shell" || f?.type === "hole") filter = bodiesOnly;
-    else if (f?.type === "combine" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
+    else if (f?.type === "shell" || f?.type === "hole" || f?.type === "draft" || f?.type === "offsetFace") filter = bodiesOnly;
+    else if (f?.type === "thread" || f?.type === "replaceFace" || f?.type === "deleteFace" || f?.type === "align") filter = bodiesOnly;
+    else if (f?.type === "boundaryFill") filter = bodiesOnly;
+    else if (f?.type === "rib") filter = { faces: false, edges: false, planes: false, sketches: true };
+    else if (f?.type === "surface") filter = f.op === "patch" || f.op === "ruled" ? { faces: false, edges: true, planes: false, sketches: false } : bodiesOnly;
+    else if (f?.type === "curve") filter = { faces: true, edges: true, planes: false, sketches: f.source === "project" };
+    else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
+    else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
     else if (f?.type === "loft") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     vp.setPickFilter(filter);
@@ -517,7 +525,7 @@ export function ViewportView() {
     const ev = documentEvaluator(doc);
     const end = activeEnd(doc);
     const list: SketchDrawable[] = [];
-    const showAll = sessionFeature?.type === "loft" || sessionFeature?.type === "sweep";
+    const showAll = sessionFeature?.type === "loft" || sessionFeature?.type === "sweep" || sessionFeature?.type === "rib" || (sessionFeature?.type === "pattern" && sessionFeature.pattern === "path");
     for (const f of doc.features.slice(0, end)) {
       if (f.type !== "sketch") continue;
       const fr = regen.sketches.find((s) => s.id === f.id);
@@ -566,6 +574,17 @@ export function ViewportView() {
     }
     vp.setSketches(list);
   }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature]);
+
+  // Interference boxes.
+  const interference = useApp((s) => s.interference);
+  useEffect(() => {
+    vp?.setFlags(interference.map((i) => i.bbox as unknown as [number[], number[]]));
+  }, [vp, interference]);
+
+  // Construction planes.
+  useEffect(() => {
+    vp?.setConstructionPlanes(regen?.planes ?? []);
+  }, [vp, regen]);
 
   // Reference pictures: the edited sketch's always, others unless hidden.
   useEffect(() => {

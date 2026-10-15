@@ -330,6 +330,17 @@ kbd {
   padding: 0 var(--sp-2);
   background: var(--bg-1);
   border-bottom: 1px solid var(--line);
+  /* narrow windows: scroll sideways instead of pushing tools off-screen */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.toolbar > * {
+  flex-shrink: 0;
+}
+.toolbar > .btn--accent {
+  position: sticky;
+  right: 0;
 }
 .toolbar--sketch {
   background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--bg-1);
@@ -1319,6 +1330,8 @@ kbd {
   position: fixed;
   z-index: 50;
   min-width: 200px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   transform: translateY(-100%);
   padding: 4px;
   background: var(--bg-1);

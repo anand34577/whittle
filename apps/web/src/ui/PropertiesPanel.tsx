@@ -47,6 +47,18 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   offset: "offset",
   scale: "scale",
   draft: "draft",
+  offsetFace: "move",
+  cplane: "plane",
+  construct: "plane",
+  curve: "path",
+  surface: "shell",
+  rib: "extrude",
+  thread: "thread",
+  replaceFace: "move",
+  deleteFace: "trash",
+  align: "move",
+  boundaryFill: "combine",
+  joint: "move",
 };
 
 const ENTITY_LABELS: Record<SketchEntity["type"], string> = {
@@ -513,7 +525,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
         <div>
           <h2>{sketch.name}</h2>
           <p className="muted">
-            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : "On a model face"} · {sketch.entities.length} shape{sketch.entities.length === 1 ? "" : "s"}
+            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : sketch.plane.kind === "construction" ? "On a construction plane" : "On a model face"} · {sketch.entities.length} shape{sketch.entities.length === 1 ? "" : "s"}
           </p>
         </div>
       </header>
@@ -672,6 +684,34 @@ function Inspector() {
             </div>
           </div>
         )}
+        {body && meta && (
+          <div className="panel__section">
+            <h3 className="eyebrow">Assembly</h3>
+            <Select
+              label="Component"
+              value={meta.component ?? ""}
+              placeholder="None"
+              options={[
+                { value: "", label: "None" },
+                ...[...new Set(Object.values(doc.bodies).map((m) => m.component).filter((c): c is string => !!c))].map((c) => ({ value: c, label: c })),
+                { value: "__new__", label: "New component…" },
+              ]}
+              onChange={(v) =>
+                mutate("Set component", (d) => {
+                  const m = d.bodies[body.id];
+                  if (!m) return;
+                  if (v === "__new__") {
+                    const used = new Set(Object.values(d.bodies).map((x) => x.component));
+                    let n = 1;
+                    while (used.has(`Component ${n}`)) n++;
+                    m.component = `Component ${n}`;
+                  } else m.component = v || undefined;
+                })
+              }
+            />
+            <Toggle label="Grounded" hint="A grounded body never moves under a joint" checked={!!meta.grounded} onChange={(v) => mutate("Ground", (d) => void (d.bodies[body.id]!.grounded = v || undefined))} />
+          </div>
+        )}
         {p?.kind === "face" && body && (
           <div className="panel__section">
             <h3 className="eyebrow">Face</h3>
@@ -719,6 +759,14 @@ function Inspector() {
                     onChange={(v) => setPrefs({ material: v })}
                     options={MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))}
                   />
+                </dd>
+              </>
+            )}
+            {(body ? [body] : bodies).length > 0 && totalVolume > 0 && (
+              <>
+                <dt>Center of mass</dt>
+                <dd className="mono" title="Weighted by volume (uniform density)">
+                  {[0, 1, 2].map((i) => trim((body ? body.centerOfMass[i]! : bodies.reduce((a, b) => a + b.centerOfMass[i]! * b.volume, 0) / totalVolume) / LENGTH_TO_MM[unit], 2)).join(", ")} {unit}
                 </dd>
               </>
             )}

@@ -51,6 +51,10 @@ export interface SketchFrame {
   xDir: Vec3;
   yDir: Vec3;
   normal: Vec3;
+  /** Construction geometry kind (planes by default). */
+  kind?: "plane" | "axis" | "point" | "curve";
+  /** Curves: line segments as xyz pairs, for display. */
+  line?: Float32Array;
   /** Triangles (xyz per vertex, world space) of the closed profile regions. */
   fill?: Float32Array;
   /** Solved constraint-driven geometry, when the sketch has any. */
@@ -73,12 +77,16 @@ export interface FeatureStatus {
   message?: string;
   fix?: FeatureFix;
   ms?: number;
+  /** Boundary Fill: the cells the tool bodies were cut into. */
+  cells?: { volume: number; center: Vec3 }[];
 }
 
 export interface RegenResult {
   seq: number;
   bodies: BodyResult[];
   sketches: SketchFrame[];
+  /** Construction planes, for display and picking. */
+  planes: SketchFrame[];
   status: FeatureStatus[];
   /** Bodies as they were just before pickBefore (for picking while a feature previews). */
   pickBodies?: BodyResult[];
@@ -87,14 +95,35 @@ export interface RegenResult {
   rebuilt: number;
 }
 
+export interface InterferenceItem {
+  a: Id;
+  b: Id;
+  volume: number;
+  bbox: [Vec3, Vec3];
+}
+
+export interface RadiusItem {
+  bodyId: Id;
+  radius: number;
+  /** True when the surface curves inward (a pocket's rounded corner). */
+  concave: boolean;
+  center: Vec3;
+  normal: Vec3;
+}
+
+export type InspectKind = "interference" | "radii";
+export type InspectResult = { kind: "interference"; items: InterferenceItem[] } | { kind: "radii"; items: RadiusItem[] };
+
 export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply";
 
 export type KernelRequest =
   | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id }
-  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[] };
+  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[] }
+  | { type: "inspect"; seq: number; doc: WhittleDocument; kind: InspectKind };
 
 export type KernelResponse =
   | { type: "ready"; ms: number }
   | { type: "regen"; result: RegenResult }
   | { type: "export"; seq: number; data: Uint8Array; mime: string; ext: string }
+  | { type: "inspect"; seq: number; result: InspectResult }
   | { type: "error"; seq: number; message: string };

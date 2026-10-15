@@ -13,12 +13,15 @@ import {
   type SketchEntity,
   type Vec2,
   arcPoints,
+  bsplineSamples,
+  endTangent,
   entityOutline,
   entitySnapPoints,
   geomOutline,
   makeEntity,
   polylinePath,
   resolveEntity,
+  tangentArcThrough,
 } from "@whittle/core";
 import type { SketchTool } from "../state/store";
 import type { SketchPointerEvent } from "./Viewport";
@@ -31,8 +34,68 @@ export interface SnapInfo {
 }
 
 /** Tools that draw constraint-driven geometry. */
-const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "pcircle", "spline"]);
+const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "tarc", "carc", "conic", "pcircle", "spline", "earc", "tan2c", "tan3c"]);
 /** Tools that take three clicks (the rest of the simple shapes take two). */
+/** Counter-clockwise arc about `c` from `s`, ending on the ray toward `e`. */
+function centerArc(c: Vec2, s: Vec2, e: Vec2): { start: Vec2; end: Vec2; through: Vec2 } | null {
+  const r = Math.hypot(s[0] - c[0], s[1] - c[1]);
+  if (r < 1e-6) return null;
+  const a0 = Math.atan2(s[1] - c[1], s[0] - c[0]);
+  let sweep = Math.atan2(e[1] - c[1], e[0] - c[0]) - a0;
+  while (sweep <= 1e-6) sweep += 2 * Math.PI;
+  const at = (t: number): Vec2 => [c[0] + r * Math.cos(a0 + t), c[1] + r * Math.sin(a0 + t)];
+  return { start: s, end: at(sweep), through: at(sweep / 2) };
+}
+
+/** Points on an ellipse arc: center, end of the major axis, a point giving the minor radius, then the arc's start and end (counter-clockwise). */
+function ellipseArc(c: Vec2, m: Vec2, q: Vec2, s: Vec2, e: Vec2, n = 32): Vec2[] | null {
+  const a = Math.hypot(m[0] - c[0], m[1] - c[1]);
+  if (a < 1e-6) return null;
+  const u: Vec2 = [(m[0] - c[0]) / a, (m[1] - c[1]) / a];
+  const v: Vec2 = [-u[1], u[0]];
+  const b = Math.abs((q[0] - c[0]) * v[0] + (q[1] - c[1]) * v[1]);
+  if (b < 1e-6) return null;
+  const param = (p: Vec2) => Math.atan2(((p[0] - c[0]) * v[0] + (p[1] - c[1]) * v[1]) / b, ((p[0] - c[0]) * u[0] + (p[1] - c[1]) * u[1]) / a);
+  const t0 = param(s);
+  let sweep = param(e) - t0;
+  while (sweep <= 1e-6) sweep += 2 * Math.PI;
+  const out: Vec2[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = t0 + (sweep * i) / n;
+    out.push([c[0] + a * Math.cos(t) * u[0] + b * Math.sin(t) * v[0], c[1] + a * Math.cos(t) * u[1] + b * Math.sin(t) * v[1]]);
+  }
+  return out;
+}
+
+/** A full ellipse from the same three points (for the preview). */
+function ellipseFull(c: Vec2, m: Vec2, q: Vec2, n = 48): Vec2[] {
+  const a = Math.hypot(m[0] - c[0], m[1] - c[1]);
+  const u: Vec2 = a > 0 ? [(m[0] - c[0]) / a, (m[1] - c[1]) / a] : [1, 0];
+  const v: Vec2 = [-u[1], u[0]];
+  const b = Math.abs((q[0] - c[0]) * v[0] + (q[1] - c[1]) * v[1]);
+  const out: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    out.push([c[0] + a * Math.cos(t) * u[0] + b * Math.sin(t) * v[0], c[1] + a * Math.cos(t) * u[1] + b * Math.sin(t) * v[1]]);
+  }
+  return out;
+}
+
+/** Points on a conic from `s` to `e` whose tangents meet at `apex`; rho 0.5 is a parabola. */
+function conicPoints(s: Vec2, e: Vec2, apex: Vec2, rho: number, n = 12): Vec2[] {
+  const w = rho / (1 - rho);
+  const out: Vec2[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const a = (1 - t) * (1 - t);
+    const b = 2 * w * t * (1 - t);
+    const c = t * t;
+    const k = a + b + c;
+    out.push([(a * s[0] + b * apex[0] + c * e[0]) / k, (a * s[1] + b * apex[1] + c * e[1]) / k]);
+  }
+  return out;
+}
+
 const THREE_POINT = new Set<SketchTool>(["rect3", "circle3"]);
 
 export interface DimField {
@@ -68,7 +131,11 @@ export interface SketchEnv {
   geometry(): GeomResolved[];
   addLines(pts: (Vec2 | Id)[], closed: boolean): void;
   addArc(a: Vec2 | Id, b: Vec2 | Id, through: Vec2): void;
+  /** An arc leaving the end of a line or arc smoothly, ending at the point. */
+  addTangentArc(from: Id | undefined, to: Vec2): void;
   addCircle(c: Vec2 | Id, r: number): void;
+  /** A circle tangent to the given curves, its center near the point. */
+  addTangentCircle(refs: Id[], guess: Vec2): void;
   addSpline(pts: (Vec2 | Id)[], closed: boolean): void;
   addPoint(p: Vec2): void;
   /** The Project tool: pick the model under this window position and copy it into the sketch. */
@@ -100,6 +167,8 @@ export class SketchController {
   private dragging: { id: Id; last: Vec2; moved: boolean; geom?: Id[] } | null = null;
   /** Solver points the placed points snapped to (parallel to `points`). */
   private refs: (Id | undefined)[] = [];
+  /** Tangent-circle tools: the curves picked so far. */
+  private tanRefs: Id[] = [];
   private hoverEntity: Id | null = null;
   private resolvedCache: ResolvedEntity[] = [];
   /** Outline/path tools: "arc" points (parallel to `points`), arc mode, and an arc's end awaiting its middle. */
@@ -118,6 +187,7 @@ export class SketchController {
   reset() {
     this.points = [];
     this.refs = [];
+    this.tanRefs = [];
     this.arcFlags = [];
     this.arcMode = false;
     this.arcEnd = null;
@@ -256,6 +326,11 @@ export class SketchController {
     }
   }
 
+  private conicRho() {
+    const t = this.typed.a;
+    return t !== undefined && t > 0.01 && t < 0.99 ? t : 0.5;
+  }
+
   private previewShapes(): { pts: Vec2[]; closed: boolean }[] {
     const c = this.cursor;
     if (!c || this.points.length === 0 || this.tool === "select" || this.tool === "text") return [];
@@ -265,9 +340,35 @@ export class SketchController {
       const through = [...this.points, c];
       return through.length < 2 ? [] : [{ pts: geomOutline({ id: "", type: "spline", pts: through, closed: false, construction: false }), closed: false }];
     }
+    if (this.tool === "earc") {
+      if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
+      if (this.points.length === 2) return [{ pts: ellipseFull(a, this.points[1]!, c), closed: true }, { pts: [a, this.points[1]!], closed: false }];
+      if (this.points.length === 3) return [{ pts: ellipseFull(a, this.points[1]!, this.points[2]!), closed: true }];
+      const arc = ellipseArc(a, this.points[1]!, this.points[2]!, this.points[3]!, c, 32);
+      return [{ pts: ellipseFull(a, this.points[1]!, this.points[2]!), closed: true }, ...(arc ? [{ pts: arc, closed: false }] : [])];
+    }
+    if (this.tool === "cspline") {
+      const ctrl = [...this.points, c];
+      return [{ pts: ctrl, closed: false }, ...(ctrl.length >= 3 ? [{ pts: bsplineSamples(ctrl, false, 12), closed: false }] : [])];
+    }
     if (this.tool === "pcircle") {
       const r = Math.hypot(this.secondPoint(a, c)[0] - a[0], this.secondPoint(a, c)[1] - a[1]);
       return r > 0 ? [{ pts: geomOutline({ id: "", type: "circle", c: a, r, construction: false }), closed: true }] : [];
+    }
+    if (this.tool === "tarc") {
+      const geo = this.env.geometry();
+      const t = endTangent(geo, a);
+      const arc = t ? tangentArcThrough(a, t.dir, c) : null;
+      return arc ? [{ pts: [...arcPoints(a, c, arc.through, 32), c], closed: false }] : [{ pts: [a, c], closed: false }];
+    }
+    if (this.tool === "conic") {
+      if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
+      if (this.points.length === 2) return [{ pts: conicPoints(a, this.points[1]!, c, this.conicRho(), 24), closed: false }, { pts: [a, c, this.points[1]!], closed: false }];
+    }
+    if (this.tool === "carc") {
+      if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
+      const arc = centerArc(a, this.points[1]!, c);
+      return [{ pts: [a, this.points[1]!], closed: false }, ...(arc ? [{ pts: [...arcPoints(arc.start, arc.end, arc.through, 32), arc.end], closed: false }] : [])];
     }
     if (this.tool === "arc") {
       if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
@@ -351,6 +452,27 @@ export class SketchController {
         const uy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
         return makeEntity("circle", [ux, uy], a);
       }
+      case "polygonC": {
+        // Circumscribed: the second point is the middle of an edge, so the radius is the apothem.
+        const e = makeEntity("polygon", a, b);
+        if (e.type !== "polygon") return null;
+        const half = Math.PI / 6;
+        e.r = fmt(Math.hypot(b[0] - a[0], b[1] - a[1]) / Math.cos(half));
+        e.angle = fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI - 30);
+        return e;
+      }
+      case "polygonE": {
+        // Edge polygon: the two points are one edge; the polygon grows to the left of a -> b.
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len < 1e-6) return null;
+        const R = len / (2 * Math.sin(Math.PI / 6));
+        const apo = R * Math.cos(Math.PI / 6);
+        const c: Vec2 = [(a[0] + b[0]) / 2 - ((b[1] - a[1]) / len) * apo, (a[1] + b[1]) / 2 + ((b[0] - a[0]) / len) * apo];
+        const e = makeEntity("polygon", c, a);
+        if (e.type !== "polygon") return null;
+        e.r = fmt(R);
+        return e;
+      }
       default:
         return makeEntity(this.tool as EntityType, a, b);
     }
@@ -367,6 +489,7 @@ export class SketchController {
       return [{ key: "a", label: "H", value: h, at: p3 }];
     }
     if (this.tool === "circle3") return [];
+    if (this.tool === "conic") return this.points.length === 2 ? [{ key: "a", label: "ρ", value: this.conicRho(), at: c }] : [];
     const a = this.multi || this.tool === "segment" ? this.points[this.points.length - 1]! : this.points[0]!;
     const b = this.secondPoint(a, c);
     switch (this.tool) {
@@ -448,16 +571,17 @@ export class SketchController {
 
   /** Tools that place many points (outlines and open paths). */
   private get multi() {
-    return this.tool === "polyline" || this.tool === "path";
+    return this.tool === "polyline" || this.tool === "path" || this.tool === "cspline";
   }
 
   private commitPolyline() {
-    const open = this.tool === "path";
-    if (this.points.length >= (open ? 2 : 3)) {
+    const open = this.tool === "path" || this.tool === "cspline";
+    if (this.points.length >= (this.tool === "cspline" ? 3 : open ? 2 : 3)) {
       const e = makeEntity("polyline", this.points[0]!, this.points[1]!);
       if (e.type === "polyline") {
         e.points = this.points.map(([x, y], i) => (this.arcFlags[i] ? [fmt(x), fmt(y), "arc"] : [fmt(x), fmt(y)]));
         if (open) e.open = true;
+        if (this.tool === "cspline") e.ctrl = true;
       }
       this.env.add(e);
     }
@@ -546,6 +670,20 @@ export class SketchController {
       this.typed = {};
       return;
     }
+    if (this.tool === "tan2c" || this.tool === "tan3c") {
+      const need = this.tool === "tan2c" ? 2 : 3;
+      if (this.tanRefs.length < need) {
+        const hit = this.geomAt(c, true);
+        if (hit && !this.tanRefs.includes(hit)) {
+          this.tanRefs.push(hit);
+          this.points.push(c);
+        }
+        return;
+      }
+      this.env.addTangentCircle(this.tanRefs, c);
+      this.reset();
+      return;
+    }
     if (this.tool === "spline") {
       // Click the first point to close (three or more); click the last point again, Enter or Esc to stop.
       const n = this.points.length;
@@ -562,6 +700,34 @@ export class SketchController {
     const at = (i: number) => this.refs[i] ?? this.points[i]!;
     if (this.tool === "pcircle" && this.points.length === 2) {
       this.env.addCircle(at(0), Math.hypot(p[0] - this.points[0]![0], p[1] - this.points[0]![1]));
+      this.reset();
+    } else if (this.tool === "tarc" && this.points.length === 2) {
+      this.env.addTangentArc(this.refs[0], p);
+      this.reset();
+    } else if (this.tool === "conic" && this.points.length === 3) {
+      // Start, end, apex; a typed value (0.01 to 0.99) sets rho.
+      const [s0, e0, a0] = this.points as [Vec2, Vec2, Vec2];
+      this.env.addSpline([s0, ...conicPoints(s0, e0, a0, this.conicRho()).slice(1, -1), e0], false);
+      this.reset();
+    } else if (this.tool === "carc" && this.points.length === 3) {
+      // Center, start, then the end direction (counter-clockwise from the start).
+      const [c0, s0, e0] = this.points as [Vec2, Vec2, Vec2];
+      const arc = centerArc(c0, s0, e0);
+      if (arc) this.env.addArc(arc.start, arc.end, arc.through);
+      this.reset();
+    } else if (this.tool === "earc" && this.points.length === 5) {
+      // Center, end of the major axis, minor radius, then where the arc starts and ends.
+      const [c0, m0, q0, s0, e0] = this.points as [Vec2, Vec2, Vec2, Vec2, Vec2];
+      const pts = ellipseArc(c0, m0, q0, s0, e0, 24);
+      if (pts) {
+        const e = makeEntity("polyline", pts[0]!, pts[1]!);
+        if (e.type === "polyline") {
+          e.points = pts.map(([x, y]) => [fmt(x), fmt(y)]);
+          e.open = true;
+          e.smooth = true;
+        }
+        this.env.add(e);
+      }
       this.reset();
     } else if (this.tool === "arc" && this.points.length === 3) {
       // Start, end, then a point the arc passes through.
@@ -632,6 +798,7 @@ export class SketchController {
       return;
     }
     if (GEOM_TOOLS.has(this.tool)) {
+      if (this.tool === "tan2c" || this.tool === "tan3c") this.hoverEntity = this.tanRefs.length < (this.tool === "tan2c" ? 2 : 3) ? this.geomAt(e.p, true) : null;
       if (e.type === "down") this.geomClick();
       this.publish();
       return;
@@ -656,7 +823,7 @@ export class SketchController {
         // Outlines close on their first point; paths finish when the last point is clicked again.
         if (this.arcMode && this.points.length) {
           this.arcClick(this.cursor, first, near(first));
-        } else if ((this.tool === "polyline" && this.points.length >= 3 && near(first)) || (this.tool === "path" && this.points.length >= 2 && near(last))) {
+        } else if ((this.tool === "polyline" && this.points.length >= 3 && near(first)) || ((this.tool === "path" || this.tool === "cspline") && this.points.length >= (this.tool === "cspline" ? 3 : 2) && near(last))) {
           this.commitPolyline();
         } else {
           const last = this.points[this.points.length - 1];
@@ -763,6 +930,7 @@ export class SketchController {
       else {
         this.points.pop();
         this.refs.pop();
+        this.tanRefs.pop();
         this.publish();
       }
       return true;

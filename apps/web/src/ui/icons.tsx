@@ -191,6 +191,12 @@ const P = {
     </>
   ),
   plane: <path d="M2.5 13 L7.5 6 H17.5 L12.5 13 Z" />,
+  axis: (
+    <>
+      <path d="M3.5 16.5 L16.5 3.5" strokeDasharray="2.4 1.8" />
+      <path d="M11.5 3.5 H16.5 V8.5" />
+    </>
+  ),
   origin: (
     <>
       <path d="M10 10 V3 M10 10 L16 13.5 M10 10 L4 13.5" />

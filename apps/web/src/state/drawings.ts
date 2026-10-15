@@ -4,7 +4,7 @@
  *   - import an SVG (logos, lettering, traced outlines) as editable sketch shapes
  */
 import { promptDialog } from "./dialogs";
-import { type Evaluator, type ResolvedEntity, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
+import { type Evaluator, type ResolvedEntity, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, parseDxf, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
 import { exportText } from "./files";
 import { findFeature, sketchMutate, toast, useApp } from "./store";
 
@@ -307,6 +307,48 @@ export function importSvgIntoSketch() {
       toast("ok", `Added ${entities.length} shape${entities.length > 1 ? "s" : ""} from ${file.name}. Shapes inside shapes become holes.`);
     } catch (e) {
       toast("error", e instanceof Error ? e.message : "Couldn't read that SVG.");
+    }
+  };
+  input.click();
+}
+
+/** Ask for a DXF file and add its lines, arcs, circles and outlines to the sketch being edited. */
+export function importDxfIntoSketch() {
+  const s = useApp.getState();
+  if (s.mode.kind !== "sketch") return toast("info", "Open a sketch first, then import a DXF into it.");
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".dxf";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const dxf = parseDxf(await file.text());
+      if (!dxf.loops.length && !dxf.circles.length) return toast("warn", "No lines, arcs, circles or outlines were found in that DXF.");
+      const answer = await promptDialog({
+        title: `Import ${file.name}`,
+        message: "Scale of the drawing: 1 if it is in millimetres, 25.4 if it is in inches.",
+        label: "Scale",
+        initial: "1",
+        type: "number",
+        confirmLabel: "Import",
+        validate: (v) => (parseFloat(v) > 0 ? null : "Enter a number greater than zero"),
+      });
+      if (answer === null) return;
+      const k = parseFloat(answer);
+      const entities: SketchEntity[] = [
+        ...dxf.circles.map((c) => ({ id: uid("e"), type: "circle" as const, cx: trim(c.c[0] * k, 4), cy: trim(c.c[1] * k, 4), r: trim(c.r * k, 4) })),
+        ...dxf.loops
+          .filter((l) => l.pts.length >= (l.closed ? 3 : 2))
+          .map((l) => ({ id: uid("e"), type: "polyline" as const, points: l.pts.map(([x, y]) => [trim(x * k, 4), trim(y * k, 4)] as [string, string]), ...(l.closed ? {} : { open: true }) })),
+      ];
+      sketchMutate(`Import ${file.name}`, (sk) => {
+        for (const e of entities) sk.entities.push(e as never);
+      });
+      useApp.setState({ selectedEntity: null });
+      toast("ok", `Added ${entities.length} shape${entities.length > 1 ? "s" : ""} from ${file.name}.${dxf.skipped.length ? ` Skipped: ${dxf.skipped.join(", ")}.` : ""}`);
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Couldn't read that DXF.");
     }
   };
   input.click();

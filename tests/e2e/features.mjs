@@ -281,7 +281,8 @@ await step("17-svg-import", async () => {
     <circle cx="70" cy="30" r="12" transform="translate(0 0)" />
   </svg>`;
   const chooser = page.waitForEvent("filechooser");
-  await page.locator(".toolbar").getByRole("button", { name: "SVG" }).click();
+  await page.locator(".toolbar").getByRole("button", { name: /Insert/ }).click();
+  await page.getByRole("menuitem", { name: /Import SVG/ }).click();
   await (await chooser).setFiles({ name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
   // The width is asked in Whittle's own dialog.
   const ask = page.getByRole("dialog", { name: "Import logo.svg" });

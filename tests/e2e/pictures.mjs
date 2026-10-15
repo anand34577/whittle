@@ -80,7 +80,8 @@ await step("02-add-picture", async () => {
   await page.locator(".tree__row", { hasText: "XY plane" }).click();
   await page.waitForTimeout(900);
   const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: /Picture/ }).first().click();
+  await page.locator(".toolbar").getByRole("button", { name: /Insert/ }).click();
+  await page.getByRole("menuitem", { name: /Picture to trace/ }).click();
   await (await chooser).setFiles({ name: "part.png", mimeType: "image/png", buffer: Buffer.from(png, "base64") });
   await page.waitForFunction(() => window.whittle.useApp.getState().doc.features.find((f) => f.type === "sketch")?.image);
   await waitBuilt();

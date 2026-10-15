@@ -34,7 +34,9 @@ export type PlaneRef =
       angle?: Expr;
       tilt?: "x" | "y";
     }
-  | { kind: "face"; face: FaceRef; offset: Expr };
+  | { kind: "face"; face: FaceRef; offset: Expr }
+  /** A named construction plane (see ConstructionPlaneFeature). */
+  | { kind: "construction"; plane: Id; offset: Expr };
 
 /**
  * A persistent reference to a face. Rather than an index (which changes
@@ -120,6 +122,8 @@ export interface PolylineEntity extends EntityBase {
   smooth?: boolean;
   /** An open path (for sweeps and guides): never becomes a solid region. */
   open?: boolean;
+  /** A control-point spline: the points steer a smooth B-spline curve that does not pass through them. */
+  ctrl?: boolean;
 }
 
 export interface EllipseEntity extends EntityBase {
@@ -213,6 +217,131 @@ interface FeatureBase {
   suppressed?: boolean;
 }
 
+/** A reusable plane (offset, tilted, or on a face) that sketches and other planes can sit on. */
+export interface ConstructionPlaneFeature extends FeatureBase {
+  type: "cplane";
+  plane: PlaneRef;
+}
+
+export type ConstructMode =
+  | "midplane" | "plane3" | "plane2e" | "planeEdge" | "planeTangent" | "planePath"
+  | "axisCyl" | "axis2p" | "axis2pl" | "axisEdge" | "axisPerp"
+  | "pointVertex" | "point2e" | "point3pl" | "pointCenter" | "pointEdgePlane";
+
+/**
+ * Construction geometry derived from model faces, edges and points: planes (sketchable),
+ * axes and points (references). `value` is an angle (planeEdge, planeTangent) or a 0-100 %
+ * position along the edge (planePath).
+ */
+export interface ConstructFeature extends FeatureBase {
+  type: "construct";
+  mode: ConstructMode;
+  faces: FaceRef[];
+  edges: EdgeRef[];
+  points: Vec3[];
+  value: Expr;
+}
+
+/** A thin reinforcing wall from an open sketch path: stands in the sketch plane and extends `depth` to one side. */
+export interface RibFeature extends FeatureBase {
+  type: "rib";
+  sketch: Id;
+  thickness: Expr;
+  depth: Expr;
+  flip: boolean;
+  op: BodyOp;
+  target?: Id;
+}
+
+/** A modeled screw thread cut along a cylindrical face (external rod or internal hole). */
+export interface ThreadFeature extends FeatureBase {
+  type: "thread";
+  face: FaceRef | null;
+  pitch: Expr;
+  /** Threaded length along the face; empty = the whole face. */
+  length: Expr;
+  /** Groove depth; empty = ISO proportion of the pitch. */
+  depth: Expr;
+  lefthand: boolean;
+}
+
+/** Replace flat faces with a plane (another face, or a construction plane): the body grows or shrinks to meet it. */
+export interface ReplaceFaceFeature extends FeatureBase {
+  type: "replaceFace";
+  faces: FaceRef[];
+  target: FaceRef | null;
+  plane?: Id;
+  /** While true the next face click sets the target face instead of adding a face to replace. */
+  pickTarget?: boolean;
+}
+
+/** Delete the faces of a hole, pocket or boss and heal the gap (the opening must be flat). */
+export interface DeleteFaceFeature extends FeatureBase {
+  type: "deleteFace";
+  faces: FaceRef[];
+}
+
+/** Move a body so one of its flat faces meets a flat face of another body. */
+export interface AlignFeature extends FeatureBase {
+  type: "align";
+  bodyId?: Id;
+  from: FaceRef | null;
+  to: FaceRef | null;
+  /** Face to face by default; flip turns the body around. */
+  flip: boolean;
+  offset: Expr;
+}
+
+/** New bodies from the cells the tool bodies cut each other into (overlaps and leftovers). */
+export interface BoundaryFillFeature extends FeatureBase {
+  type: "boundaryFill";
+  tools: Id[];
+  /** Indices of the cells to keep as bodies. */
+  cells: number[];
+  keepTools: boolean;
+}
+
+/**
+ * A 3D curve: through clicked points (3D sketch), copied from model edges (include 3D geometry),
+ * where two faces meet (intersection curve) or a sketch laid onto a face (project to surface).
+ */
+export interface CurveFeature extends FeatureBase {
+  type: "curve";
+  source: "points" | "edges" | "faces" | "project";
+  points: Vec3[];
+  edges: EdgeRef[];
+  faces: FaceRef[];
+  sketch?: Id;
+  smooth: boolean;
+}
+
+export type SurfaceOp = "patch" | "ruled" | "offset" | "trim" | "untrim" | "extend" | "stitch" | "unstitch" | "merge" | "reverse" | "thicken";
+
+/** Surface tools: make surfaces (patch, ruled, offset) or edit and finish them (trim, stitch, thicken...). */
+export interface SurfaceFeature extends FeatureBase {
+  type: "surface";
+  op: SurfaceOp;
+  /** The body to work on (trim, unstitch, merge, reverse, thicken). */
+  bodyId?: Id;
+  /** Bodies to join (stitch). */
+  bodies: Id[];
+  faces: FaceRef[];
+  edges: EdgeRef[];
+  /** Offset / extend / ruled distance, or thickness. */
+  distance: Expr;
+  /** Ruled: out of the face's normal, along its surface, or along an axis. */
+  direction: "normal" | "tangent" | "axis";
+  axis: "x" | "y" | "z";
+  /** Trim: the plane and the side to keep. */
+  plane: OriginPlane;
+  planeRef?: Id;
+  offset: Expr;
+  keep: "above" | "below";
+  /** Thicken: grow both ways from the surface; keep the surface body afterwards. */
+  both?: boolean;
+  keep2?: boolean;
+}
+
 export interface SketchFeature extends FeatureBase {
   type: "sketch";
   plane: PlaneRef;
@@ -241,6 +370,8 @@ export interface SketchImage {
 
 export interface ExtrudeFeature extends FeatureBase {
   type: "extrude";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   sketch: Id;
   distance: Expr;
   /** "two" = `distance` one way and `distance2` the other. */
@@ -266,6 +397,8 @@ export interface ExtrudeFeature extends FeatureBase {
 
 export interface RevolveFeature extends FeatureBase {
   type: "revolve";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   sketch: Id;
   /** "line" spins around `axisLine`, a straight path or construction line in the sketch. */
   axis: "x" | "y" | "line";
@@ -279,6 +412,8 @@ export interface FilletFeature extends FeatureBase {
   type: "fillet";
   edges: EdgeRef[];
   radius: Expr;
+  /** Variable radius: the radius at the end of each edge (the start uses `radius`). */
+  radius2?: Expr;
 }
 
 export interface ChamferFeature extends FeatureBase {
@@ -316,14 +451,21 @@ export interface MirrorFeature extends FeatureBase {
   plane: OriginPlane;
   /** Move the mirror plane along its normal. */
   offset?: Expr;
+  /** Mirror across a construction plane instead of an origin plane. */
+  planeRef?: Id;
   merge: boolean;
 }
 
 export interface PatternFeature extends FeatureBase {
   type: "pattern";
   bodyId?: Id;
-  pattern: "linear" | "circular";
+  pattern: "linear" | "circular" | "path";
   axis: "x" | "y" | "z";
+  /** A construction axis to repeat along / around instead of an origin axis. */
+  axisRef?: Id;
+  /** Path pattern: the sketch whose first path the copies follow, and whether they turn with it. */
+  path?: Id;
+  follow?: boolean;
   count: Expr;
   spacing: Expr;
   angle: Expr;
@@ -350,6 +492,8 @@ export interface HoleFeature extends FeatureBase {
 /** A smooth solid through two or more sketch profiles. */
 export interface LoftFeature extends FeatureBase {
   type: "loft";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   sketches: Id[];
   ruled: boolean;
   op: BodyOp;
@@ -369,12 +513,16 @@ export interface MoveFeature extends FeatureBase {
 /** Sweep a closed profile along a path (pipes, handles, rails, gaskets). */
 export interface SweepFeature extends FeatureBase {
   type: "sweep";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   /** Sketch holding the closed cross-section. */
   profile: Id;
   /** Sketch whose first path (an open line, or any outline) is followed. */
   path: Id;
   /** "frenet" follows the path's curvature; "fixed" keeps the profile upright (better for flat paths). */
   orientation: "frenet" | "fixed";
+  /** Pipe mode: no profile sketch; a round or square tube (optionally hollow) built at the path's start. */
+  pipe?: { shape: "circle" | "square"; size: Expr; wall: Expr };
   op: BodyOp;
   target?: Id;
 }
@@ -404,6 +552,12 @@ export interface SplitFeature extends FeatureBase {
   offset: Expr;
   /** "both" keeps each side as its own body. */
   keep: "both" | "above" | "below";
+  /** Only cut the faces along the plane; keep one body. */
+  facesOnly?: boolean;
+  /** Cut where the body is widest along the plane's normal (a mould parting line); the offset is ignored. */
+  silhouette?: boolean;
+  /** Split along a construction plane instead of an origin plane. */
+  planeRef?: Id;
 }
 
 /** Grow or shrink a whole body by a distance (clearances, tolerances, coatings). */
@@ -436,6 +590,49 @@ export interface DraftFeature extends FeatureBase {
   flip: boolean;
 }
 
+/**
+ * A joint between two bodies: the moving body sits where the joint's value puts it.
+ * Edit `angle` / `distance` to drive the joint; limits stop it at its ends.
+ */
+export interface JointFeature extends FeatureBase {
+  type: "joint";
+  /** The body that moves. */
+  bodyId?: Id;
+  /** The body it is attached to (stays put; documents what the joint connects). */
+  fixedId?: Id;
+  joint: "rigid" | "revolute" | "slider" | "cylindrical" | "planar" | "ball" | "pinslot";
+  /** Joint origin: a construction axis (direction and pivot line) and/or point to use instead of the X/Y/Z axis and pivot above. */
+  axisRef?: Id;
+  originRef?: Id;
+  /** Planar: slide along the plane's second direction. Ball: turns about the second and third axes. */
+  distance2?: Expr;
+  angle2?: Expr;
+  angle3?: Expr;
+  /** Contact set: warn when the moving body (or its component) runs into another body. */
+  collide?: boolean;
+  /** Motion link: this joint's main value follows another joint's (degrees or length) times a ratio. */
+  link?: { joint: Id; ratio: Expr };
+  /** Where the joint axis passes through: the moving body's center, or a point. */
+  origin: "center" | "point";
+  point: [Expr, Expr, Expr];
+  /** The joint axis (rotation axis / slide direction). */
+  axis: "x" | "y" | "z";
+  angle: Expr;
+  distance: Expr;
+  /** Stop the joint at its ends of travel (degrees for a turn, length for a slide). */
+  limited: boolean;
+  min: Expr;
+  max: Expr;
+}
+
+/** Press/Pull: push or pull flat faces along their normals (grows or cuts material). */
+export interface OffsetFaceFeature extends FeatureBase {
+  type: "offsetFace";
+  faces: FaceRef[];
+  /** Positive pulls the faces outward (adds material), negative pushes them in (removes it). */
+  distance: Expr;
+}
+
 /** Boolean between existing bodies. */
 export interface CombineFeature extends FeatureBase {
   type: "combine";
@@ -448,7 +645,8 @@ export interface CombineFeature extends FeatureBase {
 /** A body imported from a STEP or STL file (embedded in the design). */
 export interface ImportFeature extends FeatureBase {
   type: "import";
-  format: "step" | "stl";
+  /** "whittle" brings in every body of another Whittle design (a derived copy). */
+  format: "step" | "stl" | "whittle";
   fileName: string;
   /** Base64 file contents. */
   data: string;
@@ -463,6 +661,18 @@ export type Feature =
   | OffsetFeature
   | ScaleFeature
   | DraftFeature
+  | JointFeature
+  | ConstructionPlaneFeature
+  | ConstructFeature
+  | CurveFeature
+  | SurfaceFeature
+  | RibFeature
+  | ThreadFeature
+  | ReplaceFaceFeature
+  | DeleteFaceFeature
+  | AlignFeature
+  | BoundaryFillFeature
+  | OffsetFaceFeature
   | HoleFeature
   | LoftFeature
   | MoveFeature
@@ -488,6 +698,10 @@ export interface BodyMeta {
   visible: boolean;
   /** Appearance preset (see MATERIAL_LOOKS in the web app). */
   look?: string;
+  /** Bodies sharing a component name move together under joints. */
+  component?: string;
+  /** A grounded body never moves under a joint. */
+  grounded?: boolean;
 }
 
 export interface WhittleDocument {

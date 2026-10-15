@@ -8,6 +8,8 @@ import {
   type DraftFeature,
   type ExtrudeFeature,
   type Feature,
+  type JointFeature,
+  type OffsetFaceFeature,
   type OffsetFeature,
   type PrimitiveFeature,
   type ScaleFeature,
@@ -20,6 +22,10 @@ import {
   makeDraft,
   makeExtrude,
   makeOffset,
+  makeConstructionPlane,
+  makeJoint,
+  makeOffsetFace,
+  makePipe,
   makePrimitive,
   makeScale,
   makeSketch,
@@ -143,6 +149,141 @@ describe("tilted sketch planes", () => {
     expect(max[1] - min[1]).toBeCloseTo(10, 3);
     expect(max[2] - min[2]).toBeCloseTo(10, 3);
     expect(min[1]).toBeCloseTo(-10, 3);
+  });
+});
+
+describe("construction planes", () => {
+  it("places a sketch on an offset, tilted plane built on another plane", () => {
+    const doc = newDocument();
+    const base = push(doc, makeConstructionPlane(doc, { kind: "origin", plane: "XY", offset: "10" }));
+    const up = push(doc, makeConstructionPlane(doc, { kind: "construction", plane: base.id, offset: "5" }));
+    const s = sketch(doc, [square(10)], { kind: "construction", plane: up.id, offset: "0" });
+    push(doc, makeExtrude(doc, s.id) as ExtrudeFeature, true);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    expect(r.planes).toHaveLength(2);
+    const [min, max] = r.bodies[0]!.bbox;
+    expect(min[2]).toBeCloseTo(15, 3);
+    expect(max[2]).toBeGreaterThan(15);
+  });
+
+  it("reports a missing base plane", () => {
+    const doc = newDocument();
+    const p = push(doc, makeConstructionPlane(doc, { kind: "construction", plane: "gone", offset: "0" }));
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === p.id)?.state).toBe("error");
+  });
+});
+
+describe("joints", () => {
+  const two = (doc: WhittleDocument) => {
+    const a = box(doc, 10, 10, 10);
+    const s = sketch(doc, [square(4)], { kind: "origin", plane: "XY", offset: "30" });
+    const ex = push(doc, makeExtrude(doc, s.id) as ExtrudeFeature, true);
+    ex.distance = "4";
+    return [a, ex] as const;
+  };
+
+  it("turns the moving body about a point on the axis (revolute) and holds the other still", () => {
+    const doc = newDocument();
+    const [fixed, moving] = two(doc);
+    const j = push(doc, makeJoint(doc, moving.id, fixed.id) as JointFeature);
+    j.joint = "revolute";
+    j.origin = "point";
+    j.axis = "z";
+    j.angle = "90";
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    const m = r.bodies.find((b) => b.id === moving.id)!;
+    // The 4 mm block was centred on the origin in XY; the quarter turn about the origin keeps that.
+    expect((m.bbox[1][0] - m.bbox[0][0])).toBeCloseTo(4, 2);
+    j.origin = "point";
+    j.point = ["10", "0", "0"];
+    const r2 = new Builder().regen(doc, "final");
+    ok(r2);
+    const m2 = r2.bodies.find((b) => b.id === moving.id)!;
+    // Pivoting about (10,0): the block moves from near x = 0 to near y = -10.
+    expect(m2.bbox[0][1]).toBeLessThan(-7);
+    const f = r2.bodies.find((b) => b.id === fixed.id)!;
+    expect(f.bbox[0][0]).toBeCloseTo(-5, 3);
+  });
+
+  it("slides along an axis and stops at its limit with a warning", () => {
+    const doc = newDocument();
+    const [fixed, moving] = two(doc);
+    const j = push(doc, makeJoint(doc, moving.id, fixed.id) as JointFeature);
+    j.joint = "slider";
+    j.axis = "x";
+    j.distance = "80";
+    j.limited = true;
+    j.min = "0";
+    j.max = "25";
+    const r = new Builder().regen(doc, "final");
+    expect(r.status.find((x) => x.id === j.id)?.state).toBe("warning");
+    const m = r.bodies.find((b) => b.id === moving.id)!;
+    expect(m.bbox[0][0]).toBeCloseTo(-2 + 25, 2);
+  });
+
+  it("needs a moving body", () => {
+    const doc = newDocument();
+    const [fixed] = two(doc);
+    const j = push(doc, makeJoint(doc, undefined, fixed.id) as JointFeature);
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === j.id)?.state).toBe("incomplete");
+  });
+});
+
+describe("press/pull", () => {
+  const topFace = (doc: WhittleDocument) => {
+    const b = new Builder().regen(doc, "final").bodies[0]!;
+    const i = b.faces.findIndex((f) => f.surface === "PLANE" && f.normal[2] > 0.99);
+    return { bodyId: b.id, ...b.faces[i]! };
+  };
+
+  it("pulls a flat face out to add material and pushes it in to remove material", () => {
+    const doc = newDocument();
+    box(doc, 20, 20, 20);
+    const pp = push(doc, makeOffsetFace(doc) as OffsetFaceFeature);
+    pp.faces = [topFace(doc)];
+    pp.distance = "5";
+    let r = new Builder().regen(doc, "final");
+    ok(r);
+    expect(r.bodies[0]!.volume).toBeCloseTo(20 * 20 * 25, 0);
+    pp.distance = "-5";
+    r = new Builder().regen(doc, "final");
+    ok(r);
+    expect(r.bodies[0]!.volume).toBeCloseTo(20 * 20 * 15, 0);
+  });
+
+  it("asks for a face first", () => {
+    const doc = newDocument();
+    box(doc);
+    const pp = push(doc, makeOffsetFace(doc) as OffsetFaceFeature);
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === pp.id)?.state).toBe("incomplete");
+  });
+});
+
+describe("pipe", () => {
+  const straight = (doc: WhittleDocument) => sketch(doc, [{ id: uid("e"), type: "polyline", open: true, points: [["0", "0"], ["0", "30"]] }], { kind: "origin", plane: "XZ", offset: "0" });
+
+  it("makes a hollow round tube along a path with no profile sketch", () => {
+    const doc = newDocument();
+    const f = makePipe(doc, straight(doc).id) as SweepFeature;
+    f.pipe = { shape: "circle", size: "10", wall: "2" };
+    push(doc, f, true);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    // Ring: outer radius 5, inner 3.
+    expect(r.bodies[0]!.volume).toBeCloseTo(Math.PI * (25 - 9) * 30, 0);
+  });
+
+  it("makes a solid square rod when the wall is zero, and rejects a wall that is too thick", () => {
+    const doc = newDocument();
+    const f = makePipe(doc, straight(doc).id) as SweepFeature;
+    f.pipe = { shape: "square", size: "6", wall: "0" };
+    push(doc, f, true);
+    ok(new Builder().regen(doc, "final"));
+    expect(new Builder().regen(doc, "final").bodies[0]!.volume).toBeCloseTo(36 * 30, 0);
+    f.pipe.wall = "3";
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === f.id)?.state).toBe("error");
   });
 });
 

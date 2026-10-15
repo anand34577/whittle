@@ -113,17 +113,8 @@
   background: var(--bg-3);
 }
 .groupmenu__pop {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
-  min-width: 300px;
+  min-width: min(300px, calc(100vw - 16px));
   padding: 6px;
-  background: var(--bg-2);
-  border-radius: var(--r-3);
-  box-shadow: var(--shadow-pop);
-  animation: pop-in var(--dur) var(--ease);
 }
 .groupmenu__item {
   display: grid;
@@ -738,4 +729,26 @@ details.points summary {
 }
 .copyrow--wide > span {
   width: 56px;
+}
+
+/* A group that is just one button opening its list */
+.toolgroup--menu {
+  justify-content: center;
+}
+.tool--menu .tool__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.groupmenu__head {
+  padding: 8px 10px 3px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.groupmenu__head:not(:first-child) {
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
 }

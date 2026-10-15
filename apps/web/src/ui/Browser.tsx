@@ -29,6 +29,8 @@ export function Browser() {
   const ev = documentEvaluator(doc);
   const bodies = regen?.bodies ?? [];
   const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch");
+  const cplanes = doc.features.slice(0, end).filter((f) => f.type === "cplane" || (f.type === "construct" && (f.mode.startsWith("plane") || f.mode === "midplane")));
+  const refs = doc.features.slice(0, end).filter((f) => (f.type === "construct" && !(f.mode.startsWith("plane") || f.mode === "midplane")) || f.type === "curve");
   const isSel = (fn: (p: (typeof selection)[number]) => boolean) => selection.some(fn);
 
   return (
@@ -64,7 +66,30 @@ export function Browser() {
               <span className="tree__action">Sketch</span>
             </button>
           ))}
+          {cplanes.map((c) => (
+            <div key={c.id} className="tree__row" title="Sketch on this plane">
+              <button className="tree__main" onClick={() => createSketchOn({ kind: "construction", plane: c.id, offset: "0" })} onDoubleClick={() => editFeature(c.id)}>
+                <Icon name="plane" size={16} />
+                <span className="tree__name">{c.name}</span>
+                <span className="tree__action">Sketch</span>
+              </button>
+              <button className="tree__eye" title="Edit plane" aria-label="Edit plane" onClick={() => editFeature(c.id)}>
+                <Icon name="edit" size={15} />
+              </button>
+            </div>
+          ))}
         </Section>
+
+        {refs.length > 0 && (
+          <Section title="Axes & points" count={refs.length} defaultOpen={false}>
+            {refs.map((c) => (
+              <button key={c.id} className="tree__row" onClick={() => editFeature(c.id)} title="Edit">
+                <Icon name={c.type === "curve" ? "path" : c.type === "construct" && c.mode.startsWith("axis") ? "axis" : "point"} size={16} />
+                <span className="tree__name">{c.name}</span>
+              </button>
+            ))}
+          </Section>
+        )}
 
         <Section title="Bodies" count={bodies.length}>
           {bodies.length === 0 && <p className="tree__empty">No bodies yet</p>}
@@ -76,6 +101,7 @@ export function Browser() {
                 <button className="tree__main" onClick={() => useApp.setState({ selection: [{ kind: "body", bodyId: b.id }] })} onDoubleClick={() => editFeature(b.id)}>
                   <span className="tree__swatch" style={{ background: meta?.color ?? "#ccc" }} />
                   <span className={`tree__name ${visible ? "" : "is-muted"}`}>{meta?.name ?? "Body"}</span>
+                  {(meta?.component || meta?.grounded) && <span className="tree__action">{[meta?.component, meta?.grounded ? "grounded" : ""].filter(Boolean).join(" · ")}</span>}
                 </button>
                 <button
                   className="tree__eye"

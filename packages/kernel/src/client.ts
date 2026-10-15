@@ -1,11 +1,12 @@
 /** Main-thread handle to the kernel worker (the default KernelHost). */
 import type { Id, WhittleDocument } from "@whittle/core";
-import type { ExportFormat, KernelRequest, KernelResponse, RegenResult } from "./protocol";
+import type { ExportFormat, InspectKind, InspectResult, KernelRequest, KernelResponse, RegenResult } from "./protocol";
 
 export interface KernelHost {
   readonly ready: Promise<number>;
   regen(doc: WhittleDocument, quality?: "preview" | "final", pickBefore?: Id): Promise<RegenResult | null>;
   export(doc: WhittleDocument, format: ExportFormat, bodyIds?: Id[]): Promise<{ data: Uint8Array; mime: string; ext: string }>;
+  inspect(doc: WhittleDocument, kind: InspectKind): Promise<InspectResult>;
   dispose(): void;
 }
 
@@ -33,7 +34,7 @@ export class WorkerKernel implements KernelHost {
       if (!p) return;
       this.pending.delete(seq);
       if (msg.type === "error") p.reject(new Error(msg.message));
-      else if (msg.type === "regen") p.resolve(msg.result as never);
+      else if (msg.type === "regen" || msg.type === "inspect") p.resolve(msg.result as never);
       else p.resolve({ data: msg.data, mime: msg.mime, ext: msg.ext } as never);
     };
     this.worker.onerror = (e) => {
@@ -60,6 +61,10 @@ export class WorkerKernel implements KernelHost {
 
   export(doc: WhittleDocument, format: ExportFormat, bodyIds?: Id[]) {
     return this.send<{ data: Uint8Array; mime: string; ext: string }>({ type: "export", seq: ++this.seq, doc, format, bodyIds });
+  }
+
+  inspect(doc: WhittleDocument, kind: InspectKind) {
+    return this.send<InspectResult>({ type: "inspect", seq: ++this.seq, doc, kind });
   }
 
   private send<T>(req: KernelRequest, regen = false): Promise<T> {
