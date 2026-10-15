@@ -28,6 +28,7 @@ import {
   restoreVersion,
 } from "../state/files";
 import { apiJson, ask } from "../state/platform";
+import { exportParametersCsv } from "../state/files";
 import { mutate, selectedBodyId, useApp } from "../state/store";
 import { TEMPLATES } from "../state/templates";
 import { Icon } from "./icons";
@@ -182,6 +183,24 @@ export function ParamsDialog() {
           </button>
         </form>
       </div>
+      {doc.parameters.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+          <button
+            className="btn btn--small"
+            onClick={() =>
+              exportParametersCsv(
+                doc.parameters.map((p) => {
+                  const v = ev.params.get(p.name);
+                  return [p.name, p.expr, p.kind, v?.ok ? formatQuantity(v.value, p.kind, doc.units) : (v?.error ?? ""), p.comment ?? ""];
+                }),
+                doc.name,
+              )
+            }
+          >
+            <Icon name="export" size={16} /> Export CSV
+          </button>
+        </div>
+      )}
     </Modal>
   );
 }

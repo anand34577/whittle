@@ -722,6 +722,14 @@ function Inspector() {
                 </dd>
               </>
             )}
+            {(body ? [body] : bodies).length > 0 && totalVolume > 0 && (
+              <>
+                <dt>Center of mass</dt>
+                <dd className="mono" title="Weighted by volume (uniform density)">
+                  {[0, 1, 2].map((i) => trim((body ? body.centerOfMass[i]! : bodies.reduce((a, b) => a + b.centerOfMass[i]! * b.volume, 0) / totalVolume) / LENGTH_TO_MM[unit], 2)).join(", ")} {unit}
+                </dd>
+              </>
+            )}
             {body && (
               <>
                 <dt>Size</dt>
