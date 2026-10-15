@@ -40,6 +40,7 @@ import {
   type Shape3D,
   type Wire,
   asDir,
+  basicFaceExtrusion,
   cast,
   downcast,
   draw,
@@ -62,7 +63,7 @@ import {
   measureShapeVolumeProperties,
 } from "replicad";
 import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
-import type { CoilFeature, DraftFeature, SweepFeature } from "@whittle/core";
+import type { CoilFeature, DraftFeature, OffsetFaceFeature, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
@@ -753,6 +754,9 @@ export class Builder {
       case "draft":
         return draftFaces(f, bodies, ev);
 
+      case "offsetFace":
+        return offsetFaces(f, bodies, ev);
+
       case "fillet":
       case "chamfer": {
         if (f.edges.length === 0) throw new FeatureError("Select one or more edges in the viewport.", undefined, true);
@@ -1222,6 +1226,36 @@ function draftFaces(f: DraftFeature, bodies: Map<Id, Shape3D>, ev: Evaluator): s
     bodies.set(bodyId, clean(cast(downcast(builder.Shape())) as Shape3D));
   } finally {
     builder.delete();
+  }
+  return warning;
+}
+
+/** Press/Pull on flat faces: sweep each face along its normal and join (pull) or cut (push) the result. */
+function offsetFaces(f: OffsetFaceFeature, bodies: Map<Id, Shape3D>, ev: Evaluator): string | undefined {
+  if (f.faces.length === 0) throw new FeatureError("Click the flat faces to push or pull.", undefined, true);
+  const d = ev.num(f.distance, "length", "Distance");
+  if (Math.abs(d) < 1e-9) throw new FeatureError("The distance can't be zero.");
+  const bodyId = f.faces[0]!.bodyId;
+  const body = bodyForRefs(bodies, bodyId);
+  let warning: string | undefined;
+  // Resolve every face against the untouched body first; the prisms are then applied together.
+  const prisms: Shape3D[] = [];
+  for (const ref of f.faces) {
+    if (ref.bodyId !== bodyId) throw new FeatureError("All faces must belong to one body.");
+    const res = resolveFace(body, ref);
+    if (!res) throw new FeatureError("A face to move no longer exists. Edit the feature to re-pick it.");
+    if (res.uncertain) warning = "A face moved after an upstream change. Please check the selection.";
+    if (res.item.geomType !== "PLANE") throw new FeatureError("Only flat faces can be pushed or pulled. For a hole or boss, edit its feature instead.");
+    const n = res.item.normalAt();
+    prisms.push(basicFaceExtrusion(res.item, n.multiply(d)) as unknown as Shape3D);
+  }
+  try {
+    let out = body;
+    for (const p of prisms) out = d > 0 ? out.fuse(p) : out.cut(p);
+    if (!(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");
+    bodies.set(bodyId, clean(out));
+  } catch {
+    throw new FeatureError("The faces couldn't be moved that far. Try a smaller distance.");
   }
   return warning;
 }

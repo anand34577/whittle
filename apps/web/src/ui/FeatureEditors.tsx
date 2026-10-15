@@ -24,6 +24,7 @@ import type {
   OffsetFeature,
   ScaleFeature,
   DraftFeature,
+  OffsetFaceFeature,
 } from "@whittle/core";
 import { setBodyOp, updateFeature, useApp } from "../state/store";
 import { ExprInput, Segmented, Toggle } from "./ExprInput";
@@ -691,6 +692,24 @@ function DraftEditor({ f }: { f: DraftFeature }) {
   );
 }
 
+function OffsetFaceEditor({ f }: { f: OffsetFaceFeature }) {
+  const n = f.faces.length;
+  return (
+    <>
+      <div className="picker">
+        <Icon name="move" size={16} />
+        <span>{n === 0 ? "Click the flat faces to push or pull" : `${n} face${n > 1 ? "s" : ""}`}</span>
+        {n > 0 && (
+          <button className="link" onClick={() => upd(f, "Clear faces", (d) => void (d.type === "offsetFace" && (d.faces = [])))}>
+            Clear
+          </button>
+        )}
+      </div>
+      <ExprInput label="Distance" kind="length" value={f.distance} autoFocus hint="Positive pulls the face out and adds material; negative pushes it in and removes material" onChange={(v) => upd(f, "Distance", (d) => void (d.type === "offsetFace" && (d.distance = v)))} />
+    </>
+  );
+}
+
 export function FeatureEditor({ f }: { f: Feature }) {
   switch (f.type) {
     case "sweep":
@@ -703,6 +722,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <OffsetEditor f={f} />;
     case "scale":
       return <ScaleEditor f={f} />;
+    case "offsetFace":
+      return <OffsetFaceEditor f={f} />;
     case "draft":
       return <DraftEditor f={f} />;
     case "hole":

@@ -438,6 +438,14 @@ export interface DraftFeature extends FeatureBase {
   flip: boolean;
 }
 
+/** Press/Pull: push or pull flat faces along their normals (grows or cuts material). */
+export interface OffsetFaceFeature extends FeatureBase {
+  type: "offsetFace";
+  faces: FaceRef[];
+  /** Positive pulls the faces outward (adds material), negative pushes them in (removes it). */
+  distance: Expr;
+}
+
 /** Boolean between existing bodies. */
 export interface CombineFeature extends FeatureBase {
   type: "combine";
@@ -465,6 +473,7 @@ export type Feature =
   | OffsetFeature
   | ScaleFeature
   | DraftFeature
+  | OffsetFaceFeature
   | HoleFeature
   | LoftFeature
   | MoveFeature

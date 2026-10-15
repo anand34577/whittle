@@ -8,6 +8,7 @@ import {
   type DraftFeature,
   type ExtrudeFeature,
   type Feature,
+  type OffsetFaceFeature,
   type OffsetFeature,
   type PrimitiveFeature,
   type ScaleFeature,
@@ -20,6 +21,7 @@ import {
   makeDraft,
   makeExtrude,
   makeOffset,
+  makeOffsetFace,
   makePipe,
   makePrimitive,
   makeScale,
@@ -144,6 +146,36 @@ describe("tilted sketch planes", () => {
     expect(max[1] - min[1]).toBeCloseTo(10, 3);
     expect(max[2] - min[2]).toBeCloseTo(10, 3);
     expect(min[1]).toBeCloseTo(-10, 3);
+  });
+});
+
+describe("press/pull", () => {
+  const topFace = (doc: WhittleDocument) => {
+    const b = new Builder().regen(doc, "final").bodies[0]!;
+    const i = b.faces.findIndex((f) => f.surface === "PLANE" && f.normal[2] > 0.99);
+    return { bodyId: b.id, ...b.faces[i]! };
+  };
+
+  it("pulls a flat face out to add material and pushes it in to remove material", () => {
+    const doc = newDocument();
+    box(doc, 20, 20, 20);
+    const pp = push(doc, makeOffsetFace(doc) as OffsetFaceFeature);
+    pp.faces = [topFace(doc)];
+    pp.distance = "5";
+    let r = new Builder().regen(doc, "final");
+    ok(r);
+    expect(r.bodies[0]!.volume).toBeCloseTo(20 * 20 * 25, 0);
+    pp.distance = "-5";
+    r = new Builder().regen(doc, "final");
+    ok(r);
+    expect(r.bodies[0]!.volume).toBeCloseTo(20 * 20 * 15, 0);
+  });
+
+  it("asks for a face first", () => {
+    const doc = newDocument();
+    box(doc);
+    const pp = push(doc, makeOffsetFace(doc) as OffsetFaceFeature);
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === pp.id)?.state).toBe("incomplete");
   });
 });
 

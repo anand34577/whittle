@@ -16,6 +16,7 @@ import {
   makeCoil,
   makeCombine,
   makeDraft,
+  makeOffsetFace,
   makeOffset,
   makeScale,
   makeSplit,
@@ -353,6 +354,16 @@ export function startDraft() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+/** Press/Pull: starts with any flat faces already selected. */
+export function startOffsetFace() {
+  const faces = get()
+    .selection.map((p) => faceRefFromPick(p))
+    .filter((x): x is FaceRef => !!x && x.surface === "PLANE");
+  const f = makeOffsetFace(get().doc);
+  if (f.type === "offsetFace") f.faces = faces;
+  beginNewFeature(f, `New ${f.name}`);
+}
+
 /** Fillet or chamfer every edge of the selected (or latest) body. */
 export function startEdgeFeatureAll(kind: "fillet" | "chamfer") {
   const id = selectedBodyId() ?? lastBodyId();
@@ -425,6 +436,19 @@ export function handlePick(p: Pick | null, additive: boolean) {
       else if (x.path === p.sketchId) x.path = "";
       else if (!x.profile) x.profile = p.sketchId;
       else x.path = p.sketchId;
+    });
+    return;
+  }
+  if (f && f.type === "offsetFace" && p?.kind === "face") {
+    const ref = faceRefFromPick(p);
+    if (!ref) return;
+    if (ref.surface !== "PLANE") return toast("warn", "Only flat faces can be pushed or pulled.");
+    mutate("Pick face", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "offsetFace") return;
+      const i = x.faces.findIndex((e) => d3(e.center, ref.center) < 1e-6);
+      if (i >= 0) x.faces.splice(i, 1);
+      else x.faces.push(ref);
     });
     return;
   }

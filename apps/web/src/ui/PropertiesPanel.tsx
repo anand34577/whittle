@@ -47,6 +47,7 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   offset: "offset",
   scale: "scale",
   draft: "draft",
+  offsetFace: "move",
 };
 
 const ENTITY_LABELS: Record<SketchEntity["type"], string> = {

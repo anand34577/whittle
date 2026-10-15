@@ -192,8 +192,8 @@ function toolsFor(profile: Profile | null) {
       ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["pipe", "thread", "spring", "import"] }
       : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "loft", "thread", "spring", "import"] },
     modify: pro
-      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
-      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
+      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["press-pull", "combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
+      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["press-pull", "combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
   };
 }
 
