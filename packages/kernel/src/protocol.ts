@@ -93,14 +93,35 @@ export interface RegenResult {
   rebuilt: number;
 }
 
+export interface InterferenceItem {
+  a: Id;
+  b: Id;
+  volume: number;
+  bbox: [Vec3, Vec3];
+}
+
+export interface RadiusItem {
+  bodyId: Id;
+  radius: number;
+  /** True when the surface curves inward (a pocket's rounded corner). */
+  concave: boolean;
+  center: Vec3;
+  normal: Vec3;
+}
+
+export type InspectKind = "interference" | "radii";
+export type InspectResult = { kind: "interference"; items: InterferenceItem[] } | { kind: "radii"; items: RadiusItem[] };
+
 export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply";
 
 export type KernelRequest =
   | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id }
-  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[] };
+  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[] }
+  | { type: "inspect"; seq: number; doc: WhittleDocument; kind: InspectKind };
 
 export type KernelResponse =
   | { type: "ready"; ms: number }
   | { type: "regen"; result: RegenResult }
   | { type: "export"; seq: number; data: Uint8Array; mime: string; ext: string }
+  | { type: "inspect"; seq: number; result: InspectResult }
   | { type: "error"; seq: number; message: string };

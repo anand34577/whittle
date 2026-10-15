@@ -47,6 +47,7 @@ import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type Construct
 import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { intersectIntoSketch } from "./sectionCurves";
+import { clearInterference, colorByComponent, makeComponent, runInterference, runMinRadius, toggleGround } from "./inspect";
 import { THEMES } from "./prefs";
 import {
   type AppState,
@@ -92,6 +93,7 @@ const hasGeometry = (s: AppState) => inSketch(s) && s.sketchSel.length > 0;
 const hasEntity = (s: AppState) => inSketch(s) && !!s.selectedEntity;
 const hasImage = (s: AppState) => s.mode.kind === "sketch" && !!findFeature(s.doc, s.mode.sketchId, "sketch")?.image;
 const hasBodies = (s: AppState) => (s.regen?.bodies.length ?? 0) > 0;
+const NEEDS_BODY = (s: AppState) => inModel(s) && hasBodies(s);
 const get = useApp.getState;
 
 /** Leave measure mode before starting another command. */
@@ -225,6 +227,32 @@ export const COMMANDS: Command[] = [
     on: (s) => s.view.analysis === "zebra",
     run: () => setView({ analysis: get().view.analysis === "zebra" ? null : "zebra" }),
   },
+  {
+    id: "curvature",
+    label: "Curvature map",
+    group: "Inspect",
+    icon: "zebra",
+    keywords: "curvature heat map radius tight bend surface analysis",
+    hint: "Color the surface by how sharply it curves: blue is flat, red is tight",
+    on: (s) => s.view.analysis === "curvature",
+    run: () => setView({ analysis: get().view.analysis === "curvature" ? null : "curvature" }),
+  },
+  {
+    id: "accessibility",
+    label: "Accessibility (from above)",
+    group: "Inspect",
+    icon: "overhang",
+    keywords: "reach cutter tool milling 3 axis visible undercut shadow cnc",
+    hint: "Machining from the top: red surfaces can't be reached by a straight-down tool",
+    on: (s) => s.view.analysis === "access",
+    run: () => setView({ analysis: get().view.analysis === "access" ? null : "access" }),
+  },
+  { id: "interference", label: "Interference", group: "Inspect", icon: "combine", keywords: "collision overlap clash intersect bodies check fit", hint: "Find bodies that overlap and mark where", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: () => void runInterference() },
+  { id: "clear-interference", label: "Clear interference marks", group: "Inspect", icon: "close", keywords: "remove red boxes overlap", when: (s) => s.interference.length > 0, run: clearInterference },
+  { id: "min-radius", label: "Minimum radius check", short: "Min radius", group: "Inspect", icon: "measure", keywords: "cutter endmill tool radius inside corner machining cnc tight", hint: "Select inside corners a cutter of a given size can't reach", when: NEEDS_BODY, run: () => void runMinRadius() },
+  { id: "component-colors", label: "Color by component", group: "Inspect", icon: "palette", keywords: "colour parts assembly distinguish each body", hint: "Give every component (or body) its own color", when: NEEDS_BODY, run: colorByComponent },
+  { id: "make-component", label: "Make component", group: "Modify", icon: "body", keywords: "group assembly parts together container new component", hint: "Put the selected bodies in a component so joints move them together", when: NEEDS_BODY, run: makeComponent },
+  { id: "ground", label: "Ground / un-ground", group: "Modify", icon: "isolate", keywords: "fix lock stationary frame base anchor assembly", hint: "A grounded body never moves under a joint", when: NEEDS_BODY, run: toggleGround },
   display("edges", "Shaded with edges", "solid default"),
   display("shaded", "Shaded", "smooth no edges"),
   display("wire", "Wireframe", "lines mesh"),
@@ -407,7 +435,6 @@ export const COMMANDS: Command[] = [
   { id: "welcome", label: "Start screen & templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
 ];
 
-const NEEDS_BODY = (s: AppState) => inModel(s) && hasBodies(s);
 COMMANDS.push(
   { id: "rib", label: "Rib", group: "Create", icon: "extrude", keywords: "reinforce stiffen gusset support wall", hint: "A thin reinforcing wall from a line sketched through the part", when: inModel, run: model(startRib) },
   { id: "web", label: "Web", group: "Create", icon: "extrude", keywords: "thin wall reinforce open line", hint: "A thin wall from an open line, standing up from the sketch", when: inModel, run: model(startWeb) },

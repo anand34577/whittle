@@ -101,6 +101,7 @@ export function Browser() {
                 <button className="tree__main" onClick={() => useApp.setState({ selection: [{ kind: "body", bodyId: b.id }] })} onDoubleClick={() => editFeature(b.id)}>
                   <span className="tree__swatch" style={{ background: meta?.color ?? "#ccc" }} />
                   <span className={`tree__name ${visible ? "" : "is-muted"}`}>{meta?.name ?? "Body"}</span>
+                  {(meta?.component || meta?.grounded) && <span className="tree__action">{[meta?.component, meta?.grounded ? "grounded" : ""].filter(Boolean).join(" · ")}</span>}
                 </button>
                 <button
                   className="tree__eye"

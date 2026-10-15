@@ -3,6 +3,9 @@ import {
   type AlignFeature,
   type BoundaryFillFeature,
   type DeleteFaceFeature,
+  type JointFeature,
+  type WhittleDocument,
+  frameAxes,
   type Evaluator,
   type Id,
   type PatternFeature,
@@ -32,7 +35,7 @@ import {
   measureShapeVolumeProperties,
 } from "replicad";
 import type { SketchFrame } from "./protocol";
-import { FeatureError, bodyForRefs, clean, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./build";
+import { FeatureError, bodyForRefs, boxCenter, clean, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./build";
 import { circleOf } from "./construct";
 import { add, cross, dist, dot, norm, resolveFace, scale, sub } from "./refs";
 
@@ -348,4 +351,94 @@ export function patternOnPath(f: PatternFeature, src: Shape3D, sketches: Map<Id,
     copies.push(c);
   }
   return copies;
+}
+
+/* ───────────────────────────── Joints ───────────────────────────── */
+
+const TURNS = new Set(["revolute", "cylindrical", "pinslot", "planar"]);
+const SLIDES = new Set(["slider", "cylindrical", "pinslot", "planar"]);
+
+/** Bodies that move together: everything in the same component (just the body when it has none). */
+export function componentBodies(doc: WhittleDocument, id: Id): Id[] {
+  const c = doc.bodies[id]?.component;
+  if (!c) return [id];
+  return Object.entries(doc.bodies)
+    .filter(([, m]) => m.component === c)
+    .map(([k]) => k);
+}
+
+/** The values a joint puts its body at (radians and mm), with limits and any motion link applied. */
+export function jointValue(f: JointFeature, doc: WhittleDocument, ev: Evaluator, depth = 0): { angle: number; dist: number; dist2: number; angle2: number; angle3: number; warning?: string } {
+  let warning: string | undefined;
+  const t = f.joint;
+  let angle = TURNS.has(t) || t === "ball" ? ev.num(f.angle, "angle", "Angle") : 0;
+  let dist = SLIDES.has(t) ? ev.num(f.distance, "length", "Distance") : 0;
+  const dist2 = t === "planar" ? ev.num(f.distance2 ?? "0", "length", "Second distance") : 0;
+  const angle2 = t === "ball" ? ev.num(f.angle2 ?? "0", "angle", "Angle about Y") : 0;
+  const angle3 = t === "ball" ? ev.num(f.angle3 ?? "0", "angle", "Angle about Z") : 0;
+  if (f.link && depth < 8) {
+    const src = doc.features.find((x) => x.id === f.link!.joint);
+    if (!src || src.type !== "joint") throw new FeatureError("The joint this one follows is missing. Choose it again.");
+    const sv = jointValue(src, doc, ev, depth + 1);
+    const srcMain = src.joint === "revolute" || src.joint === "ball" ? (sv.angle * 180) / Math.PI : TURNS.has(src.joint) && !SLIDES.has(src.joint) ? (sv.angle * 180) / Math.PI : SLIDES.has(src.joint) ? sv.dist : (sv.angle * 180) / Math.PI;
+    const v = ev.num(f.link.ratio, "number", "Ratio") * srcMain;
+    if (t === "revolute" || t === "ball") angle = (v * Math.PI) / 180;
+    else dist = v;
+  }
+  if (f.limited) {
+    const rotLimited = t === "revolute";
+    const kind = rotLimited ? "angle" : "length";
+    const lo = ev.num(f.min, kind, "Minimum");
+    const hi = ev.num(f.max, kind, "Maximum");
+    const x = rotLimited ? angle : dist;
+    const c = Math.min(hi, Math.max(lo, x));
+    if (c !== x) warning = c === lo ? "The joint is at its lower limit." : "The joint is at its upper limit.";
+    if (rotLimited) angle = c;
+    else if (SLIDES.has(t)) dist = c;
+  }
+  return { angle, dist, dist2, angle2, angle3, warning };
+}
+
+/** Put the moving body (and its whole component) where the joint's values say. */
+export function applyJoint(f: JointFeature, bodies: Map<Id, Shape3D>, sketches: Map<Id, { frame: SketchFrame }>, ev: Evaluator, doc: WhittleDocument): string | undefined {
+  const id = f.bodyId;
+  if (!id || !bodies.has(id)) throw new FeatureError("Pick the body that moves.", undefined, true);
+  if (f.fixedId && !bodies.has(f.fixedId)) throw new FeatureError("The body this joint is attached to no longer exists. Re-pick it.");
+  if (f.fixedId === id) throw new FeatureError("Pick two different bodies.", undefined, true);
+  const v = jointValue(f, doc, ev);
+  let warning = v.warning;
+  if (doc.bodies[id]?.grounded) {
+    const moves = Math.abs(v.angle) + Math.abs(v.dist) + Math.abs(v.dist2) + Math.abs(v.angle2) + Math.abs(v.angle3) > 1e-12;
+    return moves ? "This body is grounded, so it stays put. Un-ground it or make the other body the moving one." : undefined;
+  }
+  const axisFrame = f.axisRef ? sketches.get(f.axisRef)?.frame : undefined;
+  if (f.axisRef && !axisFrame) throw new FeatureError("The construction axis is missing. Choose another axis.");
+  const originFrame = f.originRef ? sketches.get(f.originRef)?.frame : undefined;
+  if (f.originRef && !originFrame) throw new FeatureError("The construction point is missing. Choose another point.");
+  const world: Record<"x" | "y" | "z", Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+  const axis: Vec3 = axisFrame ? norm(axisFrame.normal) : world[f.axis];
+  const { xDir, yDir } = frameAxes(axis);
+  const src = bodies.get(id)!;
+  const pivot: Vec3 = originFrame ? originFrame.origin : f.origin === "point" ? (f.point.map((p, i) => ev.num(p, "length", "XYZ"[i]!)) as Vec3) : axisFrame ? axisFrame.origin : boxCenter(src);
+  const move = (s: Shape3D): Shape3D => {
+    let o = s.clone();
+    if (f.joint === "ball") {
+      const axes: Vec3[] = axisFrame ? [xDir, yDir, axis] : [world.x, world.y, world.z];
+      [v.angle, v.angle2, v.angle3].forEach((a, i) => {
+        if (Math.abs(a) > 1e-12) o = o.rotate(deg(a), pivot, axes[i]!);
+      });
+      return o;
+    }
+    if (Math.abs(v.angle) > 1e-12 && TURNS.has(f.joint)) o = o.rotate(deg(v.angle), pivot, axis);
+    let t: Vec3 = [0, 0, 0];
+    if (f.joint === "slider" || f.joint === "cylindrical") t = scale(axis, v.dist);
+    else if (f.joint === "pinslot") t = scale(xDir, v.dist);
+    else if (f.joint === "planar") t = add(scale(xDir, v.dist), scale(yDir, v.dist2));
+    return t.some((c) => Math.abs(c) > 1e-12) ? o.translate(t) : o;
+  };
+  for (const b of componentBodies(doc, id)) {
+    const s = bodies.get(b);
+    if (s && b !== f.fixedId && !doc.bodies[b]?.grounded) bodies.set(b, move(s));
+  }
+  return warning;
 }

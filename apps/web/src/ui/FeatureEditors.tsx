@@ -1,5 +1,6 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
+import { useEffect, useRef, useState } from "react";
 import { CONSTRUCT_MODES } from "@whittle/core";
 import type {
   BodyOp,
@@ -933,24 +934,78 @@ function BoundaryFillEditor({ f }: { f: BoundaryFillFeature }) {
   );
 }
 
+const JOINT_TYPES = [
+  { value: "rigid", label: "Rigid: no motion" },
+  { value: "revolute", label: "Revolute: turns about an axis" },
+  { value: "slider", label: "Slider: slides along an axis" },
+  { value: "cylindrical", label: "Cylindrical: turns and slides" },
+  { value: "pinslot", label: "Pin-slot: turns on a pin that slides" },
+  { value: "planar", label: "Planar: slides and turns on a plane" },
+  { value: "ball", label: "Ball: turns every way" },
+] as const;
+
+/** A drag bar that drives a joint value live (and Play sweeps it back and forth). */
+function Drive({ f, field, min, max, unit }: { f: JointFeature; field: "angle" | "distance"; min: number; max: number; unit: string }) {
+  const timer = useRef<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const value = Number.parseFloat(f[field]);
+  const write = (v: number) => updateFeature(f.id, "Drive joint", (d) => void (d.type === "joint" && (d[field] = String(Math.round(v * 100) / 100))), f.id + "drive");
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearInterval(timer.current);
+    },
+    [],
+  );
+  const play = () => {
+    if (timer.current) {
+      window.clearInterval(timer.current);
+      timer.current = null;
+      return setPlaying(false);
+    }
+    let dir = 1;
+    let v = Number.isFinite(value) ? value : min;
+    setPlaying(true);
+    timer.current = window.setInterval(() => {
+      v += (dir * (max - min)) / 40;
+      if (v >= max) ((v = max), (dir = -1));
+      if (v <= min) ((v = min), (dir = 1));
+      write(v);
+    }, 120);
+  };
+  return (
+    <div className="field">
+      <span className="field__label">Drive ({unit})</span>
+      <div className="field-row">
+        <input type="range" min={min} max={max} step={(max - min) / 200} value={Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min} onChange={(e) => write(Number(e.target.value))} style={{ flex: 1 }} aria-label="Drive the joint" />
+        <button className="link" onClick={play}>
+          {playing ? "Stop" : "Play"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function JointEditor({ f }: { f: JointFeature }) {
-  const turns = f.joint === "revolute" || f.joint === "cylindrical";
-  const slides = f.joint === "slider" || f.joint === "cylindrical";
-  const limitKind = f.joint === "revolute" ? "angle" : "length";
+  const features = useApp((s) => s.doc.features);
+  const t = f.joint;
+  const turns = t === "revolute" || t === "cylindrical" || t === "pinslot" || t === "planar";
+  const slides = t === "slider" || t === "cylindrical" || t === "pinslot" || t === "planar";
+  const ball = t === "ball";
+  const mainIsTurn = t === "revolute" || ball;
+  const limitKind = t === "revolute" ? "angle" : "length";
   const set = (label: string, recipe: (d: JointFeature) => void) => upd(f, label, (d) => void (d.type === "joint" && recipe(d)));
+  const axes = constructsBefore(features, f.id, "axis");
+  const points = features.slice(0, features.findIndex((x) => x.id === f.id)).filter((x) => x.type === "construct" && x.mode.startsWith("point"));
+  const others = features.slice(0, features.findIndex((x) => x.id === f.id)).filter((x) => x.type === "joint");
+  const lim = f.limited ? [Number.parseFloat(f.min), Number.parseFloat(f.max)] : null;
   return (
     <>
       <BodySelect label="Moving body" value={f.bodyId} allowAuto="Choose…" exclude={f.id} onChange={(v) => set("Body", (d) => void (d.bodyId = v))} />
       <BodySelect label="Attached to" value={f.fixedId} allowAuto="Choose…" exclude={f.id} onChange={(v) => set("Attached to", (d) => void (d.fixedId = v))} />
-      <Segmented
+      <Select
         label="Joint"
         value={f.joint}
-        options={[
-          { value: "rigid", label: "Rigid", title: "No motion: holds the body where it is" },
-          { value: "revolute", label: "Revolute", title: "Turns about an axis (hinge, wheel)" },
-          { value: "slider", label: "Slider", title: "Slides along an axis (drawer, piston)" },
-          { value: "cylindrical", label: "Cylindrical", title: "Turns and slides along the same axis (screw)" },
-        ]}
+        options={JOINT_TYPES.map((j) => ({ value: j.value, label: j.label }))}
         onChange={(v) =>
           set("Joint type", (d) => {
             d.joint = v;
@@ -959,39 +1014,58 @@ function JointEditor({ f }: { f: JointFeature }) {
           })
         }
       />
-      {f.joint !== "rigid" && (
-        <Segmented
+      {t !== "rigid" && (
+        <Select
           label="Axis"
-          value={f.axis}
-          options={[
-            { value: "x", label: "X" },
-            { value: "y", label: "Y" },
-            { value: "z", label: "Z" },
-          ]}
-          onChange={(v) => set("Axis", (d) => void (d.axis = v))}
+          value={f.axisRef ?? f.axis}
+          options={[...ORIGIN_AXES, ...axes.map((c) => ({ value: c.id, label: c.name, icon: "axis" as const }))]}
+          onChange={(v) => set("Axis", (d) => (v === "x" || v === "y" || v === "z" ? ((d.axis = v), (d.axisRef = undefined)) : (d.axisRef = v)))}
         />
       )}
-      {turns && (
-        <Segmented
-          label="Pivot at"
-          value={f.origin}
-          options={[
-            { value: "center", label: "Body center" },
-            { value: "point", label: "A point" },
-          ]}
-          onChange={(v) => set("Pivot", (d) => void (d.origin = v))}
+      {(turns || ball) && (
+        <>
+          <Segmented
+            label="Pivot at"
+            value={f.origin}
+            options={[
+              { value: "center", label: "Body center" },
+              { value: "point", label: "A point" },
+            ]}
+            onChange={(v) => set("Pivot", (d) => void (d.origin = v))}
+          />
+          {f.origin === "point" && !f.originRef && (
+            <div className="field-row">
+              {(["X", "Y", "Z"] as const).map((axis, i) => (
+                <ExprInput key={axis} label={axis} kind="length" value={f.point[i]!} onChange={(v) => set("Pivot", (d) => void (d.point[i] = v))} />
+              ))}
+            </div>
+          )}
+          {points.length > 0 && (
+            <Select
+              label="Joint origin"
+              value={f.originRef ?? ""}
+              placeholder="None (use the pivot above)"
+              options={[{ value: "", label: "None" }, ...points.map((c) => ({ value: c.id, label: c.name, icon: "point" as const }))]}
+              onChange={(v) => set("Joint origin", (d) => void (d.originRef = v || undefined))}
+            />
+          )}
+        </>
+      )}
+      {(turns || ball) && <ExprInput label={ball ? "Turn about X" : "Angle"} kind="angle" value={f.angle} autoFocus hint="Drive the joint: change this to turn the body" onChange={(v) => set("Angle", (d) => void (d.angle = v))} />}
+      {ball && <ExprInput label="Turn about Y" kind="angle" value={f.angle2 ?? "0"} onChange={(v) => set("Angle Y", (d) => void (d.angle2 = v))} />}
+      {ball && <ExprInput label="Turn about Z" kind="angle" value={f.angle3 ?? "0"} onChange={(v) => set("Angle Z", (d) => void (d.angle3 = v))} />}
+      {slides && <ExprInput label={t === "planar" ? "Slide along the plane (1)" : "Distance"} kind="length" value={f.distance} autoFocus={!turns} hint="Drive the joint: change this to slide the body" onChange={(v) => set("Distance", (d) => void (d.distance = v))} />}
+      {t === "planar" && <ExprInput label="Slide along the plane (2)" kind="length" value={f.distance2 ?? "0"} onChange={(v) => set("Distance 2", (d) => void (d.distance2 = v))} />}
+      {t !== "rigid" && !f.link && (
+        <Drive
+          f={f}
+          field={mainIsTurn ? "angle" : "distance"}
+          min={lim && Number.isFinite(lim[0]) ? lim[0]! : mainIsTurn ? -180 : -50}
+          max={lim && Number.isFinite(lim[1]) ? lim[1]! : mainIsTurn ? 180 : 50}
+          unit={mainIsTurn ? "degrees" : "length"}
         />
       )}
-      {turns && f.origin === "point" && (
-        <div className="field-row">
-          {(["X", "Y", "Z"] as const).map((axis, i) => (
-            <ExprInput key={axis} label={axis} kind="length" value={f.point[i]!} onChange={(v) => set("Pivot", (d) => void (d.point[i] = v))} />
-          ))}
-        </div>
-      )}
-      {turns && <ExprInput label="Angle" kind="angle" value={f.angle} autoFocus hint="Drive the joint: change this to turn the body" onChange={(v) => set("Angle", (d) => void (d.angle = v))} />}
-      {slides && <ExprInput label="Distance" kind="length" value={f.distance} autoFocus={!turns} hint="Drive the joint: change this to slide the body" onChange={(v) => set("Distance", (d) => void (d.distance = v))} />}
-      {f.joint !== "rigid" && (
+      {t !== "rigid" && !ball && (
         <>
           <Toggle label="Limit the travel" checked={f.limited} onChange={(v) => set("Limits", (d) => void (d.limited = v))} />
           {f.limited && (
@@ -1001,6 +1075,18 @@ function JointEditor({ f }: { f: JointFeature }) {
             </div>
           )}
         </>
+      )}
+      {t !== "rigid" && others.length > 0 && (
+        <Disclosure summary="Motion link (gears, lead screws)" defaultOpen={!!f.link}>
+          <Select
+            label="Follows joint"
+            value={f.link?.joint ?? ""}
+            placeholder="Independent"
+            options={[{ value: "", label: "Independent" }, ...others.map((j) => ({ value: j.id, label: j.name }))]}
+            onChange={(v) => set("Motion link", (d) => void (d.link = v ? { joint: v, ratio: d.link?.ratio ?? "1" } : undefined))}
+          />
+          {f.link && <ExprInput label="Ratio" kind="number" value={f.link.ratio} hint="Value = ratio × the other joint's value (degrees or length). Use -1 to run opposite, 5 for 5 mm per degree." onChange={(v) => set("Link ratio", (d) => void (d.link && (d.link.ratio = v)))} />}
+        </Disclosure>
       )}
     </>
   );

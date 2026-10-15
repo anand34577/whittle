@@ -156,6 +156,7 @@ export class Viewport {
   private view: ViewSettings = { display: "edges", section: null, analysis: null, grid: true, ortho: false };
   private lastBodies: { list: BodyResult[]; meta: Record<Id, BodyMeta> } = { list: [], meta: {} };
   private measureGroup = new THREE.Group();
+  private flagGroup = new THREE.Group();
   private fillGroup = new THREE.Group();
   private shadow: THREE.Mesh;
   private clip = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -223,7 +224,7 @@ export class Viewport {
     pmrem.dispose();
 
     this.persp.up.set(0, 0, 1);
-    this.scene.add(this.shadow, this.imageGroup, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.grid, this.planes, this.cplanes, this.hemi, this.persp, this.orthoCam);
+    this.scene.add(this.shadow, this.imageGroup, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.flagGroup, this.grid, this.planes, this.cplanes, this.hemi, this.persp, this.orthoCam);
     this.persp.add(this.headlight);
     this.headlight.position.set(0.3, 0.6, 1);
     const orthoLight = this.headlight.clone();
@@ -489,7 +490,7 @@ export class Viewport {
     const xray = !overlay && v.display === "xray";
     const opacity = xray ? Math.min(0.28, look.opacity) : look.opacity;
     const analysis = overlay ? null : v.analysis;
-    const tinted = analysis === "overhang" || analysis === "draft";
+    const tinted = analysis === "overhang" || analysis === "draft" || analysis === "curvature" || analysis === "access";
     if (tinted) geo.setAttribute("color", this.analysisColors(b, color, analysis));
     const mat = new THREE.MeshStandardMaterial({
       color: tinted ? "#ffffff" : color,
@@ -539,7 +540,9 @@ export class Viewport {
    * draft: walls along the pull (Z) with under 0.1 degrees of draft are red,
    * under 1 degree amber, everything that releases cleanly green.
    */
-  private analysisColors(b: BodyResult, color: string, kind: "overhang" | "draft"): THREE.BufferAttribute {
+  private analysisColors(b: BodyResult, color: string, kind: "overhang" | "draft" | "curvature" | "access"): THREE.BufferAttribute {
+    if (kind === "curvature") return this.curvatureColors(b);
+    if (kind === "access") return this.accessColors(b, color);
     const base = new THREE.Color(color);
     const warn = new THREE.Color("#e2553f");
     const amber = new THREE.Color("#e6a23c");
@@ -560,6 +563,100 @@ export class Viewport {
       out[i + 2] = c.b;
     }
     return new THREE.BufferAttribute(out, 3);
+  }
+
+  /** Mean-curvature heat map: blue is flat, red is tight (per vertex, from how fast the normal turns along each edge). */
+  private curvatureColors(b: BodyResult): THREE.BufferAttribute {
+    const n = b.normals;
+    const p = b.positions;
+    const idx = b.indices;
+    const k = new Float32Array(n.length / 3);
+    const diag = Math.hypot(b.bbox[1][0] - b.bbox[0][0], b.bbox[1][1] - b.bbox[0][1], b.bbox[1][2] - b.bbox[0][2]) || 1;
+    for (let t = 0; t + 2 < idx.length; t += 3) {
+      for (let e = 0; e < 3; e++) {
+        const i = idx[t + e]!;
+        const j = idx[t + ((e + 1) % 3)]!;
+        const len = Math.hypot(p[i * 3]! - p[j * 3]!, p[i * 3 + 1]! - p[j * 3 + 1]!, p[i * 3 + 2]! - p[j * 3 + 2]!);
+        if (len < 1e-9) continue;
+        const turn = Math.hypot(n[i * 3]! - n[j * 3]!, n[i * 3 + 1]! - n[j * 3 + 1]!, n[i * 3 + 2]! - n[j * 3 + 2]!) / len;
+        k[i] = Math.max(k[i]!, turn);
+        k[j] = Math.max(k[j]!, turn);
+      }
+    }
+    const out = new Float32Array(n.length);
+    const c = new THREE.Color();
+    for (let v = 0; v < k.length; v++) {
+      const s = Math.min(1, (k[v]! * diag) / 8);
+      c.setHSL((1 - s) * 0.66, 0.85, 0.5);
+      out[v * 3] = c.r;
+      out[v * 3 + 1] = c.g;
+      out[v * 3 + 2] = c.b;
+    }
+    return new THREE.BufferAttribute(out, 3);
+  }
+
+  /** Reach from above (a 3-axis tool): vertices with something higher above them are shaded red. */
+  private accessColors(b: BodyResult, color: string): THREE.BufferAttribute {
+    const p = b.positions;
+    const idx = b.indices;
+    const N = 192;
+    const [lo, hi] = b.bbox;
+    const sx = (N - 1) / Math.max(1e-9, hi[0] - lo[0]);
+    const sy = (N - 1) / Math.max(1e-9, hi[1] - lo[1]);
+    const top = new Float32Array(N * N).fill(-Infinity);
+    for (let t = 0; t + 2 < idx.length; t += 3) {
+      const v = [idx[t]! * 3, idx[t + 1]! * 3, idx[t + 2]! * 3];
+      const px = v.map((o) => (p[o]! - lo[0]) * sx);
+      const py = v.map((o) => (p[o + 1]! - lo[1]) * sy);
+      const x0 = Math.max(0, Math.floor(Math.min(...px)));
+      const x1 = Math.min(N - 1, Math.ceil(Math.max(...px)));
+      const y0 = Math.max(0, Math.floor(Math.min(...py)));
+      const y1 = Math.min(N - 1, Math.ceil(Math.max(...py)));
+      const den = (py[1]! - py[2]!) * (px[0]! - px[2]!) + (px[2]! - px[1]!) * (py[0]! - py[2]!);
+      if (Math.abs(den) < 1e-12) continue;
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const a = ((py[1]! - py[2]!) * (x - px[2]!) + (px[2]! - px[1]!) * (y - py[2]!)) / den;
+          const c = ((py[2]! - py[0]!) * (x - px[2]!) + (px[0]! - px[2]!) * (y - py[2]!)) / den;
+          const d = 1 - a - c;
+          if (a < -0.02 || c < -0.02 || d < -0.02) continue;
+          const z = a * p[v[0]! + 2]! + c * p[v[1]! + 2]! + d * p[v[2]! + 2]!;
+          if (z > top[y * N + x]!) top[y * N + x] = z;
+        }
+      }
+    }
+    const base = new THREE.Color(color);
+    const hidden = new THREE.Color("#e2553f");
+    const out = new Float32Array(p.length);
+    const tol = (hi[2] - lo[2]) * 0.01 + 0.05;
+    for (let i = 0; i < p.length; i += 3) {
+      const x = Math.min(N - 1, Math.max(0, Math.round((p[i]! - lo[0]) * sx)));
+      const y = Math.min(N - 1, Math.max(0, Math.round((p[i + 1]! - lo[1]) * sy)));
+      const reach = p[i + 2]! >= top[y * N + x]! - tol;
+      const c = reach ? base : hidden;
+      out[i] = c.r;
+      out[i + 1] = c.g;
+      out[i + 2] = c.b;
+    }
+    return new THREE.BufferAttribute(out, 3);
+  }
+
+  /** Red boxes around overlaps found by the interference check. */
+  setFlags(boxes: [number[], number[]][]) {
+    this.clearGroup(this.flagGroup);
+    for (const [lo, hi] of boxes) {
+      const geo = new THREE.BoxGeometry(Math.max(0.2, hi[0]! - lo[0]!), Math.max(0.2, hi[1]! - lo[1]!), Math.max(0.2, hi[2]! - lo[2]!));
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: "#e2553f", transparent: true, opacity: 0.35, depthTest: false }));
+      mesh.position.set((lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2, (lo[2]! + hi[2]!) / 2);
+      mesh.raycast = () => {};
+      mesh.renderOrder = 6;
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: "#e2553f", depthTest: false }));
+      edges.position.copy(mesh.position);
+      edges.raycast = () => {};
+      edges.renderOrder = 7;
+      this.flagGroup.add(mesh, edges);
+    }
+    this.invalidate();
   }
 
   private dropView(v: BodyView, parent: THREE.Group) {

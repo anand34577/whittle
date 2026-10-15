@@ -682,6 +682,34 @@ function Inspector() {
             </div>
           </div>
         )}
+        {body && meta && (
+          <div className="panel__section">
+            <h3 className="eyebrow">Assembly</h3>
+            <Select
+              label="Component"
+              value={meta.component ?? ""}
+              placeholder="None"
+              options={[
+                { value: "", label: "None" },
+                ...[...new Set(Object.values(doc.bodies).map((m) => m.component).filter((c): c is string => !!c))].map((c) => ({ value: c, label: c })),
+                { value: "__new__", label: "New component…" },
+              ]}
+              onChange={(v) =>
+                mutate("Set component", (d) => {
+                  const m = d.bodies[body.id];
+                  if (!m) return;
+                  if (v === "__new__") {
+                    const used = new Set(Object.values(d.bodies).map((x) => x.component));
+                    let n = 1;
+                    while (used.has(`Component ${n}`)) n++;
+                    m.component = `Component ${n}`;
+                  } else m.component = v || undefined;
+                })
+              }
+            />
+            <Toggle label="Grounded" hint="A grounded body never moves under a joint" checked={!!meta.grounded} onChange={(v) => mutate("Ground", (d) => void (d.bodies[body.id]!.grounded = v || undefined))} />
+          </div>
+        )}
         {p?.kind === "face" && body && (
           <div className="panel__section">
             <h3 className="eyebrow">Face</h3>

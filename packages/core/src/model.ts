@@ -547,7 +547,16 @@ export interface JointFeature extends FeatureBase {
   bodyId?: Id;
   /** The body it is attached to (stays put; documents what the joint connects). */
   fixedId?: Id;
-  joint: "rigid" | "revolute" | "slider" | "cylindrical";
+  joint: "rigid" | "revolute" | "slider" | "cylindrical" | "planar" | "ball" | "pinslot";
+  /** Joint origin: a construction axis (direction and pivot line) and/or point to use instead of the X/Y/Z axis and pivot above. */
+  axisRef?: Id;
+  originRef?: Id;
+  /** Planar: slide along the plane's second direction. Ball: turns about the second and third axes. */
+  distance2?: Expr;
+  angle2?: Expr;
+  angle3?: Expr;
+  /** Motion link: this joint's main value follows another joint's (degrees or length) times a ratio. */
+  link?: { joint: Id; ratio: Expr };
   /** Where the joint axis passes through: the moving body's center, or a point. */
   origin: "center" | "point";
   point: [Expr, Expr, Expr];
@@ -631,6 +640,10 @@ export interface BodyMeta {
   visible: boolean;
   /** Appearance preset (see MATERIAL_LOOKS in the web app). */
   look?: string;
+  /** Bodies sharing a component name move together under joints. */
+  component?: string;
+  /** A grounded body never moves under a joint. */
+  grounded?: boolean;
 }
 
 export interface WhittleDocument {

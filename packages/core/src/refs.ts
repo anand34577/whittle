@@ -54,7 +54,7 @@ export function featureInputs(f: Feature): Id[] {
     case "scale":
       return f.bodyId ? [f.bodyId] : [];
     case "joint":
-      return [...(f.bodyId ? [f.bodyId] : []), ...(f.fixedId ? [f.fixedId] : [])];
+      return [...(f.bodyId ? [f.bodyId] : []), ...(f.fixedId ? [f.fixedId] : []), ...(f.axisRef ? [f.axisRef] : []), ...(f.originRef ? [f.originRef] : []), ...(f.link ? [f.link.joint] : [])];
     case "draft":
     case "offsetFace":
       return [...new Set(f.faces.map((x) => x.bodyId))];

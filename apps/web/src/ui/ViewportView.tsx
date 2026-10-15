@@ -573,6 +573,12 @@ export function ViewportView() {
     vp.setSketches(list);
   }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature]);
 
+  // Interference boxes.
+  const interference = useApp((s) => s.interference);
+  useEffect(() => {
+    vp?.setFlags(interference.map((i) => i.bbox as unknown as [number[], number[]]));
+  }, [vp, interference]);
+
   // Construction planes.
   useEffect(() => {
     vp?.setConstructionPlanes(regen?.planes ?? []);

@@ -55,7 +55,7 @@ export interface ViewSettings {
   display: DisplayMode;
   section: { axis: "x" | "y" | "z"; offset: number; flip: boolean } | null;
   /** Face coloring: overhangs (3D printing), draft angle (moulding) or zebra stripes (surface quality). */
-  analysis: "overhang" | "draft" | "zebra" | null;
+  analysis: "overhang" | "draft" | "zebra" | "curvature" | "access" | null;
   grid: boolean;
   ortho: boolean;
 }
@@ -99,6 +99,8 @@ export interface AppState {
   selectedEntity: Id | null;
   /** Selected constraint-driven geometry and constraints in the open sketch (may hold stale ids; check before use). */
   sketchSel: Id[];
+  /** Overlapping bodies found by the interference check (drawn as red boxes). */
+  interference: { a: Id; b: Id; volume: number; bbox: [Vec3, Vec3] }[];
   /** Points placed so far by the active sketch tool (drives the hint line). */
   sketchStep: number;
 
@@ -142,6 +144,7 @@ export const useApp = create<AppState>(() => ({
   hover: null,
   selectedEntity: null,
   sketchSel: [],
+  interference: [],
   sketchStep: 0,
   theme: resolveTheme(initialPrefs.theme),
   prefs: initialPrefs,
