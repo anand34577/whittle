@@ -10,7 +10,7 @@ export type ResolvedEntity =
   | { id: string; type: "circle"; cx: number; cy: number; r: number; construction: boolean; mode: string }
   | { id: string; type: "polygon"; cx: number; cy: number; r: number; sides: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "slot"; cx: number; cy: number; length: number; width: number; angle: number; construction: boolean; mode: string }
-  | { id: string; type: "polyline"; points: Vec2[]; corner: number; smooth: boolean; construction: boolean; mode: string }
+  | { id: string; type: "polyline"; points: Vec2[]; corner: number; smooth: boolean; open: boolean; construction: boolean; mode: string }
   | { id: string; type: "ellipse"; cx: number; cy: number; rx: number; ry: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "text"; x: number; y: number; text: string; size: number; bold: boolean; angle: number; construction: boolean; mode: string }
   | { id: string; type: "gear"; cx: number; cy: number; teeth: number; module: number; bore: number; construction: boolean; mode: string };
@@ -76,7 +76,8 @@ export function resolveEntity(e: SketchEntity, ev: Evaluator): ResolvedEntity {
       const points = e.points.map(([px, py], i) => [L(px, `Point ${i + 1} X`), L(py, `Point ${i + 1} Y`)] as Vec2);
       const corner = e.corner ? L(e.corner, "Corner radius") : 0;
       if (corner < 0) throw new Error("Corner radius can't be negative");
-      return { ...common, type: "polyline", points, corner, smooth: !!e.smooth };
+      if (!e.open && points.length < 3) throw new Error("A closed outline needs at least three points");
+      return { ...common, type: "polyline", points, corner, smooth: !!e.smooth, open: !!e.open };
     }
     case "ellipse": {
       const rx = L(e.rx, "Radius X");
@@ -176,6 +177,7 @@ export function entityOutline(r: ResolvedEntity, segments = 64): Vec2[] {
       });
     }
     case "polyline":
+      if (r.open) return r.smooth && r.points.length >= 3 ? smoothOpen(r.points, 12) : r.points;
       if (r.smooth && r.points.length >= 3) return smoothClosed(r.points, 12);
       if (r.corner > 0 && r.points.length >= 3) return roundCorners(r.points, r.corner);
       return r.points;
@@ -240,6 +242,32 @@ function smoothClosed(pts: Vec2[], perSeg: number): Vec2[] {
       out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
     }
   }
+  return out;
+}
+
+/** Open Catmull-Rom curve through the points (end tangents mirror the neighbours). */
+function smoothOpen(pts: Vec2[], perSeg: number): Vec2[] {
+  const n = pts.length;
+  const at = (i: number): Vec2 => {
+    if (i < 0) return [2 * pts[0]![0] - pts[1]![0], 2 * pts[0]![1] - pts[1]![1]];
+    if (i >= n) return [2 * pts[n - 1]![0] - pts[n - 2]![0], 2 * pts[n - 1]![1] - pts[n - 2]![1]];
+    return pts[i]!;
+  };
+  const out: Vec2[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = at(i - 1);
+    const p1 = at(i);
+    const p2 = at(i + 1);
+    const p3 = at(i + 2);
+    for (let k = 0; k < perSeg; k++) {
+      const t = k / perSeg;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const f = (a: number, b: number, c: number, d: number) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+      out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  out.push(pts[n - 1]!);
   return out;
 }
 
@@ -381,6 +409,7 @@ export function entitySnapPoints(r: ResolvedEntity): { p: Vec2; kind: "end" | "m
     case "polyline":
       r.points.forEach((p, i) => {
         out.push({ p, kind: "end" });
+        if (r.open && i === r.points.length - 1) return;
         const q = r.points[(i + 1) % r.points.length]!;
         out.push({ p: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], kind: "mid" });
       });

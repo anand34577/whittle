@@ -122,6 +122,7 @@ export function dependsOn(expr: string, parameters: Parameter[]): Set<string> {
 const NOT_EXPR = new Set([
   "id", "type", "name", "mode", "anchor", "text", "sketch", "extent", "op", "target", "axis", "shape", "bodyId", "pattern",
   "style", "fileName", "format", "data", "surface", "curve", "sketches", "tools", "face", "faces", "edges", "comment",
+  "profile", "path", "orientation", "section", "keep", "center", "pull", "tilt",
 ]);
 
 function renameIn(expr: string, from: string, to: string): string {

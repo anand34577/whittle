@@ -61,6 +61,12 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   move: "Move",
   combine: "Combine",
   import: "Import",
+  sweep: "Sweep",
+  coil: "Coil",
+  split: "Split",
+  offset: "Offset",
+  scale: "Scale",
+  draft: "Draft",
 };
 
 /** "Extrude 3" — next free numbered name for a feature type. */
@@ -172,6 +178,43 @@ export function makeCombine(doc: WhittleDocument, target?: Id, tools: Id[] = [])
 
 export function makeImport(doc: WhittleDocument, fileName: string, format: "step" | "stl", data: string): Feature {
   return { id: uid("im"), type: "import", name: nextName(doc, "Import"), fileName, format, data, scale: "1" };
+}
+
+export function makeSweep(doc: WhittleDocument, profile: Id, path: Id): Feature {
+  return { id: uid("sw"), type: "sweep", name: nextName(doc, "Sweep"), profile, path, orientation: "frenet", op: "new" };
+}
+
+/** A coil or thread. `kind` picks sensible starting sizes. */
+export function makeCoil(doc: WhittleDocument, kind: "spring" | "thread" = "spring"): Feature {
+  return {
+    id: uid("co"),
+    type: "coil",
+    name: nextName(doc, kind === "thread" ? "Thread" : "Spring"),
+    section: kind === "thread" ? "triangle" : "circle",
+    radius: kind === "thread" ? "4" : "10",
+    pitch: kind === "thread" ? "1.25" : "6",
+    height: kind === "thread" ? "20" : "40",
+    size: kind === "thread" ? "0.75" : "2",
+    lefthand: false,
+    position: ["0", "0", "0"],
+    op: "new",
+  };
+}
+
+export function makeSplit(doc: WhittleDocument, bodyId?: Id): Feature {
+  return { id: uid("sp"), type: "split", name: nextName(doc, "Split"), bodyId, plane: "XY", offset: "0", keep: "both" };
+}
+
+export function makeOffset(doc: WhittleDocument, bodyId?: Id): Feature {
+  return { id: uid("of"), type: "offset", name: nextName(doc, "Offset"), bodyId, distance: "0.5", copy: false };
+}
+
+export function makeScale(doc: WhittleDocument, bodyId?: Id): Feature {
+  return { id: uid("sc"), type: "scale", name: nextName(doc, "Scale"), bodyId, factor: "1.5", center: "body", copy: false };
+}
+
+export function makeDraft(doc: WhittleDocument): Feature {
+  return { id: uid("dr"), type: "draft", name: nextName(doc, "Draft"), faces: [], angle: "3", pull: "z", neutral: "0", flip: false };
 }
 
 export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {

@@ -32,7 +32,16 @@ import {
   type Face,
   Plane,
   type Shape3D,
+  type Wire,
+  asDir,
+  cast,
+  downcast,
   draw,
+  genericSweep,
+  getOC,
+  makeHelix,
+  makeOffset,
+  makePln,
   drawCircle,
   drawEllipse,
   drawPointsInterpolation,
@@ -47,11 +56,14 @@ import {
   measureShapeVolumeProperties,
 } from "replicad";
 import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
+import type { CoilFeature, DraftFeature, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
 
 interface SketchBuilt {
   frame: SketchFrame;
+  /** The sketch feature itself (sweeps read open paths from it). */
+  source?: SketchFeature;
   drawing: Drawing | null;
   error?: string;
   /** Triangles of the closed profile regions (world coordinates), for display. */
@@ -91,6 +103,12 @@ const FRIENDLY: Record<string, string> = {
   move: "The body couldn't be moved.",
   combine: "The bodies couldn't be combined. Check that they touch or overlap.",
   import: "The file couldn't be imported. It may be damaged or use an unsupported variant.",
+  sweep: "The sweep couldn't be built. Make the profile smaller than the tightest bend of the path, and place it at the path's start.",
+  coil: "The coil couldn't be built. The section is probably too large for the pitch (turns would overlap).",
+  split: "The body couldn't be split there. Move the plane so it crosses the body.",
+  offset: "The body couldn't be offset by that much. Try a smaller distance; very small details limit how far a body can shrink.",
+  scale: "The body couldn't be scaled.",
+  draft: "The draft couldn't be applied. Only flat, cylindrical or conical faces can be drafted, and the angle must be small enough.",
 };
 
 function describeError(f: Feature, e: unknown): string {
@@ -211,7 +229,8 @@ export function sketchDrawing(f: SketchFeature, ev: Evaluator): Drawing | null {
   for (const e of f.entities) {
     try {
       const r = resolveEntity(e, ev);
-      if (!r.construction) resolved.push(r);
+      // Open paths guide sweeps; they never enclose material.
+      if (!r.construction && !(r.type === "polyline" && r.open)) resolved.push(r);
     } catch (err) {
       throw new FeatureError(err instanceof Error ? err.message : String(err));
     }
@@ -335,8 +354,34 @@ function boxCenter(s: Shape3D): Vec3 {
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
 }
 
+/** Fresh copies of a cached mesh (the worker transfers, and so detaches, what it sends). */
+function copyBody(b: BodyResult, id: Id): BodyResult {
+  return {
+    ...b,
+    id,
+    positions: b.positions.slice(),
+    normals: b.normals.slice(),
+    indices: b.indices.slice(),
+    faceRanges: b.faceRanges.slice(),
+    edgePositions: b.edgePositions.slice(),
+    edgeRanges: b.edgeRanges.slice(),
+  };
+}
+
 export class Builder {
   private cache: Snapshot[] = [];
+  /** Meshes by shape: a body that didn't change since the last rebuild isn't meshed again. */
+  private meshes = new WeakMap<Shape3D, Partial<Record<"preview" | "final", BodyResult>>>();
+
+  private mesh(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyResult {
+    let entry = this.meshes.get(shape);
+    if (!entry) this.meshes.set(shape, (entry = {}));
+    const hit = entry[quality];
+    if (hit) return copyBody(hit, id);
+    const m = meshBody(id, shape, quality);
+    entry[quality] = m;
+    return copyBody(m, id);
+  }
   /** Parsed imported files, keyed by feature id + content length + content head. */
   private imports = new Map<string, Shape3D>();
   private importErrors = new Map<string, string>();
@@ -364,7 +409,7 @@ export class Builder {
     const bodies: BodyResult[] = [];
     for (const [id, shape] of prev.bodies) {
       try {
-        bodies.push(meshBody(id, shape, quality));
+        bodies.push(this.mesh(id, shape, quality));
       } catch (e) {
         statuses.push({ id, state: "error", message: "This body couldn't be displayed: " + String(e) });
       }
@@ -383,7 +428,7 @@ export class Builder {
       pickBodies = [];
       for (const [id, shape] of before?.bodies ?? []) {
         try {
-          pickBodies.push(meshBody(id, shape, "preview"));
+          pickBodies.push(this.mesh(id, shape, "preview"));
         } catch {
           /* not pickable */
         }
@@ -471,7 +516,18 @@ export class Builder {
         const offset = ev.num(f.plane.offset, "length", "Offset");
         if (f.plane.kind === "origin") {
           const o = ORIGIN_FRAMES[f.plane.plane]!;
-          frame = { id: f.id, origin: scale(o.normal, offset), xDir: o.xDir, yDir: o.yDir, normal: o.normal };
+          let { xDir, yDir, normal } = o;
+          const tilt = f.plane.angle ? ev.num(f.plane.angle, "angle", "Tilt") : 0;
+          if (Math.abs(tilt) > 1e-12) {
+            if (f.plane.tilt === "y") {
+              normal = rotateAbout(normal, yDir, tilt);
+              xDir = rotateAbout(xDir, yDir, tilt);
+            } else {
+              normal = rotateAbout(normal, xDir, tilt);
+              yDir = rotateAbout(yDir, xDir, tilt);
+            }
+          }
+          frame = { id: f.id, origin: scale(normal, offset), xDir, yDir, normal };
         } else {
           const body = bodyForRefs(bodies, f.plane.face.bodyId);
           const res = resolveFace(body, f.plane.face);
@@ -490,7 +546,7 @@ export class Builder {
         } catch (e) {
           error = describeError(f, e);
         }
-        sketches.set(f.id, { frame, drawing, error, fill: drawing ? profileFill(drawing, frame) : undefined });
+        sketches.set(f.id, { frame, drawing, error, source: f, fill: drawing ? profileFill(drawing, frame) : undefined });
         if (error) throw new FeatureError(error);
         return warning;
       }
@@ -511,9 +567,23 @@ export class Builder {
           if (f.extent === "symmetric") {
             frame = { ...frame, origin: add(frame.origin, scale(frame.normal, -Math.abs(d) / 2)) };
             dist = Math.abs(d);
+          } else if (f.extent === "two") {
+            const d2 = ev.num(f.distance2 ?? "0", "length", "Second distance");
+            if (d2 < 0) throw new FeatureError("The second distance can't be negative.");
+            const dir = sign * Math.sign(d);
+            frame = { ...frame, origin: add(frame.origin, scale(frame.normal, -d2 * dir)) };
+            dist = (Math.abs(d) + d2) * dir;
           }
-          const sketch = sk.drawing.clone().sketchOnPlane(planeFromFrame(frame));
-          tool = clean(sketch.extrude(dist) as Shape3D);
+          const taper = f.taper ? ev.num(f.taper, "angle", "Taper") : 0;
+          const twist = f.twist ? ev.num(f.twist, "angle", "Twist") : 0;
+          if (Math.abs(taper) > 1e-9 && Math.abs(twist) > 1e-9) throw new FeatureError("Use either a taper or a twist on one extrusion, not both.");
+          if (Math.abs(taper) >= Math.PI / 2 - 1e-3) throw new FeatureError("The taper must be between -89 and 89 degrees.");
+          if (Math.abs(taper) > 1e-9) {
+            tool = clean(taperedExtrude(sk.drawing, frame, dist, taper));
+          } else {
+            const sketch = sk.drawing.clone().sketchOnPlane(planeFromFrame(frame));
+            tool = clean((Math.abs(twist) > 1e-9 ? sketch.extrude(dist, { twistAngle: deg(twist) }) : sketch.extrude(dist)) as Shape3D);
+          }
         } else {
           const angle = ev.num(f.angle, "angle", "Angle");
           if (Math.abs(angle) < 1e-6) throw new FeatureError("The angle can't be zero.");
@@ -598,6 +668,59 @@ export class Builder {
 
       case "hole":
         return this.hole(f, bodies, ev);
+
+      case "sweep":
+        return applyOp(bodies, f.id, f.op, f.target, sweepTool(f, sketches, ev));
+
+      case "coil":
+        return applyOp(bodies, f.id, f.op, f.target, coilTool(f, ev));
+
+      case "split": {
+        const id = f.bodyId ?? lastBody(bodies);
+        if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to split.");
+        const off = ev.num(f.offset, "length", "Offset");
+        const parts = bodies.get(id)!.split(f.plane, off);
+        const above = parts.positive as Shape3D | null;
+        const below = parts.negative as Shape3D | null;
+        if (!above || !below) throw new FeatureError("The plane doesn't cross this body, so there's nothing to split. Change the offset.");
+        if (f.keep === "both") {
+          bodies.set(id, clean(above));
+          bodies.set(f.id, clean(below));
+        } else bodies.set(id, clean(f.keep === "above" ? above : below));
+        return;
+      }
+
+      case "offset": {
+        const id = f.bodyId ?? lastBody(bodies);
+        if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to offset.");
+        const d = ev.num(f.distance, "length", "Distance");
+        if (Math.abs(d) < 1e-6) throw new FeatureError("The distance can't be zero.");
+        const src = bodies.get(id)!;
+        let out: Shape3D;
+        try {
+          out = makeOffset(src as unknown as Face, d, 1e-4);
+          // A shrunk body that lost all its volume is a failure, not a result.
+          if (!(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");
+        } catch {
+          throw new FeatureError(FRIENDLY.offset!);
+        }
+        bodies.set(f.copy ? f.id : id, out);
+        return;
+      }
+
+      case "scale": {
+        const id = f.bodyId ?? lastBody(bodies);
+        if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to scale.");
+        const k = ev.num(f.factor, "number", "Factor");
+        if (k <= 0) throw new FeatureError("The scale factor must be greater than zero.");
+        const src = bodies.get(id)!;
+        const out = src.clone().scale(k, f.center === "body" ? boxCenter(src) : [0, 0, 0]);
+        bodies.set(f.copy ? f.id : id, out);
+        return;
+      }
+
+      case "draft":
+        return draftFaces(f, bodies, ev);
 
       case "fillet":
       case "chamfer": {
@@ -795,6 +918,187 @@ export class Builder {
   }
 }
 
+/** Rotate `v` about the unit axis `k` by `a` radians (Rodrigues). */
+function rotateAbout(v: Vec3, k: Vec3, a: number): Vec3 {
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  const kv = cross(k, v);
+  const d = dot(k, v) * (1 - c);
+  return norm([v[0] * c + kv[0] * s + k[0] * d, v[1] * c + kv[1] * s + k[1] * d, v[2] * c + kv[2] * s + k[2] * d]);
+}
+
+type AnySketch = { wire?: Wire; outerSketch?: { wire: Wire }; innerSketches?: { wire: Wire }[]; sketches?: AnySketch[] };
+
+/** Outer and inner wires of every region of a placed sketch. */
+function regions(s: AnySketch): { outer: Wire; inner: Wire[] }[] {
+  // A compound sketch also lists its loops in `sketches`: check it first so holes stay holes.
+  if (s.outerSketch) return [{ outer: s.outerSketch.wire, inner: (s.innerSketches ?? []).map((x) => x.wire) }];
+  if (s.sketches) return s.sketches.flatMap(regions);
+  if (s.wire) return [{ outer: s.wire, inner: [] }];
+  throw new FeatureError("The profile has no closed shape.");
+}
+
+/** A solid through two or more wires with straight (ruled) sides. */
+function loftWires(wires: Wire[]): Shape3D {
+  const oc = getOC();
+  const b = new oc.BRepOffsetAPI_ThruSections(true, true, 1e-6);
+  try {
+    for (const w of wires) b.AddWire(w.wrapped);
+    b.Build(new oc.Message_ProgressRange());
+    return cast(downcast(b.Shape())) as Shape3D;
+  } finally {
+    b.delete();
+  }
+}
+
+/**
+ * A true draft: the profile is offset inward by distance × tan(angle) at the
+ * far end and joined to the start with straight sides. Holes grow instead,
+ * so every wall keeps the same draft.
+ */
+function taperedExtrude(drawing: Drawing, frame: SketchFrame, dist: number, angle: number): Shape3D {
+  const inset = Math.abs(dist) * Math.tan(angle);
+  const far: SketchFrame = { ...frame, origin: add(frame.origin, scale(frame.normal, dist)) };
+  // Drawing offsets move every loop the same way relative to itself, so outlines come from
+  // an inward offset and holes from an outward one: the whole region shrinks (or grows) evenly.
+  const at = (d: number) => {
+    try {
+      return regions(drawing.clone().offset(d, { lineJoinType: "miter" }).sketchOnPlane(planeFromFrame(far)) as unknown as AnySketch);
+    } catch {
+      throw new FeatureError("The taper closes the profile before the end. Use a smaller angle or a shorter distance.");
+    }
+  };
+  const a = regions(drawing.clone().sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch);
+  const outs = at(-inset);
+  const holes = a.some((r) => r.inner.length) ? at(inset) : outs;
+  const same = (b: typeof a) => b.length === a.length && a.every((r, i) => r.inner.length === b[i]!.inner.length);
+  if (!same(outs) || !same(holes)) {
+    throw new FeatureError("The taper changes the shape too much (a hole or piece disappears or merges). Use a smaller angle.");
+  }
+  let out: Shape3D | null = null;
+  a.forEach((r, i) => {
+    let solid = loftWires([r.outer, outs[i]!.outer]);
+    r.inner.forEach((w, j) => (solid = solid.cut(loftWires([w, holes[i]!.inner[j]!]))));
+    out = out ? out.fuse(solid) : solid;
+  });
+  return out!;
+}
+
+/** The path a sweep follows: the sketch's first open line, else its first outline. */
+function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire {
+  const open = f.entities.find((e) => e.type === "polyline" && e.open);
+  const e = open ?? f.entities.find((x) => !x.construction);
+  if (!e) throw new FeatureError("The path sketch is empty. Draw a path (open line) or a shape in it.", undefined, true);
+  const r = resolveEntity(e, ev);
+  let d: Drawing;
+  if (r.type === "polyline" && r.open) {
+    if (r.points.length < 2) throw new FeatureError("The path needs at least two points.");
+    if (r.smooth && r.points.length >= 3) d = drawPointsInterpolation(r.points, {}, { closeShape: false });
+    else {
+      let pen = draw(r.points[0]);
+      for (const p of r.points.slice(1)) pen = pen.lineTo(p);
+      d = pen.done();
+    }
+  } else d = entityDrawing(r);
+  const placed = d.sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch;
+  const w = placed.wire ?? placed.outerSketch?.wire ?? placed.sketches?.[0]?.wire;
+  if (!w) throw new FeatureError("The path couldn't be read.");
+  return w;
+}
+
+function sweepTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator): Shape3D {
+  if (!f.profile || !f.path) throw new FeatureError("Pick a profile sketch and a path sketch.", undefined, true);
+  if (f.profile === f.path) throw new FeatureError("Pick different sketches for the profile and the path.", undefined, true);
+  const prof = sketches.get(f.profile);
+  const path = sketches.get(f.path);
+  if (!prof || !path?.source) throw new FeatureError("The profile or path sketch is missing. Re-pick them.");
+  if (prof.error || !prof.drawing) throw new FeatureError("The profile needs a closed shape.");
+  const config = { frenet: f.orientation === "frenet", transitionMode: "round" as const };
+  try {
+    let out: Shape3D | null = null;
+    for (const r of regions(prof.drawing.clone().sketchOnPlane(planeFromFrame(prof.frame)) as unknown as AnySketch)) {
+      let solid = genericSweep(r.outer, sketchPath(path.source, path.frame, ev), config) as Shape3D;
+      for (const w of r.inner) solid = solid.cut(genericSweep(w, sketchPath(path.source, path.frame, ev), config) as Shape3D);
+      out = out ? out.fuse(solid) : solid;
+    }
+    if (!out || !(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");
+    return clean(out);
+  } catch (e) {
+    if (e instanceof FeatureError) throw e;
+    throw new FeatureError(FRIENDLY.sweep!);
+  }
+}
+
+function coilTool(f: CoilFeature, ev: Evaluator): Shape3D {
+  const [px, py, pz] = f.position.map((p, i) => ev.num(p, "length", "XYZ"[i] + " position")) as Vec3;
+  const r = ev.num(f.radius, "length", "Radius");
+  const pitch = ev.num(f.pitch, "length", "Pitch");
+  const h = ev.num(f.height, "length", "Height");
+  const size = ev.num(f.size, "length", f.section === "circle" ? "Wire diameter" : "Depth");
+  if (r <= 0 || pitch <= 0 || h <= 0 || size <= 0) throw new FeatureError("Radius, pitch, height and size must all be greater than zero.");
+  if (h / pitch > 400) throw new FeatureError("That's more than 400 turns. Increase the pitch or reduce the height.");
+  // The section's width along the axis has to fit inside one pitch.
+  const tan30 = Math.tan(Math.PI / 6);
+  const width = f.section === "circle" ? size : f.section === "triangle" ? size * 2 * tan30 : pitch / 2;
+  if (width >= pitch * 0.98) {
+    const fit = f.section === "circle" ? pitch * 0.9 : (pitch * 0.9) / (2 * tan30);
+    throw new FeatureError(`The section is too large for a ${fmt(pitch)} mm pitch, so the turns would overlap.`, {
+      label: `Use ${fmt(fit)} mm`,
+      field: "size",
+      value: fmt(fit),
+    });
+  }
+  if (f.section === "circle" && size / 2 >= r) throw new FeatureError("The wire is thicker than the coil radius. Increase the radius.");
+  // Section in the axial plane at the helix start: x points away from the axis, y along it.
+  const plane = new Plane([px + r, py, pz], [1, 0, 0], [0, -1, 0]);
+  const overlap = size * 0.05;
+  let d: Drawing;
+  if (f.section === "circle") d = drawCircle(size / 2);
+  else if (f.section === "triangle") d = polyDrawing([[-overlap, -width / 2], [size, 0], [-overlap, width / 2]]);
+  else d = polyDrawing([[-overlap, -width / 2], [size, -width / 2], [size, width / 2], [-overlap, width / 2]]);
+  const section = (d.sketchOnPlane(plane) as unknown as AnySketch).wire!;
+  const helix = makeHelix(pitch, h, r, [px, py, pz], [0, 0, 1], f.lefthand);
+  try {
+    return clean(genericSweep(section, helix, { frenet: true }) as Shape3D);
+  } catch {
+    throw new FeatureError(FRIENDLY.coil!);
+  }
+}
+
+const PULL: Record<"x" | "y" | "z", Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+
+function draftFaces(f: DraftFeature, bodies: Map<Id, Shape3D>, ev: Evaluator): string | undefined {
+  if (f.faces.length === 0) throw new FeatureError("Click the side faces to draft.", undefined, true);
+  const angle = ev.num(f.angle, "angle", "Angle");
+  if (Math.abs(angle) < 1e-9) throw new FeatureError("The angle can't be zero.");
+  if (Math.abs(angle) > Math.PI / 4) throw new FeatureError("Keep the draft angle under 45 degrees.");
+  const neutral = ev.num(f.neutral, "length", "Neutral plane");
+  const axis = PULL[f.pull];
+  const bodyId = f.faces[0]!.bodyId;
+  const body = bodyForRefs(bodies, bodyId);
+  let warning: string | undefined;
+  const oc = getOC();
+  const builder = new oc.BRepOffsetAPI_DraftAngle(body.wrapped);
+  try {
+    const dir = asDir(scale(axis, f.flip ? -1 : 1));
+    const pln = makePln(scale(axis, neutral), axis);
+    for (const ref of f.faces) {
+      if (ref.bodyId !== bodyId) throw new FeatureError("All drafted faces must belong to one body.");
+      const res = resolveFace(body, ref);
+      if (!res) throw new FeatureError("A face to draft no longer exists. Edit the draft to re-pick it.");
+      if (res.uncertain) warning = "A face moved after an upstream change. Please check the selection.";
+      builder.Add(res.item.wrapped, dir, angle, pln, true);
+      if (!builder.AddDone()) throw new FeatureError("One of the faces can't be drafted: pick side walls (parallel to the pull direction), not tops or curved freeform faces.");
+    }
+    builder.Build(new oc.Message_ProgressRange());
+    if (!builder.IsDone()) throw new FeatureError(FRIENDLY.draft!);
+    bodies.set(bodyId, clean(cast(downcast(builder.Shape())) as Shape3D));
+  } finally {
+    builder.delete();
+  }
+  return warning;
+}
+
 function importKey(f: { id: Id; data: string }): string {
   return `${f.id}:${f.data.length}:${f.data.slice(0, 64)}:${f.data.slice(-64)}`;
 }
@@ -879,8 +1183,26 @@ function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyRes
   } catch {
     /* shells or compounds without volume */
   }
+  // Face -> boundary edges, matched through hash buckets (isSame is exact but slow).
+  const byHash = new Map<number, number[]>();
+  edges.forEach((e, i) => {
+    const h = e.hashCode;
+    const list = byHash.get(h);
+    if (list) list.push(i);
+    else byHash.set(h, [i]);
+  });
+  const faceEdges = faces.map((f) => {
+    const out: number[] = [];
+    for (const e of f.edges) {
+      const i = (byHash.get(e.hashCode) ?? []).find((k) => edges[k]!.isSame(e));
+      if (i !== undefined && !out.includes(i)) out.push(i);
+    }
+    return out;
+  });
+
   return {
     id,
+    faceEdges,
     positions: Float32Array.from(m.vertices),
     normals: Float32Array.from(m.normals),
     indices: Uint32Array.from(m.triangles),

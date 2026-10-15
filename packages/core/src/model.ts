@@ -26,7 +26,14 @@ export interface Parameter {
 export type OriginPlane = "XY" | "XZ" | "YZ";
 
 export type PlaneRef =
-  | { kind: "origin"; plane: OriginPlane; offset: Expr }
+  | {
+      kind: "origin";
+      plane: OriginPlane;
+      offset: Expr;
+      /** Tilt the plane about one of its own in-plane axes (a construction plane at an angle). */
+      angle?: Expr;
+      tilt?: "x" | "y";
+    }
   | { kind: "face"; face: FaceRef; offset: Expr };
 
 /**
@@ -104,6 +111,8 @@ export interface PolylineEntity extends EntityBase {
   corner?: Expr;
   /** Draw a smooth curve through the points instead of straight lines. */
   smooth?: boolean;
+  /** An open path (for sweeps and guides): never becomes a solid region. */
+  open?: boolean;
 }
 
 export interface EllipseEntity extends EntityBase {
@@ -161,8 +170,14 @@ export interface ExtrudeFeature extends FeatureBase {
   type: "extrude";
   sketch: Id;
   distance: Expr;
-  extent: "one" | "symmetric";
+  /** "two" = `distance` one way and `distance2` the other. */
+  extent: "one" | "symmetric" | "two";
+  distance2?: Expr;
   flip: boolean;
+  /** Draft angle: positive narrows the profile as it rises (mould and cast parts). */
+  taper?: Expr;
+  /** Twist the profile by this angle over the extrusion (vases, grips, springs). */
+  twist?: Expr;
   op: BodyOp;
   /** Body to join/cut. Unset = most recent body (join) or every body (cut). */
   target?: Id;
@@ -262,6 +277,76 @@ export interface MoveFeature extends FeatureBase {
   copy: boolean;
 }
 
+/** Sweep a closed profile along a path (pipes, handles, rails, gaskets). */
+export interface SweepFeature extends FeatureBase {
+  type: "sweep";
+  /** Sketch holding the closed cross-section. */
+  profile: Id;
+  /** Sketch whose first path (an open line, or any outline) is followed. */
+  path: Id;
+  /** "frenet" follows the path's curvature; "fixed" keeps the profile upright (better for flat paths). */
+  orientation: "frenet" | "fixed";
+  op: BodyOp;
+  target?: Id;
+}
+
+/** A helical coil: springs, threads, augers. */
+export interface CoilFeature extends FeatureBase {
+  type: "coil";
+  /** Cross-section of the coil: round wire, 60 degree thread, or square thread. */
+  section: "circle" | "triangle" | "square";
+  /** Radius of the helix (to the center of the section). */
+  radius: Expr;
+  pitch: Expr;
+  height: Expr;
+  /** Wire diameter (circle) or thread depth (triangle, square). */
+  size: Expr;
+  lefthand: boolean;
+  position: [Expr, Expr, Expr];
+  op: BodyOp;
+  target?: Id;
+}
+
+/** Split a body in two along a plane (or trim away one side). */
+export interface SplitFeature extends FeatureBase {
+  type: "split";
+  bodyId?: Id;
+  plane: OriginPlane;
+  offset: Expr;
+  /** "both" keeps each side as its own body. */
+  keep: "both" | "above" | "below";
+}
+
+/** Grow or shrink a whole body by a distance (clearances, tolerances, coatings). */
+export interface OffsetFeature extends FeatureBase {
+  type: "offset";
+  bodyId?: Id;
+  distance: Expr;
+  copy: boolean;
+}
+
+/** Scale a body uniformly. */
+export interface ScaleFeature extends FeatureBase {
+  type: "scale";
+  bodyId?: Id;
+  factor: Expr;
+  /** Scale about the body's own center, or the origin. */
+  center: "body" | "origin";
+  copy: boolean;
+}
+
+/** Tilt faces by an angle so parts release from moulds (or look tapered). */
+export interface DraftFeature extends FeatureBase {
+  type: "draft";
+  faces: FaceRef[];
+  angle: Expr;
+  /** Pull direction (the faces tilt relative to it). */
+  pull: "x" | "y" | "z";
+  /** Position of the neutral plane (perpendicular to the pull) where faces keep their size. */
+  neutral: Expr;
+  flip: boolean;
+}
+
 /** Boolean between existing bodies. */
 export interface CombineFeature extends FeatureBase {
   type: "combine";
@@ -283,6 +368,12 @@ export interface ImportFeature extends FeatureBase {
 
 export type Feature =
   | SketchFeature
+  | SweepFeature
+  | CoilFeature
+  | SplitFeature
+  | OffsetFeature
+  | ScaleFeature
+  | DraftFeature
   | HoleFeature
   | LoftFeature
   | MoveFeature
@@ -300,7 +391,7 @@ export type Feature =
 export type FeatureType = Feature["type"];
 
 /** Features that can create a new body. */
-export type BodyFeature = ExtrudeFeature | RevolveFeature | PrimitiveFeature | LoftFeature;
+export type BodyFeature = ExtrudeFeature | RevolveFeature | PrimitiveFeature | LoftFeature | SweepFeature | CoilFeature;
 
 export interface BodyMeta {
   name: string;
@@ -326,5 +417,5 @@ export interface WhittleDocument {
 }
 
 export function isBodyFeature(f: Feature): f is BodyFeature {
-  return f.type === "extrude" || f.type === "revolve" || f.type === "primitive" || f.type === "loft";
+  return f.type === "extrude" || f.type === "revolve" || f.type === "primitive" || f.type === "loft" || f.type === "sweep" || f.type === "coil";
 }
