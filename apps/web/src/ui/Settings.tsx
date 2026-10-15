@@ -1,7 +1,7 @@
 /** Settings: appearance, workspace profile, navigation and the assistant. */
 import { useState } from "react";
 import type { LengthUnit } from "@whittle/core";
-import { ACCENTS, type Density, NAV_PRESETS, PROFILES, type Profile, THEMES, type ThemePref } from "../state/prefs";
+import { ACCENTS, type Density, NAV_PRESETS, PROFILES, type Profile, THEMES, type ThemePref, smartSketchOn } from "../state/prefs";
 import { setPrefs, useApp } from "../state/store";
 import { APP_VERSION } from "@whittle/core";
 import { AssistantSettings } from "./Assistant";
@@ -120,6 +120,7 @@ function Workspace() {
           onChange={(v) => setPrefs({ material: v })}
         />
       </div>
+      <Switch label="Constraint-ready shapes" hint="New rectangles, circles, polygons and slots are drawn as lines and arcs you can dimension, constrain, trim and fillet" checked={smartSketchOn(prefs)} onChange={(v) => setPrefs({ smartSketch: v })} />
       <Switch label="Show hints" hint="The hint line at the bottom always tells you the next step" checked={prefs.hints} onChange={(v) => setPrefs({ hints: v })} />
       <Switch label="Labels under toolbar icons" hint="Turn off for a slimmer toolbar once you know the icons" checked={prefs.toolLabels} onChange={(v) => setPrefs({ toolLabels: v })} />
     </div>

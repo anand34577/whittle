@@ -30,6 +30,8 @@ export interface Prefs {
   /** Default material for mass estimates. */
   material: string;
   reduceMotion: boolean;
+  /** New shapes become constraint-ready geometry (dimension, constrain, trim, fillet them). */
+  smartSketch: boolean | null;
 }
 
 export interface ThemeInfo {
@@ -102,6 +104,7 @@ export const DEFAULT_PREFS: Prefs = {
   toolLabels: true,
   material: "pla",
   reduceMotion: false,
+  smartSketch: null,
 };
 
 export function loadPrefs(): Prefs {
@@ -126,6 +129,11 @@ export function savePrefs(p: Prefs) {
   } catch {
     /* not persisted, still applied */
   }
+}
+
+/** Whether new shapes become constraint-ready geometry: the person's choice, else on for engineers and designers. */
+export function smartSketchOn(p: Prefs): boolean {
+  return p.smartSketch ?? (p.profile === "engineer" || p.profile === "designer");
 }
 
 /** The concrete theme for a preference ("system" follows the OS). */

@@ -149,8 +149,11 @@
 /* ── Interface size: the whole app scales (popovers and tooltips keep their size) ── */
 #root {
   zoom: var(--ui-scale, 1);
-  width: calc(100% / var(--ui-scale, 1));
-  height: calc(100% / var(--ui-scale, 1));
+  /* Pinned to the window edges: sizes from "100%" are zoom-dependent across browser versions, edges are not. */
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
 }
 
 /* ── Reduced motion (preference, in addition to the OS setting) ── */

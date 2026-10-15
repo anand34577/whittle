@@ -31,7 +31,9 @@ export interface SnapInfo {
 }
 
 /** Tools that draw constraint-driven geometry. */
-const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "pcircle"]);
+const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "pcircle", "spline"]);
+/** Tools that take three clicks (the rest of the simple shapes take two). */
+const THREE_POINT = new Set<SketchTool>(["rect3", "circle3"]);
 
 export interface DimField {
   key: "a" | "b";
@@ -67,6 +69,14 @@ export interface SketchEnv {
   addLines(pts: (Vec2 | Id)[], closed: boolean): void;
   addArc(a: Vec2 | Id, b: Vec2 | Id, through: Vec2): void;
   addCircle(c: Vec2 | Id, r: number): void;
+  addSpline(pts: (Vec2 | Id)[], closed: boolean): void;
+  addPoint(p: Vec2): void;
+  /** The Project tool: pick the model under this window position and copy it into the sketch. */
+  project(client: Vec2): void;
+  /** The Dimension tool picked this geometry (`additive`: start a pair instead of measuring one item). */
+  dimension(id: Id, additive: boolean): void;
+  /** Fillet or chamfer the corner at this point. */
+  corner(id: Id, kind: "fillet" | "chamfer"): void;
   trim(id: Id, p: Vec2): void;
   extend(id: Id, p: Vec2): void;
   /** Select geometry (null clears); `additive` adds to / removes from the selection. */
@@ -85,6 +95,8 @@ export class SketchController {
   private guides: [Vec2, Vec2][] = [];
   private typed: { a?: number; b?: number } = {};
   private downAt: Vec2 | null = null;
+  /** Where the button went down on screen (pixels): tells a click from a drag without grid snapping in the way. */
+  private downScreen: Vec2 | null = null;
   private dragging: { id: Id; last: Vec2; moved: boolean; geom?: Id[] } | null = null;
   /** Solver points the placed points snapped to (parallel to `points`). */
   private refs: (Id | undefined)[] = [];
@@ -111,12 +123,18 @@ export class SketchController {
     this.arcEnd = null;
     this.typed = {};
     this.downAt = null;
+    this.downScreen = null;
     this.dragging = null;
     this.publish();
   }
 
   get busy() {
     return this.points.length > 0;
+  }
+
+  /** Whether the shape being drawn has size fields to type into. */
+  get typable() {
+    return this.dims().length > 0;
   }
 
   /** Typed dimension from the overlay input. */
@@ -158,7 +176,9 @@ export class SketchController {
       if (this.dragging && r.id === this.dragging.id) continue;
       for (const s of entitySnapPoints(r)) cands.push({ p: s.p, kind: s.kind });
     }
-    this.points.forEach((p, i) => cands.push({ p, kind: "end", ref: this.refs[i] }));
+    // A rectangle's second corner must not lock onto the first one's row or column (that makes it flat).
+    const skipFirst = (this.tool === "rect" || this.tool === "crect" || this.tool === "ellipse") && this.points.length === 1;
+    if (!skipFirst) this.points.forEach((p, i) => cands.push({ p, kind: "end", ref: this.refs[i] }));
     for (const c of cands) {
       const d = Math.hypot(c.p[0] - raw[0], c.p[1] - raw[1]);
       if (d < bestD) {
@@ -191,6 +211,22 @@ export class SketchController {
         const sx = Math.sign(b[0] - a[0]) || 1;
         const sy = Math.sign(b[1] - a[1]) || 1;
         return [t.a !== undefined ? a[0] + sx * t.a : b[0], t.b !== undefined ? a[1] + sy * t.b : b[1]];
+      }
+      case "crect": {
+        const sx = Math.sign(b[0] - a[0]) || 1;
+        const sy = Math.sign(b[1] - a[1]) || 1;
+        return [t.a !== undefined ? a[0] + (sx * t.a) / 2 : b[0], t.b !== undefined ? a[1] + (sy * t.b) / 2 : b[1]];
+      }
+      case "circle2": {
+        if (t.a === undefined) return b;
+        const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) || 0;
+        return [a[0] + t.a * Math.cos(ang), a[1] + t.a * Math.sin(ang)];
+      }
+      case "rect3": {
+        if (t.a === undefined && t.b === undefined) return b;
+        const len = t.a ?? Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const ang = t.b !== undefined ? (t.b * Math.PI) / 180 : Math.atan2(b[1] - a[1], b[0] - a[0]);
+        return [a[0] + len * Math.cos(ang), a[1] + len * Math.sin(ang)];
       }
       case "ellipse": {
         const sx = Math.sign(b[0] - a[0]) || 1;
@@ -225,6 +261,10 @@ export class SketchController {
     if (!c || this.points.length === 0 || this.tool === "select" || this.tool === "text") return [];
     const a = this.points[0]!;
     if (this.tool === "segment") return [{ pts: [...this.points, this.secondPoint(this.points[this.points.length - 1]!, c)], closed: false }];
+    if (this.tool === "spline") {
+      const through = [...this.points, c];
+      return through.length < 2 ? [] : [{ pts: geomOutline({ id: "", type: "spline", pts: through, closed: false, construction: false }), closed: false }];
+    }
     if (this.tool === "pcircle") {
       const r = Math.hypot(this.secondPoint(a, c)[0] - a[0], this.secondPoint(a, c)[1] - a[1]);
       return r > 0 ? [{ pts: geomOutline({ id: "", type: "circle", c: a, r, construction: false }), closed: true }] : [];
@@ -239,8 +279,16 @@ export class SketchController {
       const next = this.arcEnd ? polylinePath([last, c, this.arcEnd], [false, true, false], false) : [last, this.secondPoint(last, c)];
       return [{ pts: [...done, ...next.slice(1)], closed: false }];
     }
-    const b = this.secondPoint(a, c);
-    const e = makeEntity(this.tool as EntityType, a, b);
+    if (THREE_POINT.has(this.tool)) {
+      if (this.points.length === 1) return [{ pts: [a, this.tool === "rect3" ? this.secondPoint(a, c) : c], closed: false }];
+      const e = this.build([a, this.points[1]!, this.tool === "rect3" ? this.thirdPoint(c) : c]);
+      return e ? this.outlineOf(e) : [{ pts: [a, this.points[1]!, c], closed: false }];
+    }
+    const e = this.build([a, this.secondPoint(a, c)]);
+    return e ? this.outlineOf(e) : [];
+  }
+
+  private outlineOf(e: SketchEntity): { pts: Vec2[]; closed: boolean }[] {
     try {
       return [{ pts: entityOutline(resolveEntity(e, this.env.evaluator())), closed: true }];
     } catch {
@@ -248,9 +296,77 @@ export class SketchController {
     }
   }
 
+  /** 3-point rectangle: the third point, with a typed height applied perpendicular to the first edge. */
+  private thirdPoint(c: Vec2): Vec2 {
+    const [p1, p2] = this.points as [Vec2, Vec2];
+    if (this.typed.a === undefined) return c;
+    const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) || 1;
+    const n: Vec2 = [-(p2[1] - p1[1]) / len, (p2[0] - p1[0]) / len];
+    const sign = (c[0] - p1[0]) * n[0] + (c[1] - p1[1]) * n[1] < 0 ? -1 : 1;
+    return [p1[0] + sign * n[0] * this.typed.a, p1[1] + sign * n[1] * this.typed.a];
+  }
+
+  /** The finished shape for the points placed so far (null when degenerate). */
+  private build(pts: Vec2[]): SketchEntity | null {
+    const [a, b, c] = pts as [Vec2, Vec2, Vec2 | undefined];
+    switch (this.tool) {
+      case "crect": {
+        const e = makeEntity("rect", a, b);
+        if (e.type !== "rect") return null;
+        e.x = fmt(a[0]);
+        e.y = fmt(a[1]);
+        e.w = fmt(2 * Math.abs(b[0] - a[0]));
+        e.h = fmt(2 * Math.abs(b[1] - a[1]));
+        e.anchor = "center";
+        return e;
+      }
+      case "rect3": {
+        if (!c) return null;
+        const w = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const n: Vec2 = [-(b[1] - a[1]) / (w || 1), (b[0] - a[0]) / (w || 1)];
+        const d = (c[0] - a[0]) * n[0] + (c[1] - a[1]) * n[1];
+        if (w < 1e-6 || Math.abs(d) < 1e-6) return null;
+        const e = makeEntity("rect", a, b);
+        if (e.type !== "rect") return null;
+        e.x = fmt((a[0] + b[0]) / 2 + (n[0] * d) / 2);
+        e.y = fmt((a[1] + b[1]) / 2 + (n[1] * d) / 2);
+        e.w = fmt(w);
+        e.h = fmt(Math.abs(d));
+        e.anchor = "center";
+        e.angle = fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI);
+        return e;
+      }
+      case "circle2": {
+        const r = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2;
+        if (r < 1e-6) return null;
+        const m: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        return makeEntity("circle", m, [m[0] + r, m[1]]);
+      }
+      case "circle3": {
+        if (!c) return null;
+        const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+        if (Math.abs(d) < 1e-9) return null;
+        const sq = (p: Vec2) => p[0] * p[0] + p[1] * p[1];
+        const ux = (sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d;
+        const uy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
+        return makeEntity("circle", [ux, uy], a);
+      }
+      default:
+        return makeEntity(this.tool as EntityType, a, b);
+    }
+  }
+
   private dims(): DimField[] {
     const c = this.cursor;
     if (!c || this.points.length === 0) return [];
+    if (this.tool === "rect3" && this.points.length === 2) {
+      const [p1, p2] = this.points as [Vec2, Vec2];
+      const p3 = this.thirdPoint(c);
+      const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) || 1;
+      const h = Math.abs(((p3[0] - p1[0]) * -(p2[1] - p1[1]) + (p3[1] - p1[1]) * (p2[0] - p1[0])) / len);
+      return [{ key: "a", label: "H", value: h, at: p3 }];
+    }
+    if (this.tool === "circle3") return [];
     const a = this.multi || this.tool === "segment" ? this.points[this.points.length - 1]! : this.points[0]!;
     const b = this.secondPoint(a, c);
     switch (this.tool) {
@@ -259,6 +375,13 @@ export class SketchController {
           { key: "a", label: "W", value: Math.abs(b[0] - a[0]), at: [(a[0] + b[0]) / 2, Math.min(a[1], b[1])] },
           { key: "b", label: "H", value: Math.abs(b[1] - a[1]), at: [Math.max(a[0], b[0]), (a[1] + b[1]) / 2] },
         ];
+      case "crect":
+        return [
+          { key: "a", label: "W", value: 2 * Math.abs(b[0] - a[0]), at: [(a[0] + b[0]) / 2, Math.min(a[1], b[1])] },
+          { key: "b", label: "H", value: 2 * Math.abs(b[1] - a[1]), at: [Math.max(a[0], b[0]), (a[1] + b[1]) / 2] },
+        ];
+      case "circle2":
+        return [{ key: "a", label: "\u00d8", value: Math.hypot(b[0] - a[0], b[1] - a[1]), at: b }];
       case "circle":
       case "pcircle":
         return [{ key: "a", label: "\u00d8", value: 2 * Math.hypot(b[0] - a[0], b[1] - a[1]), at: b }];
@@ -271,6 +394,7 @@ export class SketchController {
         ];
       case "polygon":
         return [{ key: "a", label: "R", value: Math.hypot(b[0] - a[0], b[1] - a[1]), at: b }];
+      case "rect3":
       case "slot":
       case "segment":
       case "path":
@@ -303,9 +427,21 @@ export class SketchController {
     const a = this.points[0]!;
     const end = this.secondPoint(a, b);
     if (Math.hypot(end[0] - a[0], end[1] - a[1]) < 1e-6) return;
-    if ((this.tool === "rect" || this.tool === "ellipse") && (Math.abs(end[0] - a[0]) < 1e-6 || Math.abs(end[1] - a[1]) < 1e-6)) return;
+    if ((this.tool === "rect" || this.tool === "crect" || this.tool === "ellipse") && (Math.abs(end[0] - a[0]) < 1e-6 || Math.abs(end[1] - a[1]) < 1e-6)) return;
     if (this.tool === "select" || this.multi || this.tool === "text") return;
-    this.env.add(makeEntity(this.tool as EntityType, a, end));
+    const e = this.build([a, end]);
+    if (!e) return;
+    this.env.add(e);
+    this.points = [];
+    this.typed = {};
+  }
+
+  /** A click with a three-point tool: the first two points are kept, the third finishes the shape. */
+  private commitThreePoint(c: Vec2) {
+    const [a, b] = this.points as [Vec2, Vec2];
+    const e = this.build([a, b, this.tool === "rect3" ? this.thirdPoint(c) : c]);
+    if (!e) return;
+    this.env.add(e);
     this.points = [];
     this.typed = {};
   }
@@ -410,6 +546,16 @@ export class SketchController {
       this.typed = {};
       return;
     }
+    if (this.tool === "spline") {
+      // Click the first point to close (three or more); click the last point again, Enter or Esc to stop.
+      const n = this.points.length;
+      if (n >= 3 && near(this.points[0])) return this.commitSpline(true);
+      if (n >= 2 && near(this.points[n - 1])) return this.commitSpline(false);
+      this.points.push(c);
+      this.refs.push(ref);
+      this.typed = {};
+      return;
+    }
     const p = this.points.length ? this.secondPoint(this.points[0]!, c) : c;
     this.points.push(p);
     this.refs.push(typed ? undefined : ref);
@@ -425,6 +571,11 @@ export class SketchController {
     this.typed = {};
   }
 
+  private commitSpline(closed: boolean) {
+    if (this.points.length >= 2) this.env.addSpline(this.points.map((p, i) => this.refs[i] ?? p), closed && this.points.length >= 3);
+    this.reset();
+  }
+
   private commitSegments(closed: boolean) {
     if (this.points.length >= 2) this.env.addLines(this.points.map((p, i) => this.refs[i] ?? p), closed && this.points.length >= 3);
     this.reset();
@@ -432,7 +583,8 @@ export class SketchController {
 
   pointer(e: SketchPointerEvent) {
     if (e.type === "leave") {
-      this.cursor = null;
+      // While drawing, keep the preview and its size fields where they were so they can be clicked and edited.
+      if (!this.points.length) this.cursor = null;
       this.publish();
       return;
     }
@@ -446,8 +598,39 @@ export class SketchController {
       this.publish();
       return;
     }
+    if (this.tool === "project") {
+      this.cursor = e.p;
+      this.snap = null;
+      if (e.type === "down") this.env.project(e.client);
+      this.publish();
+      return;
+    }
+    if (this.tool === "dimension") {
+      this.cursor = e.p;
+      this.snap = null;
+      const hit = this.geomAt(e.p);
+      this.hoverEntity = hit;
+      if (e.type === "down" && hit) this.env.dimension(hit, e.shift);
+      this.publish();
+      return;
+    }
+    if (this.tool === "sfillet" || this.tool === "schamfer") {
+      this.cursor = e.p;
+      this.snap = null;
+      const hit = this.geomAt(e.p);
+      const corner = hit && this.env.geometry().some((g) => g.id === hit && g.type === "point") ? hit : null;
+      this.hoverEntity = corner;
+      if (e.type === "down" && corner) this.env.corner(corner, this.tool === "sfillet" ? "fillet" : "chamfer");
+      this.publish();
+      return;
+    }
     this.snap = this.snapPoint(e.p, e.alt);
     this.cursor = this.snap.p;
+    if (this.tool === "gpoint") {
+      if (e.type === "down" && !this.snap.ref) this.env.addPoint(this.cursor);
+      this.publish();
+      return;
+    }
     if (GEOM_TOOLS.has(this.tool)) {
       if (e.type === "down") this.geomClick();
       this.publish();
@@ -456,6 +639,7 @@ export class SketchController {
 
     if (e.type === "down") {
       this.downAt = this.cursor;
+      this.downScreen = e.screen;
       if (this.tool === "text") {
         // One click places the text; the panel then asks what it says.
         const size = Math.max(1, Math.round(this.env.gridSpacing()));
@@ -483,17 +667,24 @@ export class SketchController {
         }
       } else if (this.points.length === 0) {
         this.points = [this.cursor];
+      } else if (THREE_POINT.has(this.tool)) {
+        if (this.points.length === 1) {
+          this.points.push(this.secondPoint(this.points[0]!, this.cursor));
+          this.typed = {};
+        } else this.commitThreePoint(this.cursor);
       } else {
         this.commitTwoPoint(this.cursor);
       }
     } else if (e.type === "up") {
       // Press-drag-release also works for two-point tools.
-      const d = this.downAt;
-      if (d && !this.multi && this.points.length === 1) {
-        const moved = Math.hypot(d[0] - this.cursor[0], d[1] - this.cursor[1]) > 4 * this.env.pixelSize();
+      const d = this.downScreen;
+      if (d && !this.multi && !THREE_POINT.has(this.tool) && this.points.length === 1) {
+        // Real pointer travel, not snapped travel: a click that wobbles a pixel must stay a click.
+        const moved = Math.hypot(d[0] - e.screen[0], d[1] - e.screen[1]) > 6;
         if (moved) this.commitTwoPoint(this.cursor);
       }
       this.downAt = null;
+      this.downScreen = null;
     }
     this.publish();
   }
@@ -563,6 +754,10 @@ export class SketchController {
       this.commitSegments(false);
       return true;
     }
+    if (this.tool === "spline" && this.points.length && (e.key === "Escape" || e.key === "Enter")) {
+      this.commitSpline(false);
+      return true;
+    }
     if (GEOM_TOOLS.has(this.tool) && this.points.length && (e.key === "Escape" || e.key === "Backspace")) {
       if (e.key === "Escape") this.reset();
       else {
@@ -586,7 +781,7 @@ export class SketchController {
       this.publish();
       return true;
     }
-    if (e.key === "Enter" && this.points.length === 1 && this.cursor && !this.multi) {
+    if (e.key === "Enter" && this.points.length === 1 && this.cursor && !this.multi && !THREE_POINT.has(this.tool)) {
       this.commitTwoPoint(this.cursor);
       this.publish();
       return true;

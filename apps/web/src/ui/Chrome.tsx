@@ -219,13 +219,13 @@ export function Toolbar() {
         <div className="toolbar__mode">
           <span className="pill pill--accent">Sketch</span>
         </div>
-        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} activeId={active} />
-        <Group label="Special" ids={["tool-text", "tool-gear", "import-image", "import-svg"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
-        <Group label="Arrange" ids={["tool-select", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "delete"]} activeId={active} />
+        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3"]} activeId={active} />
+        <Group label="Special" ids={["tool-project", "tool-text", "tool-gear", "import-image", "import-svg"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
+        <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
         <Group
           label="Constrain"
-          ids={profile === "engineer" || profile === "designer" ? ["tool-segment", "tool-arc", "tool-pcircle", "tool-trim", "tool-extend"] : ["tool-segment"]}
-          more={["tool-segment", "tool-arc", "tool-pcircle", "tool-trim", "tool-extend", ...CONSTRAINT_COMMANDS]}
+          ids={profile === "engineer" || profile === "designer" ? ["tool-segment", "tool-arc", "tool-spline", "tool-pcircle", "tool-dimension", "tool-sfillet", "tool-schamfer", "tool-trim", "tool-extend"] : ["tool-segment", "tool-spline", "tool-dimension", "tool-sfillet"]}
+          more={["tool-segment", "tool-arc", "tool-spline", "tool-pcircle", "tool-dimension", "tool-gpoint", "tool-sfillet", "tool-schamfer", "tool-trim", "tool-extend", ...CONSTRAINT_COMMANDS]}
           activeId={active}
         />
         <div className="toolbar__spacer" />

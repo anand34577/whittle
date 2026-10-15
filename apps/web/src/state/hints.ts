@@ -3,6 +3,10 @@ import { type AppState, findFeature } from "./store";
 
 const TOOL_HINTS: Record<string, [string, string]> = {
   rect: ["Click the first corner (or drag a rectangle)", "Click the opposite corner \u00b7 type a width, Tab for height, Enter to place"],
+  crect: ["Click the center", "Click a corner · type a width, Tab for height, Enter to place"],
+  rect3: ["Click the first corner", "Click the next corner (sets the angle), then move out and click for the width · type a length, Tab for angle"],
+  circle2: ["Click one side of the circle", "Click the opposite side · or type a diameter and press Enter"],
+  circle3: ["Click the first point on the circle", "Click a second point, then a third"],
   circle: ["Click the center", "Click to set the size \u00b7 or type a diameter and press Enter"],
   polygon: ["Click the center", "Click a corner \u00b7 or type the radius"],
   slot: ["Click the center of the first end", "Click the second end \u00b7 or type a length"],
@@ -13,6 +17,12 @@ const TOOL_HINTS: Record<string, [string, string]> = {
   segment: ["Click the first point (snap to points to join them)", "Click the next point · click the first point to close · click the last point again or Enter to stop · level lines get Horizontal/Vertical"],
   arc: ["Click where the arc starts", "Click where it ends, then a point the arc passes through"],
   pcircle: ["Click the center", "Click to set the radius · or type a diameter and press Enter"],
+  project: ["Click an edge or face of the model to copy it into the sketch as locked geometry", ""],
+  dimension: ["Click a line (length), a circle or arc (radius) · or a point to start a pair", "Click a second point, a line or a second line for a distance or an angle · Shift+click a line to pair it"],
+  spline: ["Click the first point of the spline", "Click the next point \u00b7 click the first point to close \u00b7 click the last point again, Enter or Esc to finish \u00b7 Backspace undoes a point"],
+  sfillet: ["Click a corner where two lines meet", ""],
+  schamfer: ["Click a corner where two lines meet", ""],
+  gpoint: ["Click to place a point", ""],
   trim: ["Click the piece of a line, arc or circle to cut away (between crossings)", ""],
   extend: ["Click near the end of a line or arc to stretch it to the next curve", ""],
   path: ["Click where the path starts", "Click the next point \u00b7 Enter (or click the last point again) finishes \u00b7 A turns arcs on/off \u00b7 Backspace undoes a point"],

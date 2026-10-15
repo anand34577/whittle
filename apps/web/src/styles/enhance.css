@@ -529,7 +529,7 @@ details.points summary {
 }
 .btnrow {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
   gap: 6px;
 }
 .copyrow {
@@ -543,8 +543,9 @@ details.points summary {
   width: 44px;
 }
 .copyrow .btn {
+  white-space: nowrap;
   flex: 1;
-  padding: 0 6px;
+  padding: 4px 6px;
 }
 .mini {
   width: 52px;

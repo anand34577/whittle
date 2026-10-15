@@ -22,7 +22,7 @@ import {
   trim,
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace } from "../state/actions";
-import { addArcGeometry, addCircleGeometry, addLines, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure } from "../state/measure";
@@ -72,6 +72,7 @@ function constraintMarks(sk: SketchFeature, sol?: SketchSolution): ConstraintMar
     if (!g) return id === "origin" ? [0, 0] : null;
     if (g.type === "point") return g.p;
     if (g.type === "line") return mid(g.a, g.b);
+    if (g.type === "spline") return g.pts[Math.floor(g.pts.length / 2)] ?? null;
     const t = g.type === "arc" ? g.a0 + g.sweep / 2 : Math.PI / 4;
     return [g.c[0] + g.r * Math.cos(t), g.c[1] + g.r * Math.sin(t)];
   };
@@ -154,9 +155,9 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
   }, []);
   const R = 128;
   // Keep the whole ring inside the view.
-  const host = document.querySelector(".viewport")?.getBoundingClientRect();
-  const cx = host ? Math.min(Math.max(x, R + 70), host.width - R - 70) : x;
-  const cy = host ? Math.min(Math.max(y, R + 30), host.height - R - 30) : y;
+  const host = document.querySelector(".viewport");
+  const cx = host ? Math.min(Math.max(x, R + 70), host.clientWidth - R - 70) : x;
+  const cy = host ? Math.min(Math.max(y, R + 30), host.clientHeight - R - 30) : y;
   return (
     <div className="radial" style={{ left: cx, top: cy }} role="menu" aria-label="Quick actions" onPointerDown={(e) => e.stopPropagation()}>
       <button className="radial__hub" onClick={close} aria-label="Close">
@@ -316,6 +317,7 @@ export function ViewportView() {
         },
         evaluator: () => documentEvaluator(useApp.getState().doc),
         add: (e, select) => {
+          if (!select && addShapeAsGeometry(e)) return;
           sketchMutate("Add shape", (s) => {
             s.entities.push(e);
           });
@@ -359,6 +361,18 @@ export function ViewportView() {
         },
         addArc: addArcGeometry,
         addCircle: addCircleGeometry,
+        addSpline: addSplineGeometry,
+        addPoint: addFreePoint,
+        corner: cornerAt,
+        dimension: dimensionPick,
+        project: (client) => {
+          // While sketching nothing in the model is pickable; open it up for this one click.
+          const v = vpRef.current;
+          v?.setPickFilter({ faces: true, edges: true, planes: false, sketches: false });
+          const pk = v?.pick({ clientX: client[0], clientY: client[1] }) ?? null;
+          v?.setPickFilter({ faces: false, edges: false, planes: false, sketches: false });
+          projectPick(pk);
+        },
         trim: trimAt,
         extend: extendAt,
         selectGeom: (id, additive) => {
@@ -645,8 +659,9 @@ export function ViewportView() {
       return controller.key(e);
     };
     sketchKeys.typeDigit = (key) => {
-      if (mode.kind !== "sketch" || !controller.busy || !/^[0-9.]$/.test(key)) return false;
-      setTyping({ key: "a", text: key });
+      if (mode.kind !== "sketch" || !controller.busy || !/^([0-9.]|Tab)$/.test(key) || !controller.typable) return false;
+      // Tab opens the first size field, digits open it with that first digit.
+      setTyping({ key: "a", text: key === "Tab" ? "" : key });
       return true;
     };
     return () => {
@@ -821,7 +836,11 @@ export function ViewportView() {
           const shown = isAngle ? trim(d.value, 1) : trim(d.value / unitFactor, 2);
           const editing = typing?.key === d.key;
           return (
-            <div key={d.key} className={`dim ${editing ? "is-editing" : ""}`} style={{ left: pos[0], top: pos[1] }}>
+            <div
+              key={d.key}
+              className={`dim ${editing ? "is-editing" : ""}`}
+              style={{ left: pos[0], top: pos[1] }}
+            >
               <span className="dim__label">{d.label}</span>
               {editing ? (
                 <input

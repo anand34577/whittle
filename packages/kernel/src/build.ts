@@ -26,7 +26,9 @@ import {
   frameAxes,
   planeOrigin,
   polygonInside,
+  chainSegments,
   polylinePath,
+  splineBeziers,
   resolveEntity,
   thickenPath,
 } from "@whittle/core";
@@ -149,18 +151,16 @@ function polyDrawing(pts: [number, number][]): Drawing {
   return pen.close();
 }
 
-/** Lines and three-point arcs through the points (closed or open). */
-function penPath(pts: [number, number][], arcs: boolean[], closed: boolean): Drawing {
-  const n = pts.length;
+/** Lines, three-point arcs and splines through the points (closed or open). */
+function penPath(pts: [number, number][], arcs: boolean[], closed: boolean, splines: boolean[] = []): Drawing {
   let pen = draw(pts[0]);
-  for (let i = 0; i < (closed ? n : n - 1); ) {
-    const j = (i + 1) % n;
-    if (arcs[j] && (closed || j < n - 1)) {
-      pen = pen.threePointsArcTo(pts[(j + 1) % n]!, pts[j]!);
-      i += 2;
-    } else {
-      if (j !== 0) pen = pen.lineTo(pts[j]!);
-      i += 1;
+  for (const s of chainSegments(pts, arcs, closed, splines)) {
+    if (s.kind === "arc") pen = pen.threePointsArcTo(s.b, s.mid);
+    else if (s.kind === "spline" && s.through.length >= 3) for (const b of splineBeziers(s.through)) pen = pen.cubicBezierCurveTo(b.end, b.c1, b.c2);
+    else {
+      const to = s.kind === "line" ? s.b : s.through[s.through.length - 1]!;
+      // The closing line back to the start is what close() draws.
+      if (!(closed && to === pts[0])) pen = pen.lineTo(to);
     }
   }
   return closed ? pen.close() : pen.done();
@@ -186,7 +186,7 @@ function entityDrawing(r: ResolvedEntity): Drawing {
       return polyDrawing(entityOutline(r));
     case "polyline": {
       if (r.smooth && r.points.length >= 3) return drawPointsInterpolation(r.points, {}, { closeShape: true });
-      const d = r.arcs.some(Boolean) ? penPath(r.points, r.arcs, true) : polyDrawing(r.points);
+      const d = r.arcs.some(Boolean) || r.splines.some(Boolean) ? penPath(r.points, r.arcs, true, r.splines) : polyDrawing(r.points);
       if (r.corner > 0) {
         try {
           return d.fillet(r.corner);
@@ -1011,7 +1011,7 @@ function thinProfile(sk: SketchBuilt, t: number, side: "center" | "inside" | "ou
     if (e.type !== "polyline" || !e.open || e.construction) continue;
     const r = resolveEntity(e, ev);
     if (r.type !== "polyline" || r.points.length < 2) continue;
-    const line = r.smooth && r.points.length >= 3 ? entityOutline(r) : polylinePath(r.points, r.arcs, false);
+    const line = r.smooth && r.points.length >= 3 ? entityOutline(r) : polylinePath(r.points, r.arcs, false, 16, r.splines);
     const band = polyDrawing(thickenPath(line, t, side));
     out = out ? out.fuse(band) : band;
   }
@@ -1094,7 +1094,7 @@ function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire {
   if (r.type === "polyline" && r.open) {
     if (r.points.length < 2) throw new FeatureError("The path needs at least two points.");
     if (r.smooth && r.points.length >= 3) d = drawPointsInterpolation(r.points, {}, { closeShape: false });
-    else d = penPath(r.points, r.arcs, false);
+    else d = penPath(r.points, r.arcs, false, r.splines);
   } else d = entityDrawing(r);
   const placed = d.sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch;
   const w = placed.wire ?? placed.outerSketch?.wire ?? placed.sketches?.[0]?.wire;

@@ -6,6 +6,7 @@
  */
 import type { ConstraintType, GeomType, Id, PolyPoint, SketchConstraint, SketchEntity, SketchFeature, SketchGeom, Vec2 } from "./model";
 import { uid } from "./factory";
+import { smoothClosed, smoothOpen } from "./sketch";
 
 /** Fixed references every sketch has: the origin point and the two axes. */
 export const SKETCH_REFS: Record<string, GeomType> = { origin: "point", xaxis: "line", yaxis: "line" };
@@ -30,7 +31,9 @@ export type GeomResolved =
   | { id: Id; type: "line"; a: Vec2; b: Vec2; construction: boolean }
   /** Counter-clockwise from angle a0 by `sweep` (radians). */
   | { id: Id; type: "arc"; c: Vec2; r: number; a0: number; sweep: number; a: Vec2; b: Vec2; construction: boolean }
-  | { id: Id; type: "circle"; c: Vec2; r: number; construction: boolean };
+  | { id: Id; type: "circle"; c: Vec2; r: number; construction: boolean }
+  /** Through the fit points; `closed` joins the last back to the first. */
+  | { id: Id; type: "spline"; pts: Vec2[]; closed: boolean; construction: boolean };
 
 const TAU = Math.PI * 2;
 const ccw = (x: number) => ((x % TAU) + TAU) % TAU;
@@ -67,6 +70,8 @@ export function resolveGeometry(sk: Pick<SketchFeature, "geometry">, sol?: Sketc
         return { id: g.id, type: "line", a: P(g.a), b: P(g.b), construction };
       case "circle":
         return { id: g.id, type: "circle", c: P(g.c), r: sol?.radii[g.id] ?? g.r, construction };
+      case "spline":
+        return { id: g.id, type: "spline", pts: g.pts.map(P), closed: !!g.closed && g.pts.length >= 3, construction };
       case "arc": {
         const c = P(g.c);
         const a = P(g.a);
@@ -90,6 +95,11 @@ export function geomOutline(g: GeomResolved, segments = 64): Vec2[] {
       const out: Vec2[] = [];
       for (let i = 0; i <= segments; i++) out.push(polar(g.c, g.r, (i / segments) * TAU));
       return out;
+    }
+    case "spline": {
+      if (g.pts.length < 3) return g.pts;
+      const per = Math.max(4, Math.round(segments / 6));
+      return g.closed ? [...smoothClosed(g.pts, per), g.pts[0]!] : smoothOpen(g.pts, per);
     }
     case "arc": {
       const n = Math.max(4, Math.ceil((segments * g.sweep) / TAU));
@@ -133,11 +143,14 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
     if (c.refs.every((r) => byId.get(r)?.type === "point")) parent.set(root(c.refs[0]!), root(c.refs[1]!));
   }
 
+  const pt = (p: Vec2): PolyPoint => [n(p[0]), n(p[1])];
   interface Seg {
     id: Id;
     ends: [Id, Id];
     at: [Vec2, Vec2];
     mid?: Vec2;
+    /** A spline's fit points between its ends, in order from the first end. */
+    through?: Vec2[];
   }
   const segs: Seg[] = [];
   for (const g of geo) {
@@ -147,6 +160,16 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
     } else if (g.type === "line" && src.type === "line") {
       if (g.construction) out.push({ id: g.id, type: "polyline", points: [[n(g.a[0]), n(g.a[1])], [n(g.b[0]), n(g.b[1])]], open: true, construction: true });
       else segs.push({ id: g.id, ends: [root(src.a), root(src.b)], at: [g.a, g.b] });
+    } else if (g.type === "spline" && src.type === "spline") {
+      if (g.closed || g.construction) {
+        // A closed spline is a whole outline by itself; a construction one is a guide.
+        const pts = g.pts.map((p) => pt(p));
+        out.push({ id: g.id, type: "polyline", points: pts, ...(g.closed ? {} : { open: true }), ...(pts.length >= 3 ? { smooth: true } : {}), ...(g.construction ? { construction: true, open: true } : {}) });
+      } else if (g.pts.length >= 2) {
+        // An open spline joins lines and arcs into one outline or path.
+        const last = g.pts.length - 1;
+        segs.push({ id: g.id, ends: [root(src.pts[0]!), root(src.pts[last]!)], at: [g.pts[0]!, g.pts[last]!], ...(last >= 2 ? { through: g.pts.slice(1, last) } : {}) });
+      }
     } else if (g.type === "arc" && src.type === "arc" && !g.construction) {
       segs.push({ id: g.id, ends: [root(src.a), root(src.b)], at: [g.a, g.b], mid: polar(g.c, g.r, g.a0 + g.sweep / 2) });
     }
@@ -155,7 +178,6 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
   const at = new Map<Id, Seg[]>();
   for (const s of segs) for (const e of s.ends) at.set(e, [...(at.get(e) ?? []), s]);
   const used = new Set<Seg>();
-  const pt = (p: Vec2): PolyPoint => [n(p[0]), n(p[1])];
   // Follow segments from `node` until a node that isn't a plain joint, or back to the start.
   const walk = (node: Id, first: Seg): { pts: PolyPoint[]; closed: boolean } => {
     const pts: PolyPoint[] = [];
@@ -166,6 +188,7 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
       const fwd = s.ends[0] === cur;
       pts.push(pt(fwd ? s.at[0] : s.at[1]));
       if (s.mid) pts.push([n(s.mid[0]), n(s.mid[1]), "arc"]);
+      if (s.through) for (const p of fwd ? s.through : [...s.through].reverse()) pts.push([n(p[0]), n(p[1]), "spline"]);
       cur = fwd ? s.ends[1] : s.ends[0];
       if (cur === node) return { pts, closed: true };
       const next = at.get(cur) ?? [];
@@ -214,6 +237,23 @@ export const DIMENSIONS: ConstraintType[] = ["distance", "radius", "angle"];
 
 const round = (k: GeomType) => k === "arc" || k === "circle";
 
+/**
+ * The fit point next to the end where a spline meets another curve, and that end
+ * point: a spline leaves its end heading for its next fit point, so "tangent" there
+ * is "the next fit point lies on the other curve's tangent line".
+ */
+export function splineJoin(sk: Pick<SketchFeature, "geometry" | "constraints">, spline: Id, other: Id): { end: Id; next: Id } | null {
+  const s = geomById(sk, spline);
+  const o = geomById(sk, other);
+  if (s?.type !== "spline" || s.pts.length < 3 || (o?.type !== "line" && o?.type !== "arc")) return null;
+  const joined = (p: Id, q: Id) => p === q || !!sk.constraints?.some((c) => c.type === "coincident" && c.refs.includes(p) && c.refs.includes(q));
+  const last = s.pts.length - 1;
+  for (const [end, next] of [[s.pts[0]!, s.pts[1]!], [s.pts[last]!, s.pts[last - 1]!]] as [Id, Id][]) {
+    if (joined(end, o.a) || joined(end, o.b)) return { end, next };
+  }
+  return null;
+}
+
 /** True when a constraint type applies to geometry of these kinds (in any order). */
 export function constraintFits(type: ConstraintType, kinds: GeomType[]): boolean {
   const [a, b] = kinds;
@@ -230,7 +270,7 @@ export function constraintFits(type: ConstraintType, kinds: GeomType[]): boolean
     case "perpendicular":
       return pair(is("line"), is("line"));
     case "tangent":
-      return pair(is("line"), round) || pair(round, round);
+      return pair(is("line"), round) || pair(round, round) || pair(is("spline"), is("line")) || pair(is("spline"), is("arc"));
     case "equal":
       return pair(is("line"), is("line")) || pair(round, round);
     case "fixed":
@@ -343,6 +383,15 @@ export function addCircle(sk: Geo, c: Vec2 | Id, r: number, construction = false
   return id;
 }
 
+/** A smooth spline through the points (new points are made for positions; ids are reused). Needs two or more; closing needs three. */
+export function addSpline(sk: Geo, pts: (Vec2 | Id)[], closed = false, construction = false): Id | null {
+  if (pts.length < 2 || (closed && pts.length < 3)) return null;
+  const id = uid("s");
+  const ids = pts.map((p) => pointId(sk, p));
+  sk.geometry!.push({ id, type: "spline", pts: ids, ...(closed ? { closed: true } : {}), ...(construction ? { construction } : {}) });
+  return id;
+}
+
 /** An arc from `a` to `b` bulging through `through`. Returns null when the three points are in a line. */
 export function addArc(sk: Geo, a: Vec2 | Id, b: Vec2 | Id, through: Vec2, construction = false): Id | null {
   const pa = typeof a === "string" ? pointAt(sk, a) : a;
@@ -376,6 +425,10 @@ export function addConstraint(sk: Geo, type: ConstraintType, refs: Id[], value?:
   if (new Set(refs).size !== refs.length) return { error: "Pick different items." };
   if (!constraintFits(type, kinds as GeomType[])) return { error: `${CONSTRAINT_LABELS[type]} doesn't apply to ${describeKinds(kinds as GeomType[])}.` };
   if (DIMENSIONS.includes(type) && !value?.trim()) return { error: "A dimension needs a value." };
+  if (type === "tangent" && kinds.includes("spline")) {
+    const [s, o] = kinds[0] === "spline" ? [refs[0]!, refs[1]!] : [refs[1]!, refs[0]!];
+    if (!splineJoin(sk, s, o)) return { error: "A spline needs at least three points and must end where the line or arc ends. Make that end coincident first, then add Tangent." };
+  }
   const id = uid("k");
   (sk.constraints ??= []).push({ id, type, refs, ...(DIMENSIONS.includes(type) ? { value } : {}) });
   return { id };
@@ -393,6 +446,11 @@ export function deleteGeometry(sk: Geo, ids: Id[]) {
   for (const g of sk.geometry ?? []) {
     if ((g.type === "line" || g.type === "arc") && (gone.has(g.a) || gone.has(g.b))) gone.add(g.id);
     if ((g.type === "arc" || g.type === "circle") && gone.has(g.c)) gone.add(g.id);
+    // A spline just loses a deleted fit point; it goes when fewer than two are left.
+    if (g.type === "spline" && g.pts.some((p) => gone.has(p))) {
+      g.pts = g.pts.filter((p) => !gone.has(p));
+      if (g.pts.length < 2) gone.add(g.id);
+    }
   }
   const before = usedPoints(sk);
   sk.geometry = (sk.geometry ?? []).filter((g) => !gone.has(g.id));
@@ -400,17 +458,18 @@ export function deleteGeometry(sk: Geo, ids: Id[]) {
 }
 
 /** Remove points that curves used before an edit but no longer do, and constraints on removed geometry. */
-function dropUnused(sk: Geo, before: Set<Id>) {
+export function dropUnused(sk: Geo, before: Set<Id>) {
   const after = usedPoints(sk);
   sk.geometry = (sk.geometry ?? []).filter((g) => g.type !== "point" || !before.has(g.id) || after.has(g.id));
   pruneConstraints(sk);
 }
 
-function usedPoints(sk: Geo): Set<Id> {
+export function usedPoints(sk: Geo): Set<Id> {
   const used = new Set<Id>();
   for (const g of sk.geometry ?? []) {
     if (g.type === "line") used.add(g.a).add(g.b);
     if (g.type === "arc") used.add(g.a).add(g.b).add(g.c);
+    if (g.type === "spline") g.pts.forEach((p) => used.add(p));
     if (g.type === "circle") used.add(g.c);
   }
   return used;
@@ -424,10 +483,10 @@ function pruneConstraints(sk: Geo) {
 
 /* ───────────────────────── Trim and extend ───────────────────────── */
 
-type Curve = Exclude<GeomResolved, { type: "point" }>;
+type Curve = Exclude<GeomResolved, { type: "point" | "spline" }>;
 const EPS = 1e-7;
 
-function lineLine(a: Vec2, b: Vec2, c: Vec2, d: Vec2): Vec2[] {
+export function lineLine(a: Vec2, b: Vec2, c: Vec2, d: Vec2): Vec2[] {
   const r: Vec2 = [b[0] - a[0], b[1] - a[1]];
   const s: Vec2 = [d[0] - c[0], d[1] - c[1]];
   const den = r[0] * s[1] - r[1] * s[0];
@@ -436,7 +495,7 @@ function lineLine(a: Vec2, b: Vec2, c: Vec2, d: Vec2): Vec2[] {
   return [[a[0] + r[0] * t, a[1] + r[1] * t]];
 }
 
-function lineCircle(a: Vec2, b: Vec2, c: Vec2, r: number): Vec2[] {
+export function lineCircle(a: Vec2, b: Vec2, c: Vec2, r: number): Vec2[] {
   const d: Vec2 = [b[0] - a[0], b[1] - a[1]];
   const f: Vec2 = [a[0] - c[0], a[1] - c[1]];
   const A = d[0] ** 2 + d[1] ** 2;
@@ -449,7 +508,7 @@ function lineCircle(a: Vec2, b: Vec2, c: Vec2, r: number): Vec2[] {
   return ts.map((t): Vec2 => [a[0] + d[0] * t, a[1] + d[1] * t]);
 }
 
-function circleCircle(c1: Vec2, r1: number, c2: Vec2, r2: number): Vec2[] {
+export function circleCircle(c1: Vec2, r1: number, c2: Vec2, r2: number): Vec2[] {
   const d = dist(c1, c2);
   if (d < 1e-12 || d > r1 + r2 + 1e-9 || d < Math.abs(r1 - r2) - 1e-9) return [];
   const x = (d * d + r1 * r1 - r2 * r2) / (2 * d);
@@ -498,7 +557,7 @@ function param(g: Curve, p: Vec2): number {
 function crossings(g: Curve, geo: GeomResolved[]): { t: number; p: Vec2; by: Id }[] {
   const out: { t: number; p: Vec2; by: Id }[] = [];
   for (const o of geo) {
-    if (o.type === "point" || o.id === g.id) continue;
+    if (o.type === "point" || o.type === "spline" || o.id === g.id) continue;
     for (const p of meet(g, o)) out.push({ t: param(g, p), p, by: o.id });
   }
   return out.sort((x, y) => x.t - y.t);
@@ -512,7 +571,7 @@ function pointOn(sk: Geo, p: Vec2, on: Id): Id {
 }
 
 /** Lines whose length changes lose their length and equal-length constraints. */
-function dropLengths(sk: Geo, id: Id) {
+export function dropLengths(sk: Geo, id: Id) {
   sk.constraints = (sk.constraints ?? []).filter((c) => !(c.refs.includes(id) && (c.type === "equal" || (c.type === "distance" && c.refs.length === 1))));
 }
 
@@ -526,7 +585,8 @@ export function trimGeometry(sk: Geo, id: Id, click: Vec2): string | undefined {
   const geo = resolveGeometry(sk);
   const g = geo.find((x) => x.id === id);
   const src = geomById(sk, id);
-  if (!g || !src || g.type === "point" || src.type === "point") return "Pick a line, arc or circle to trim.";
+  if (src?.type === "spline") return "Splines can't be trimmed. Delete the spline, or move its points.";
+  if (!g || !src || g.type === "point" || g.type === "spline" || src.type === "point") return "Pick a line, arc or circle to trim.";
   const before = usedPoints(sk);
   const span = g.type === "line" ? 1 : g.type === "arc" ? g.sweep : TAU;
   const cuts = crossings(g, geo).filter((c) => g.type === "circle" || (c.t > EPS && c.t < span - EPS));

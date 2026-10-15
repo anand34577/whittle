@@ -15,6 +15,7 @@ import {
   describeConstraint,
   geomById,
   resolveGeometry,
+  splineJoin,
 } from "@whittle/core";
 
 let gcs: GcsWrapper | null = null;
@@ -97,6 +98,15 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
         add({ type: "perpendicular_ll", l1_id: p, l2_id: q });
         break;
       case "tangent": {
+        if (kp === "spline" || kq === "spline") {
+          // The spline's next fit point lies on the other curve's tangent line at the join.
+          const [sp, ot] = kp === "spline" ? [p, q!] : [q!, p];
+          const j = splineJoin(sk, sp, ot);
+          const o = geomById(sk, ot);
+          if (j && o?.type === "line") add({ type: "point_on_line_pl", p_id: j.next, l_id: ot });
+          else if (j && o?.type === "arc") add({ type: "perpendicular_pppp", l1p1_id: j.end, l1p2_id: j.next, l2p1_id: o.c, l2p2_id: j.end });
+          break;
+        }
         const end = sharedEnd(p, q);
         if (end) {
           // Tangent where they meet: the curves leave the point in the same (or opposite) direction.
@@ -190,6 +200,8 @@ function geometryPrims(sk: SketchFeature, pos: (id: Id) => Vec2, radius: (id: Id
     if (g.type === "point") {
       const [x, y] = pos(g.id);
       points.push({ id: g.id, type: "point", x, y, fixed: fixed.has(g.id) });
+    } else if (g.type === "spline") {
+      continue; // fit points are solver points; the curve is drawn through them
     } else if (g.type === "line") curves.push({ id: g.id, type: "line", p1_id: g.a, p2_id: g.b });
     else if (g.type === "circle") curves.push({ id: g.id, type: "circle", c_id: g.c, radius: radius(g.id) });
     else {
@@ -291,7 +303,7 @@ export function solveSketch(sk: SketchFeature, ev: Evaluator): SketchSolution | 
     }
   } else if (base.dof > 0) pointIds.forEach((id) => !fixed.has(id) && free.add(id));
   for (const g of sk.geometry) {
-    const needs = g.type === "point" ? [g.id] : g.type === "line" ? [g.a, g.b] : g.type === "arc" ? [g.a, g.b, g.c] : [g.c, g.id];
+    const needs = g.type === "point" ? [g.id] : g.type === "line" ? [g.a, g.b] : g.type === "arc" ? [g.a, g.b, g.c] : g.type === "spline" ? g.pts : [g.c, g.id];
     if (needs.every((x) => !free.has(x))) sol.defined.push(g.id);
   }
   return sol;

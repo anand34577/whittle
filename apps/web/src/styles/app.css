@@ -152,8 +152,10 @@ kbd {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 14px;
+  min-height: 32px;
+  padding: 6px 14px;
+  line-height: 1.25;
+  text-align: center;
   border-radius: var(--r-2);
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -187,8 +189,8 @@ kbd {
   color: var(--danger);
 }
 .btn--small {
-  height: 26px;
-  padding: 0 10px;
+  min-height: 26px;
+  padding: 4px 10px;
   font-size: var(--fs-sm);
 }
 .btn--wide {

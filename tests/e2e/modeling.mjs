@@ -43,6 +43,8 @@ await step("01-start", async () => {
   await page.getByRole("button", { name: /Engineer & professional/ }).click();
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).getByRole("button", { name: /New design/ }).first().click();
   await waitBuilt();
+  // This script exercises whole-shape outlines; constraint-ready shapes have their own script.
+  await page.evaluate(() => window.whittle.useApp.setState((s) => ({ prefs: { ...s.prefs, smartSketch: false } })));
 });
 
 await step("02-outline-with-arc", async () => {

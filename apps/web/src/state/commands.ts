@@ -30,7 +30,7 @@ import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, sa
 import { exportSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
 import { type ConstraintType, CONSTRAINT_LABELS, DIMENSIONS } from "@whittle/core";
-import { availableConstraints, constrainSelection, deleteSketchSelection, toggleGeometryConstruction } from "./constraintOps";
+import { availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { THEMES } from "./prefs";
 import {
@@ -73,6 +73,7 @@ export interface Command {
 
 const inModel = (s: AppState) => s.mode.kind === "model" || s.mode.kind === "measure";
 const inSketch = (s: AppState) => s.mode.kind === "sketch";
+const hasGeometry = (s: AppState) => inSketch(s) && s.sketchSel.length > 0;
 const hasEntity = (s: AppState) => inSketch(s) && !!s.selectedEntity;
 const hasImage = (s: AppState) => s.mode.kind === "sketch" && !!findFeature(s.doc, s.mode.sketchId, "sketch")?.image;
 const hasBodies = (s: AppState) => (s.regen?.bodies.length ?? 0) > 0;
@@ -217,7 +218,11 @@ export const COMMANDS: Command[] = [
   { id: "tool-line", label: "Line", group: "Sketch", icon: "line", keys: "L", keywords: "polyline polygon outline profile", hint: "Click points; click the first point to close", when: inSketch, run: () => setSketchTool("polyline") },
   { id: "tool-path", label: "Path", group: "Sketch", icon: "path", keys: "A", keywords: "open line wire rail spine curve for sweep guide", hint: "An open line: a path for sweeps (Enter to finish)", when: inSketch, run: () => setSketchTool("path") },
   { id: "tool-rect", label: "Rectangle", group: "Sketch", icon: "rect", keys: "R", keywords: "square box", hint: "Two corners", when: inSketch, run: () => setSketchTool("rect") },
+  { id: "tool-crect", label: "Center rectangle", group: "Sketch", icon: "rect", keywords: "square box centre middle", hint: "Center, then a corner", when: inSketch, run: () => setSketchTool("crect") },
+  { id: "tool-rect3", label: "3-point rectangle", short: "3-pt rect", group: "Sketch", icon: "rect", keywords: "square box tilted angled rotated three point", hint: "Two corners of one side, then the width", when: inSketch, run: () => setSketchTool("rect3") },
   { id: "tool-circle", label: "Circle", group: "Sketch", icon: "circle", keys: "C", keywords: "round hole diameter", hint: "Center, then radius", when: inSketch, run: () => setSketchTool("circle") },
+  { id: "tool-circle2", label: "2-point circle", short: "2-pt circle", group: "Sketch", icon: "circle", keywords: "round hole diameter two point", hint: "Two points across the circle", when: inSketch, run: () => setSketchTool("circle2") },
+  { id: "tool-circle3", label: "3-point circle", short: "3-pt circle", group: "Sketch", icon: "circle", keywords: "round hole through three points", hint: "Three points on the circle", when: inSketch, run: () => setSketchTool("circle3") },
   { id: "tool-ellipse", label: "Ellipse", group: "Sketch", icon: "ellipse", keys: "E", keywords: "oval egg", hint: "Center, then a corner of its box", when: inSketch, run: () => setSketchTool("ellipse") },
   { id: "tool-polygon", label: "Polygon", group: "Sketch", icon: "polygon", keys: "P", keywords: "hexagon nut sides triangle", hint: "Center, then a corner", when: inSketch, run: () => setSketchTool("polygon") },
   { id: "tool-slot", label: "Slot", group: "Sketch", icon: "slot", keys: "O", keywords: "oblong obround", hint: "Two centers", when: inSketch, run: () => setSketchTool("slot") },
@@ -235,6 +240,17 @@ export const COMMANDS: Command[] = [
   { id: "tool-segment", label: "Constrained line", short: "Lines", group: "Sketch", icon: "line", keywords: "segment constraint parametric sketcher professional dimension", hint: "Lines the solver keeps to your constraints; click the first point to close", when: inSketch, run: () => setSketchTool("segment") },
   { id: "tool-arc", label: "Constrained arc", short: "Arc", group: "Sketch", icon: "path", keywords: "arc three point curve constraint tangent", hint: "Start, end, then a point on the arc", when: inSketch, run: () => setSketchTool("arc") },
   { id: "tool-pcircle", label: "Constrained circle", short: "Circle", group: "Sketch", icon: "circle", keywords: "circle constraint radius dimension", hint: "Center, then radius", when: inSketch, run: () => setSketchTool("pcircle") },
+  { id: "tool-project", label: "Project model edges", short: "Project", group: "Sketch", icon: "link", keywords: "include intersect reference edge face outline copy existing body derive", hint: "Click an edge or face of the model to copy it into the sketch as locked geometry", when: (s) => inSketch(s) && hasBodies(s), run: () => setSketchTool("project") },
+  { id: "tool-spline", label: "Spline", group: "Sketch", icon: "path", keys: "Shift+S", keywords: "curve smooth fit points freeform bezier flowing", hint: "A smooth curve through points you can move, dimension and constrain", when: inSketch, run: () => setSketchTool("spline") },
+  { id: "tool-dimension", label: "Dimension", group: "Sketch", icon: "ruler", keys: "D", keywords: "size length radius distance angle measure constrain smart", hint: "Click a line, circle, arc or two items to set an exact size", when: inSketch, run: () => setSketchTool("dimension") },
+  { id: "tool-sfillet", label: "Sketch fillet", short: "Fillet", group: "Sketch", icon: "fillet", keywords: "round corner radius arc blend", hint: "Click a corner where two lines meet, then type the radius", when: inSketch, run: () => setSketchTool("sfillet") },
+  { id: "tool-schamfer", label: "Sketch chamfer", short: "Chamfer", group: "Sketch", icon: "chamfer", keywords: "bevel cut corner", hint: "Click a corner where two lines meet, then type the distance", when: inSketch, run: () => setSketchTool("schamfer") },
+  { id: "tool-gpoint", label: "Point", group: "Sketch", icon: "point", keywords: "dot marker datum construction", hint: "Click to place a point you can dimension and constrain to", when: inSketch, run: () => setSketchTool("gpoint") },
+  { id: "make-constrainable", label: "Make constrainable", short: "Constrain", group: "Sketch", icon: "link", keywords: "convert dimension constraint lines geometry trim fillet parametric", hint: "Turn this shape into lines and arcs you can dimension, constrain, trim and fillet", when: (s) => hasEntity(s) && s.selectedEntity !== null, run: () => makeConstrainable() },
+  { id: "geo-offset", label: "Offset lines and arcs", short: "Offset", group: "Sketch", icon: "offset", keywords: "inset outset parallel concentric grow shrink wall", hint: "Select lines, arcs or circles, then give a distance", when: hasGeometry, run: () => void offsetSelection() },
+  { id: "geo-mirror-y", label: "Mirror geometry across the Y axis", short: "Mirror ↔", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy left right", hint: "A mirrored copy held symmetric to the original", when: hasGeometry, run: () => mirrorSelection("y") },
+  { id: "geo-mirror-x", label: "Mirror geometry across the X axis", short: "Mirror ↕", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy up down", hint: "A mirrored copy held symmetric to the original", when: hasGeometry, run: () => mirrorSelection("x") },
+  { id: "geo-mirror-line", label: "Mirror geometry across a line", short: "Mirror line", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy axis", hint: "Select the geometry, then the mirror line last", when: hasGeometry, run: () => mirrorSelection("line") },
   { id: "tool-trim", label: "Trim", group: "Sketch", icon: "split", keywords: "cut remove piece segment between intersections", hint: "Click the piece of a line, arc or circle to remove", when: inSketch, run: () => setSketchTool("trim") },
   { id: "tool-extend", label: "Extend", group: "Sketch", icon: "arrowRight", keywords: "lengthen stretch to meet", hint: "Click near the end of a line or arc to stretch it to the next curve", when: inSketch, run: () => setSketchTool("extend") },
   ...(Object.keys(CONSTRAINT_LABELS) as ConstraintType[]).map(
