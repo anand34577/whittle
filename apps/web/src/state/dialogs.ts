@@ -29,6 +29,8 @@ export interface PromptRequest {
   /** Unit shown after a number. */
   unit?: string;
   validate?: (v: string) => string | null;
+  /** Quick values shown as chips under the field. */
+  choices?: { label: string; value: string }[];
   resolve: (v: string | null) => void;
 }
 
@@ -71,6 +73,7 @@ export function promptDialog(opts: {
   type?: PromptRequest["type"];
   unit?: string;
   validate?: (v: string) => string | null;
+  choices?: { label: string; value: string }[];
 }): Promise<string | null> {
   return new Promise((resolve) =>
     open({
@@ -84,6 +87,7 @@ export function promptDialog(opts: {
       type: opts.type ?? "text",
       unit: opts.unit,
       validate: opts.validate,
+      choices: opts.choices,
       resolve,
     }),
   );

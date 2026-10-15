@@ -1,10 +1,12 @@
 /** Right-hand panel: the active feature's editor, the selected sketch shape, or an inspector. */
 import { useState } from "react";
 import type { Draft } from "immer";
-import { BODY_COLORS, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, trim } from "@whittle/core";
+import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, geomType, trim } from "@whittle/core";
+import { availableConstraints, constrainSelection, geoMutate, setDimension } from "../state/constraintOps";
+import { commandById } from "../state/commands";
 import { areaText, volumeText } from "../state/measure";
 import type { FeatureStatus } from "@whittle/kernel";
-import { circularCopies, duplicateEntity, linearCopies, mirrorEntity, rotateEntity } from "../state/sketchOps";
+import { circularCopies, duplicateEntity, linearCopies, mirrorEntity, offsetEntity, rotateEntity } from "../state/sketchOps";
 import { LOOKS } from "../viewport/looks";
 import {
   cancelSession,
@@ -19,7 +21,8 @@ import {
   useApp,
 } from "../state/store";
 import { ExprInput, Segmented, Toggle } from "./ExprInput";
-import { ColorPicker, Disclosure, NumberField, Select } from "./controls";
+import { ColorPicker, Disclosure, NumberField, Select, Slider } from "./controls";
+import { importImage, startImagePick, traceImage, updateImage } from "../state/refImage";
 import { FeatureEditor } from "./FeatureEditors";
 import { Icon, type IconName } from "./icons";
 
@@ -69,6 +72,9 @@ function ShapeActions() {
         </button>
         <button className="btn btn--small" onClick={() => rotateEntity(90)} title="Rotate 90° (Shift+R)">
           <Icon name="rotate" size={15} /> Rotate 90°
+        </button>
+        <button className="btn btn--small" onClick={() => void offsetEntity()} title="A copy grown outward or shrunk inward (Shift+O)">
+          <Icon name="offset" size={15} /> Offset
         </button>
       </div>
       <div className="btnrow">
@@ -277,12 +283,27 @@ function EntityEditor({ e }: { e: SketchEntity }) {
         <>
           <Toggle label="Smooth curve" hint="A flowing spline through the points" checked={!!e.smooth} onChange={(v) => set("Smooth", (d) => void ((d as typeof e).smooth = v))} />
           {!e.smooth && <ExprInput label="Round corners" kind="length" value={e.corner ?? "0"} min={0} onChange={(v) => set("Corner", (d) => void ((d as typeof e).corner = v))} />}
-          <Toggle label="Open path" hint="A line that isn't closed: a path for sweeps, never a solid" checked={!!e.open} onChange={(v) => set("Open", (d) => void ((d as typeof e).open = v))} />
+          <Toggle label="Open path" hint="A line that isn't closed: sweep paths, revolve axes, and ribs with a thin extrude" checked={!!e.open} onChange={(v) => set("Open", (d) => void ((d as typeof e).open = v))} />
           <Disclosure summary={`${e.points.length} points`}>
             {e.points.map((p, i) => (
               <div className="field-row" key={i}>
                 <ExprInput label={`P${i + 1} X`} kind="length" value={p[0]} onChange={(v) => set("Point", (d) => void ((d as typeof e).points[i]![0] = v))} />
                 <ExprInput label="Y" kind="length" value={p[1]} onChange={(v) => set("Point", (d) => void ((d as typeof e).points[i]![1] = v))} />
+                {!e.smooth && i > 0 && (e.open ? i < e.points.length - 1 : true) && (
+                  <button
+                    className={`btn btn--small ${p[2] ? "is-on" : ""}`}
+                    aria-pressed={!!p[2]}
+                    title="Make this point the middle of an arc between its neighbours"
+                    onClick={() =>
+                      set("Arc point", (d) => {
+                        const pts = (d as typeof e).points;
+                        pts[i] = p[2] ? [p[0], p[1]] : [p[0], p[1], "arc"];
+                      })
+                    }
+                  >
+                    Arc
+                  </button>
+                )}
               </div>
             ))}
           </Disclosure>
@@ -307,6 +328,132 @@ function EntityEditor({ e }: { e: SketchEntity }) {
   );
 }
 
+/** The sketch's reference picture: add, calibrate, flatten, trace, place. */
+function ImageSection({ sketch }: { sketch: SketchFeature }) {
+  const units = useApp((s) => s.doc.units);
+  const im = sketch.image;
+  const k = LENGTH_TO_MM[units];
+  if (!im)
+    return (
+      <div className="btnrow">
+        <button className="btn btn--small" onClick={importImage} title="A photo or drawing to trace over. You can also paste or drop one.">
+          <Icon name="image" size={15} /> Add picture to trace
+        </button>
+      </div>
+    );
+  const num = (label: string, key: "x" | "y" | "width", min = -Infinity) => (
+    <label className="copyrow copyrow--wide">
+      <span>{label}</span>
+      <NumberField value={+trim(im[key] / k, 3)} min={min} onChange={(v) => updateImage(label, { [key]: v * k }, "img-" + key)} ariaLabel={`Picture ${label.toLowerCase()}`} unit={units} width={150} />
+    </label>
+  );
+  return (
+    <Disclosure summary={`Picture · ${im.name}`} defaultOpen>
+      <div className="btnrow">
+        <button className="btn btn--small" onClick={() => startImagePick("calibrate")} title="Click two points and type their real distance">
+          <Icon name="calibrate" size={15} /> Calibrate
+        </button>
+        <button className="btn btn--small" onClick={() => startImagePick("flatten")} title="Photo taken at an angle? Click the corners of a sheet of paper or a card to straighten and scale it">
+          <Icon name="flatten" size={15} /> Flatten photo
+        </button>
+        <button className="btn btn--small" onClick={() => void traceImage()} title="Turn the picture's shapes into outlines; round holes become circles">
+          <Icon name="trace" size={15} /> Trace all
+        </button>
+        <button className="btn btn--small" onClick={() => startImagePick("wand")} title="Click one shape in the picture to outline just that (ignores clutter around it)">
+          <Icon name="trace" size={15} /> Trace one area
+        </button>
+      </div>
+      {num("Width", "width", 0.001)}
+      {num("X", "x")}
+      {num("Y", "y")}
+      <label className="copyrow copyrow--wide">
+        <span>Rotate</span>
+        <NumberField value={+trim(im.rotation, 2)} step={1} onChange={(v) => updateImage("Rotate picture", { rotation: v }, "img-rot")} ariaLabel="Picture rotation" unit="°" width={150} />
+      </label>
+      <div className="copyrow copyrow--wide">
+        <span>Opacity</span>
+        <div style={{ flex: 1 }}>
+          <Slider value={im.opacity} min={0.1} max={1} onChange={(v) => updateImage("Picture opacity", { opacity: v }, "img-op")} ariaLabel="Picture opacity" format={(v) => `${Math.round(v * 100)}%`} />
+        </div>
+      </div>
+      <Toggle label="Show outside this sketch" checked={!im.hidden} onChange={(v) => updateImage("Show picture", { hidden: !v })} />
+      <div className="btnrow">
+        <button className="btn btn--small" onClick={importImage}>
+          Replace…
+        </button>
+        <button className="btn btn--small btn--ghost" onClick={() => updateImage("Remove picture", null)}>
+          Remove
+        </button>
+      </div>
+    </Disclosure>
+  );
+}
+
+/** Constraint-driven geometry: how defined it is, constraints for the selection, and every constraint. */
+function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
+  const sel = useApp((s) => s.sketchSel);
+  const sol = useApp((s) => s.regen?.sketches.find((x) => x.id === sketch.id)?.solution);
+  useApp((s) => s.regen);
+  const options = availableConstraints();
+  const picked = sel.map((id) => geomType(sketch, id)).filter(Boolean);
+  const counts = picked.reduce<Record<string, number>>((a, k) => ({ ...a, [k!]: (a[k!] ?? 0) + 1 }), {});
+  const state = !sol
+    ? "Solving…"
+    : sol.state === "full"
+      ? "Fully defined"
+      : sol.state === "under"
+        ? `${sol.dof} degree${sol.dof === 1 ? "" : "s"} of freedom left. Add constraints or dimensions to pin it down (blue can still move, green is fixed).`
+        : null; // conflicts and errors already show as the sketch's warning above
+  return (
+    <div className="panel__section constraints">
+      {state && (
+        <p className={`constraints__state constraints__state--${sol?.state ?? "under"}`} role="status">
+          {state}
+        </p>
+      )}
+      {picked.length > 0 && (
+        <>
+          <p className="muted small">
+            Selected: {Object.entries(counts).map(([k, n]) => `${n} ${k}${n > 1 ? "s" : ""}`).join(", ")}
+            {picked.length === 1 ? " (Shift+click to add more)" : ""}
+          </p>
+          <div className="constraints__actions">
+            {options.map((t) => (
+              <button key={t} className="btn btn--small" onClick={() => void constrainSelection(t)} title={commandById(`constrain-${t}`).hint}>
+                {CONSTRAINT_LABELS[t]}
+                {DIMENSIONS.includes(t) ? "…" : ""}
+              </button>
+            ))}
+            {options.length === 0 && <span className="muted small">No constraint fits this selection.</span>}
+          </div>
+        </>
+      )}
+      {(sketch.constraints?.length ?? 0) > 0 && (
+        <ul className="constraints__list" aria-label="Constraints">
+          {sketch.constraints!.map((c) => (
+            <li key={c.id} className={`${sol?.bad.includes(c.id) ? "is-bad" : ""} ${sel.includes(c.id) ? "is-selected" : ""}`}>
+              {c.value !== undefined ? (
+                <ExprInput label={CONSTRAINT_LABELS[c.type]} kind={c.type === "angle" ? "angle" : "length"} value={c.value} onChange={(v) => setDimension(c.id, v)} />
+              ) : (
+                <button className="constraints__name" onClick={() => useApp.setState({ sketchSel: [c.id], selectedEntity: null })}>
+                  {CONSTRAINT_LABELS[c.type]}
+                </button>
+              )}
+              <button
+                className="btn btn--icon btn--ghost"
+                aria-label={`Delete ${CONSTRAINT_LABELS[c.type]}`}
+                onClick={() => geoMutate("Delete constraint", (sk) => void (sk.constraints = sk.constraints?.filter((x) => x.id !== c.id)))}
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SketchPanel({ sketch }: { sketch: SketchFeature }) {
   const selected = useApp((s) => s.selectedEntity);
   const e = sketch.entities.find((x) => x.id === selected);
@@ -324,6 +471,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
       </header>
       <div className="panel__body">
         <StatusNote status={status} featureId={sketch.id} />
+        {(sketch.geometry?.length ?? 0) > 0 && <ConstraintSection sketch={sketch} />}
         {e ? (
           <EntityEditor key={e.id} e={e} />
         ) : (
@@ -334,6 +482,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
               value={sketch.plane.offset}
               onChange={(v) => updateFeature(sketch.id, "Offset", (d) => void ((d as SketchFeature).plane.offset = v), "offset")}
             />
+            <ImageSection sketch={sketch} />
             <div className="tips">
               <p>
                 <b>Draw:</b> pick a tool above, then click twice. Start typing to enter exact sizes.

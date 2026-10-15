@@ -17,9 +17,24 @@ import {
   type Id,
   type OriginPlane,
   type PlaneRef,
+  type ConstraintType,
   type SketchEntity,
+  type SketchFeature,
+  type Vec2,
   type WhittleDocument,
+  CONSTRAINT_LABELS,
   FEATURE_LABELS,
+  SKETCH_REFS,
+  addArc,
+  addCircle,
+  addConstraint,
+  addLine,
+  addPoint,
+  bakeSolution,
+  deleteGeometry,
+  extendGeometry,
+  geomById,
+  trimGeometry,
   activeEnd,
   documentEvaluator,
   formatQuantity,
@@ -121,7 +136,11 @@ export const DESIGN_TOOLS: ToolDef[] = [
               angle: num,
               rx: num,
               ry: num,
-              points: { type: "array", items: point, description: "polyline (closed outline) or path (open line) points" },
+              points: {
+                type: "array",
+                items: { type: "array", minItems: 2, maxItems: 3 },
+                description: 'polyline (closed outline) or path (open line) points: [x, y], or [x, y, "arc"] to make that point the middle of a three-point arc between its neighbours',
+              },
               smooth: { type: "boolean" },
               text: { type: "string" },
               size: num,
@@ -139,10 +158,45 @@ export const DESIGN_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "constrain_sketch",
+    description:
+      "Professional parametric sketching on an existing sketch: add points, lines, arcs and circles that a constraint solver positions, then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric, midpoint, collinear) and driving dimensions (distance, radius, angle) whose values may be formulas using parameters. Positions you give are rough guesses in mm; constraints and dimensions make them exact. Closed loops of lines/arcs become solid profiles (inner loops become holes). Also trims and extends. Returns the ids of what you named and the solver state: 'full' (fully defined), 'under' (dof = freedoms left), 'over' (conflicting/redundant, with a message naming them) or 'error'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sketch: { type: "string", description: "Sketch name or id" },
+        geometry: {
+          type: "array",
+          description:
+            'Geometry to add, in order. Each item: {name, type: "point", at: [x, y]} | {name, type: "line", from, to} | {name, type: "arc", from, to, through: [x, y]} | {name, type: "circle", center, radius}. from / to / center are [x, y] or a reference to an existing point: a point name, or "<line or arc>.start", ".end", ".center", or "origin". Reusing a point joins the curves there.',
+          items: { type: "object", properties: { name: { type: "string" }, type: { type: "string", enum: ["point", "line", "arc", "circle"] } }, required: ["type"] },
+        },
+        constraints: {
+          type: "array",
+          description:
+            'Constraints to add: {type, refs, value?}. refs are geometry names/ids, point references like "L1.start", or "origin", "xaxis", "yaxis". symmetric: [point, point, line] or [point, point, centre point]; midpoint: [point, line]; collinear: [line, line]. distance: [line] (length), [point, point], [point, line] or [line, line]; radius: [circle or arc]; angle: [line] (from horizontal) or [line, line]. value is in the design units (degrees for angles) or a formula.',
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear", "distance", "radius", "angle"] },
+              refs: { type: "array", items: { type: "string" } },
+              value: num,
+            },
+            required: ["type", "refs"],
+          },
+        },
+        trim: { type: "array", description: "Pieces to cut away: {curve, at: [x, y]} removes the piece of that curve around `at`, between the nearest crossings.", items: { type: "object" } },
+        extend: { type: "array", description: "{curve, at: [x, y]} stretches the end of a line or arc nearest `at` to the next curve.", items: { type: "object" } },
+        delete: { type: "array", items: { type: "string" }, description: "Geometry or constraint names/ids to delete" },
+      },
+      required: ["sketch"],
+    },
+  },
+  {
     name: "add_feature",
     description: `Add a 3D feature at the end of the timeline. Types: ${[
-      "extrude {sketch, distance, extent: one|symmetric|two, distance2, flip, taper, twist, op}",
-      "revolve {sketch, axis: x|y, angle, op}",
+      "extrude {sketch, distance, extent: one|symmetric|two|through (through all bodies; for cuts), distance2, flip, taper, twist, thin (wall thickness: walls along outlines, open paths become ribs), thinSide: center|inside|outside, op}",
+      "revolve {sketch, axis: x|y|line (line = the sketch's first path or construction line), angle, op}",
       "loft {sketches: [ids], ruled, op}",
       "sweep {profile, path, orientation: fixed|frenet, op}",
       "primitive {shape: box|cylinder|sphere|cone|torus|tube, width, depth, height, radius, radius2, position: [x,y,z], op}",
@@ -152,8 +206,8 @@ export const DESIGN_TOOLS: ToolDef[] = [
       "shell {body, face: selector, thickness}",
       "hole {body, face: selector, points: [[x,y]...] in the face frame, diameter, through, depth, style: simple|counterbore|countersink, headDiameter, headDepth}",
       "draft {body, faces: 'sides', angle, pull: x|y|z}",
-      "mirror {body, plane: XY|XZ|YZ, merge}",
-      "pattern {body, pattern: linear|circular, axis: x|y|z, count, spacing, angle, merge}",
+      "mirror {body, plane: XY|XZ|YZ, offset (moves the plane along its normal), merge}",
+      "pattern {body, pattern: linear|circular, axis: x|y|z, count, spacing, angle, axis2, count2, spacing2 (a second linear direction makes a grid), merge}",
       "move {body, translate: [x,y,z], axis, angle, copy}",
       "combine {target, tools: [bodies], op: join|cut|intersect, keepTools}",
       "split {body, plane, offset, keep: both|above|below}",
@@ -318,8 +372,8 @@ function entityFrom(s: Record<string, unknown>): SketchEntity {
         ...base,
         type: "polyline",
         points: pts.map((p) => {
-          if (!Array.isArray(p) || p.length !== 2) throw new ApiInputError("Each point is [x, y].");
-          return [ex(p[0]), ex(p[1])] as [string, string];
+          if (!Array.isArray(p) || p.length < 2 || p.length > 3 || (p.length === 3 && p[2] !== "arc")) throw new ApiInputError('Each point is [x, y] or [x, y, "arc"].');
+          return p[2] === "arc" ? ([ex(p[0]), ex(p[1]), "arc"] as const) : ([ex(p[0]), ex(p[1])] as [string, string]);
         }),
         ...(s.smooth ? { smooth: true } : {}),
         ...(s.corner_radius ? { corner: ex(s.corner_radius) } : {}),
@@ -337,9 +391,9 @@ function entityFrom(s: Record<string, unknown>): SketchEntity {
 
 const EXPR_KEYS = new Set([
   "distance", "distance2", "taper", "twist", "angle", "width", "depth", "height", "radius", "radius2", "pitch", "size", "thickness",
-  "diameter", "headDiameter", "headDepth", "count", "spacing", "offset", "factor", "neutral", "scale",
+  "diameter", "headDiameter", "headDepth", "count", "spacing", "offset", "factor", "neutral", "scale", "thin", "count2", "spacing2",
 ]);
-const ENUM_KEYS = new Set(["extent", "flip", "op", "axis", "shape", "ruled", "orientation", "section", "lefthand", "style", "through", "plane", "merge", "pattern", "copy", "keepTools", "keep", "center", "pull"]);
+const ENUM_KEYS = new Set(["extent", "flip", "op", "axis", "axis2", "thinSide", "shape", "ruled", "orientation", "section", "lefthand", "style", "through", "plane", "merge", "pattern", "copy", "keepTools", "keep", "center", "pull"]);
 
 /** Apply API settings onto a feature draft (resolving names, selectors and formulas). */
 function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
@@ -374,6 +428,74 @@ function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
     } else if (k === "edges" || k === "face" || k === "faces") continue; // handled with `body`
     else throw new ApiInputError(`"${k}" isn't a setting of ${f.type}.`);
   }
+}
+
+/** Apply a constrain_sketch request to a sketch copy. Returns the ids of the named items. */
+function applySketchEdits(sk: SketchFeature, input: Record<string, unknown>): Record<string, Id> {
+  const names: Record<string, Id> = {};
+  const id = (ref: unknown): Id => {
+    const r = String(ref ?? "");
+    if (r in SKETCH_REFS) return r;
+    const [base, part] = r.split(".") as [string, string | undefined];
+    const gid = names[base] ?? base;
+    const g = geomById(sk, gid) ?? sk.constraints?.find((c) => c.id === gid);
+    if (!g) throw new ApiInputError(`There's no geometry called "${base}" in ${sk.name}.`);
+    if (!part) return g.id;
+    const key = ({ start: "a", end: "b", center: "c" } as const)[part as "start" | "end" | "center"];
+    const p = key && (g as unknown as Record<string, unknown>)[key];
+    if (typeof p !== "string") throw new ApiInputError(`"${r}": use .start or .end on a line or arc, .center on an arc or circle.`);
+    return p;
+  };
+  const xy = (v: unknown, what: string): Vec2 => {
+    if (!Array.isArray(v) || v.length !== 2 || !v.every((x) => Number.isFinite(Number(x)))) throw new ApiInputError(`${what} is [x, y] in mm.`);
+    return [Number(v[0]), Number(v[1])];
+  };
+  const at = (v: unknown, what: string): Vec2 | Id => (typeof v === "string" ? id(v) : xy(v, what));
+  for (const raw of (input.geometry ?? []) as Record<string, unknown>[]) {
+    const label = String(raw.name ?? raw.type);
+    let gid: Id | null;
+    switch (raw.type) {
+      case "point":
+        gid = addPoint(sk, xy(raw.at, `${label}.at`));
+        break;
+      case "line":
+        gid = addLine(sk, at(raw.from, `${label}.from`), at(raw.to, `${label}.to`), !!raw.construction);
+        break;
+      case "arc":
+        gid = addArc(sk, at(raw.from, `${label}.from`), at(raw.to, `${label}.to`), xy(raw.through, `${label}.through`), !!raw.construction);
+        if (!gid) throw new ApiInputError(`Arc "${label}": its three points are in a straight line.`);
+        break;
+      case "circle": {
+        const r = Number(raw.radius);
+        if (!(r > 0)) throw new ApiInputError(`Circle "${label}" needs a radius greater than zero (mm).`);
+        gid = addCircle(sk, at(raw.center, `${label}.center`), r, !!raw.construction);
+        break;
+      }
+      default:
+        throw new ApiInputError(`Geometry type is point, line, arc or circle (got "${String(raw.type)}").`);
+    }
+    if (raw.name) names[String(raw.name)] = gid;
+  }
+  for (const c of (input.constraints ?? []) as Record<string, unknown>[]) {
+    const type = String(c.type) as ConstraintType;
+    if (!(type in CONSTRAINT_LABELS)) throw new ApiInputError(`Unknown constraint "${type}".`);
+    if (!Array.isArray(c.refs)) throw new ApiInputError(`${type}: refs is a list of geometry names.`);
+    const r = addConstraint(sk, type, c.refs.map(id), c.value === undefined ? undefined : ex(c.value));
+    if ("error" in r) throw new ApiInputError(r.error);
+    if (c.name) names[String(c.name)] = r.id;
+  }
+  for (const [list, fn] of [[input.trim, trimGeometry], [input.extend, extendGeometry]] as const) {
+    for (const t of (list ?? []) as Record<string, unknown>[]) {
+      const msg = fn(sk, id(t.curve), xy(t.at, "at"));
+      if (msg) throw new ApiInputError(msg);
+    }
+  }
+  const del = ((input.delete ?? []) as unknown[]).map(id);
+  if (del.length) {
+    sk.constraints = (sk.constraints ?? []).filter((c) => !del.includes(c.id));
+    deleteGeometry(sk, del);
+  }
+  return names;
 }
 
 const SHAPES = ["box", "cylinder", "sphere", "cone", "torus", "tube"] as const;
@@ -448,7 +570,9 @@ export function describeDesign() {
           return [k, v];
         }),
       );
-      return { id, type, name, ...(i >= end ? { rolled_back: true } : {}), status: statusOf(id), settings };
+      const sol = f.type === "sketch" ? useApp.getState().regen?.sketches.find((x) => x.id === id)?.solution : undefined;
+      const solver = sol ? { solver: { state: sol.state, dof: sol.dof, ...(sol.message ? { message: sol.message } : {}) } } : {};
+      return { id, type, name, ...(i >= end ? { rolled_back: true } : {}), status: statusOf(id), ...solver, settings };
     }),
     bodies: bodies().map((b) => ({
       id: b.id,
@@ -502,7 +626,8 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
 
       case "add_sketch": {
         const shapes = input.shapes;
-        if (!Array.isArray(shapes) || shapes.length === 0) throw new ApiInputError("Give at least one shape.");
+        // An empty list makes a sketch for constrain_sketch to fill.
+        if (!Array.isArray(shapes)) throw new ApiInputError("shapes is a list (it may be empty when you'll use constrain_sketch).");
         const entities = shapes.map((s) => entityFrom(s as Record<string, unknown>));
         let plane: PlaneRef;
         if (input.on_body !== undefined) plane = { kind: "face", face: faceBySelector(bodyRef(input.on_body), input.face ?? "top"), offset: ex(input.offset, "0") };
@@ -517,6 +642,23 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
         mutate(label(`add ${f.name}`), (d) => void d.features.push(f as Draft<Feature>));
         await settled();
         return { id: f.id, name: f.name, status: statusOf(f.id) };
+      }
+
+      case "constrain_sketch": {
+        const f = findFeatureRef(input.sketch);
+        if (f.type !== "sketch") throw new ApiInputError(`"${f.name}" isn't a sketch.`);
+        const sol = useApp.getState().builtDoc === doc() ? useApp.getState().regen?.sketches.find((x) => x.id === f.id)?.solution : undefined;
+        // Work on a copy so a bad item changes nothing.
+        const sk = structuredClone(f) as SketchFeature;
+        bakeSolution(sk, sol);
+        const names = applySketchEdits(sk, input);
+        mutate(label(`constrain ${f.name}`), (d) => {
+          const i = d.features.findIndex((x) => x.id === f.id);
+          if (i >= 0) d.features[i] = sk as Draft<Feature>;
+        });
+        await settled();
+        const s = useApp.getState().regen?.sketches.find((x) => x.id === f.id)?.solution;
+        return { ids: names, status: statusOf(f.id), ...(s ? { solver: { state: s.state, dof: s.dof, ...(s.message ? { message: s.message } : {}) } } : {}) };
       }
 
       case "add_feature": {

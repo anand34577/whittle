@@ -19,6 +19,7 @@ import {
 } from "@whittle/core";
 import type { ExportFormat } from "@whittle/kernel";
 import { importFile } from "./actions";
+import { placeImage } from "./refImage";
 import { getKernel } from "./kernel";
 import { addLocalVersion, listLocalVersions } from "./localHistory";
 import { ApiError, api, apiJson, ask, invoke, tauri } from "./platform";
@@ -214,6 +215,7 @@ export async function openServerDesign(id: string) {
 
 /** Open a file dropped onto the window. */
 export async function openDroppedFile(file: File) {
+  if (file.type.startsWith("image/")) return placeImage(file, file.name);
   if (/\.(step|stp|stl)$/i.test(file.name)) {
     useApp.setState({ panel: null });
     await importFile(file);
@@ -221,7 +223,7 @@ export async function openDroppedFile(file: File) {
   }
   const lower = file.name.toLowerCase();
   if (!lower.endsWith(FILE_EXTENSION) && !lower.endsWith(".json")) {
-    toast("warn", "Drop a Whittle design, or a STEP or STL file to import it.");
+    toast("warn", "Drop a Whittle design, a STEP or STL file to import it, or a picture to trace over.");
     return;
   }
   if (!(await confirmDiscard())) return;

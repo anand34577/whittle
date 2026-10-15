@@ -381,6 +381,33 @@ const P = {
       <path d="M3 6.5 L10 10 V17 L3 13.5 Z" fill="currentColor" fillOpacity=".8" stroke="none" />
     </>
   ),
+  image: (
+    <>
+      <rect x="2.5" y="4" width="15" height="12" rx="1.5" />
+      <circle cx="7" cy="8" r="1.5" />
+      <path d="M2.8 14.5 L7.5 10.5 L11 13.2 L13.5 11 L17.2 14.2" />
+    </>
+  ),
+  calibrate: (
+    <>
+      <path d="M2.5 12.5 L12.5 2.5 L17.5 7.5 L7.5 17.5 Z" />
+      <path d="M5.5 9.5 L7.3 11.3 M7.8 7.2 L9.1 8.5 M10 5 L11.8 6.8" />
+    </>
+  ),
+  flatten: (
+    <>
+      <path d="M3 6 L9 3.5 L9.5 15 L2.5 13 Z" opacity=".55" />
+      <path d="M12 5 H17.5 V15 H12 Z" />
+      <path d="M9.8 9.5 H11.5 M10.6 8.5 L11.5 9.5 L10.6 10.5" />
+    </>
+  ),
+  trace: (
+    <>
+      <rect x="2.5" y="2.5" width="15" height="15" rx="1.5" opacity=".45" strokeDasharray="1.6 1.8" />
+      <path d="M5.5 13.5 C5.5 8 8 6 10.5 6.5 C13 7 14.5 9 14.5 11.5 C14.5 13 13 14 11.5 13.2" />
+      <circle cx="5.5" cy="13.5" r="1.2" />
+    </>
+  ),
   camera: (
     <>
       <path d="M2.5 6.5 H6 L7.5 4.5 H12.5 L14 6.5 H17.5 V15.5 H2.5 Z" />

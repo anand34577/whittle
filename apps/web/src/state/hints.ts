@@ -9,8 +9,13 @@ const TOOL_HINTS: Record<string, [string, string]> = {
   ellipse: ["Click the center", "Click a corner of its bounding box · or type the X radius, Tab for Y"],
   gear: ["Click the center of the gear", "Drag out its size · or type the pitch diameter · set teeth and module on the right"],
   text: ["Click where the text should start", "Type the text on the right"],
-  polyline: ["Click the first point", "Click the next point \u00b7 click the first point to close \u00b7 Backspace removes the last point"],
-  path: ["Click where the path starts", "Click the next point \u00b7 Enter (or click the last point again) finishes \u00b7 Backspace removes the last point"],
+  polyline: ["Click the first point", "Click the next point \u00b7 click the first point to close \u00b7 A turns arcs on/off (click the end, then a point on the arc) \u00b7 Backspace undoes a point"],
+  segment: ["Click the first point (snap to points to join them)", "Click the next point · click the first point to close · click the last point again or Enter to stop · level lines get Horizontal/Vertical"],
+  arc: ["Click where the arc starts", "Click where it ends, then a point the arc passes through"],
+  pcircle: ["Click the center", "Click to set the radius · or type a diameter and press Enter"],
+  trim: ["Click the piece of a line, arc or circle to cut away (between crossings)", ""],
+  extend: ["Click near the end of a line or arc to stretch it to the next curve", ""],
+  path: ["Click where the path starts", "Click the next point \u00b7 Enter (or click the last point again) finishes \u00b7 A turns arcs on/off \u00b7 Backspace undoes a point"],
 };
 
 export function hintFor(s: AppState): string {
@@ -26,6 +31,7 @@ export function hintFor(s: AppState): string {
   }
   if (mode.kind === "sketch") {
     if (mode.tool === "select") {
+      if (s.sketchSel.length) return "Pick a constraint on the right · Shift+click adds to the selection · drag to move · Del removes";
       return s.selectedEntity
         ? "Edit sizes on the right \u00b7 drag to move \u00b7 X makes it construction \u00b7 Del removes it"
         : "Click a shape to select it \u00b7 pick a drawing tool above \u00b7 Esc to finish the sketch";

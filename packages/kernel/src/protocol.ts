@@ -3,7 +3,7 @@
  * The default implementation runs OpenCascade (WASM) in a Web Worker; a native
  * sidecar or a remote kernel can implement the same messages later.
  */
-import type { Id, Vec3, WhittleDocument } from "@whittle/core";
+import type { Id, SketchSolution, Vec3, WhittleDocument } from "@whittle/core";
 
 export interface FaceInfo {
   center: Vec3;
@@ -53,6 +53,8 @@ export interface SketchFrame {
   normal: Vec3;
   /** Triangles (xyz per vertex, world space) of the closed profile regions. */
   fill?: Float32Array;
+  /** Solved constraint-driven geometry, when the sketch has any. */
+  solution?: SketchSolution;
 }
 
 /** "incomplete" = waiting for the user to pick something (not an error). */

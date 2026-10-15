@@ -1,6 +1,6 @@
 /** Title bar, toolbar, status bar and toasts: the quiet frame around the viewport. */
 import { useEffect, useRef, useState } from "react";
-import { COMMANDS, type Command, commandById, isAvailable } from "../state/commands";
+import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable } from "../state/commands";
 import { hintFor } from "../state/hints";
 import { history, mutate, setTheme, useApp } from "../state/store";
 import { AccountButton } from "./Account";
@@ -220,8 +220,14 @@ export function Toolbar() {
           <span className="pill pill--accent">Sketch</span>
         </div>
         <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} activeId={active} />
-        <Group label="Special" ids={["tool-text", "tool-gear", "import-svg"]} more={["export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
+        <Group label="Special" ids={["tool-text", "tool-gear", "import-image", "import-svg"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
         <Group label="Arrange" ids={["tool-select", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "delete"]} activeId={active} />
+        <Group
+          label="Constrain"
+          ids={profile === "engineer" || profile === "designer" ? ["tool-segment", "tool-arc", "tool-pcircle", "tool-trim", "tool-extend"] : ["tool-segment"]}
+          more={["tool-segment", "tool-arc", "tool-pcircle", "tool-trim", "tool-extend", ...CONSTRAINT_COMMANDS]}
+          activeId={active}
+        />
         <div className="toolbar__spacer" />
         <button className="btn btn--accent" onClick={commandById("finish-sketch").run} data-tour="finish-sketch">
           <Icon name="finish" size={18} /> Finish sketch

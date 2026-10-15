@@ -103,7 +103,9 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
   return (
     <>
       <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void (d.sketch = v))} />
-      <ExprInput label="Distance" kind="length" value={f.distance} autoFocus onChange={(v) => upd(f, "Distance", (d) => void (d.distance = v))} />
+      {f.extent !== "through" && (
+        <ExprInput label="Distance" kind="length" value={f.distance} autoFocus onChange={(v) => upd(f, "Distance", (d) => void (d.distance = v))} />
+      )}
       <Segmented
         label="Direction"
         value={f.extent}
@@ -111,6 +113,7 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
           { value: "one", label: "One side" },
           { value: "symmetric", label: "Symmetric", title: "Half the distance each way" },
           { value: "two", label: "Two sides", title: "A different distance each way" },
+          { value: "through", label: "Through all", title: "Through every body in that direction (holes and slots that always go all the way)" },
         ]}
         onChange={(v) => upd(f, "Direction", (d) => void (d.extent = v))}
       />
@@ -118,6 +121,28 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
         <ExprInput label="Other side" kind="length" value={f.distance2 ?? "0"} min={0} onChange={(v) => upd(f, "Second distance", (d) => void (d.distance2 = v))} />
       )}
       {f.extent !== "symmetric" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
+      <Disclosure summary="Thin wall" defaultOpen={!!f.thin}>
+        <ExprInput
+          label="Wall"
+          kind="length"
+          value={f.thin ?? "0"}
+          min={0}
+          hint="Extrude walls along the outlines instead of filling them. Open paths become ribs."
+          onChange={(v) => upd(f, "Wall thickness", (d) => void (d.thin = v === "0" ? undefined : v))}
+        />
+        {f.thin && (
+          <Segmented
+            label="Wall side"
+            value={f.thinSide ?? "center"}
+            options={[
+              { value: "inside", label: "Inside", title: "Inside outlines (left of paths)" },
+              { value: "center", label: "Centered" },
+              { value: "outside", label: "Outside", title: "Outside outlines (right of paths)" },
+            ]}
+            onChange={(v) => upd(f, "Wall side", (d) => void (d.thinSide = v === "center" ? undefined : v))}
+          />
+        )}
+      </Disclosure>
       <Disclosure summary="Taper and twist" defaultOpen={advanced}>
         <ExprInput
           label="Taper"
@@ -140,17 +165,30 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
 }
 
 function RevolveEditor({ f }: { f: RevolveFeature }) {
+  const sketch = useApp((s) => s.doc.features.find((x): x is SketchFeature => x.id === f.sketch && x.type === "sketch"));
+  const lines = (sketch?.entities ?? []).filter((e) => e.type === "polyline" && (e.open || e.construction));
   return (
     <>
+      <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void (d.sketch = v))} />
       <Segmented
         label="Axis"
         value={f.axis}
         options={[
           { value: "y", label: "Sketch vertical", title: "The sketch's vertical (Y) axis" },
           { value: "x", label: "Sketch horizontal", title: "The sketch's horizontal (X) axis" },
+          { value: "line", label: "A line", title: "A straight path or construction line drawn in the sketch" },
         ]}
         onChange={(v) => upd(f, "Axis", (d) => void (d.axis = v))}
       />
+      {f.axis === "line" && (
+        <Select
+          label="Axis line"
+          value={lines.find((e) => e.id === f.axisLine)?.id ?? lines[0]?.id ?? ""}
+          placeholder={lines.length ? "Choose a line…" : "Draw a line with the Path tool first"}
+          onChange={(v) => upd(f, "Axis line", (d) => void (d.axisLine = v))}
+          options={lines.map((e, i) => ({ value: e.id, label: `${e.construction ? "Construction line" : "Path"} ${i + 1}`, icon: "sketch" as const }))}
+        />
+      )}
       <ExprInput label="Angle" kind="angle" value={f.angle} autoFocus onChange={(v) => upd(f, "Angle", (d) => void (d.angle = v))} />
       <OpField f={f} />
     </>
@@ -260,6 +298,13 @@ function MirrorEditor({ f }: { f: MirrorFeature }) {
         ]}
         onChange={(v) => upd(f, "Plane", (d) => void (d.plane = v))}
       />
+      <ExprInput
+        label="Plane offset"
+        kind="length"
+        value={f.offset ?? "0"}
+        hint="Move the mirror plane along its normal"
+        onChange={(v) => upd(f, "Offset", (d) => void (d.offset = v === "0" ? undefined : v))}
+      />
       <Toggle label="Merge with the original" checked={f.merge} onChange={(v) => upd(f, "Merge", (d) => void (d.merge = v))} />
     </>
   );
@@ -290,7 +335,19 @@ function PatternEditor({ f }: { f: PatternFeature }) {
       />
       <ExprInput label="Count" kind="count" value={f.count} autoFocus min={2} onChange={(v) => upd(f, "Count", (d) => void (d.count = v))} />
       {f.pattern === "linear" ? (
-        <ExprInput label="Spacing" kind="length" value={f.spacing} onChange={(v) => upd(f, "Spacing", (d) => void (d.spacing = v))} />
+        <>
+          <ExprInput label="Spacing" kind="length" value={f.spacing} onChange={(v) => upd(f, "Spacing", (d) => void (d.spacing = v))} />
+          <Disclosure summary="Second direction (grid)" defaultOpen={!!f.count2 && f.count2 !== "1"}>
+            <Segmented
+              label="Direction"
+              value={f.axis2 ?? (f.axis === "x" ? "y" : "x")}
+              options={(["x", "y", "z"] as const).filter((a) => a !== f.axis).map((a) => ({ value: a, label: a.toUpperCase() }))}
+              onChange={(v) => upd(f, "Second direction", (d) => void (d.axis2 = v))}
+            />
+            <ExprInput label="Count" kind="count" value={f.count2 ?? "1"} min={1} onChange={(v) => upd(f, "Second count", (d) => void (d.count2 = v === "1" ? undefined : v))} />
+            <ExprInput label="Spacing" kind="length" value={f.spacing2 ?? f.spacing} onChange={(v) => upd(f, "Second spacing", (d) => void (d.spacing2 = v))} />
+          </Disclosure>
+        </>
       ) : (
         <ExprInput label="Total angle" kind="angle" value={f.angle} onChange={(v) => upd(f, "Angle", (d) => void (d.angle = v))} />
       )}

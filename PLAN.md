@@ -1,7 +1,7 @@
 # Whittle: Product & Technical Plan
 
 > **Name:** Whittle (shaping material by hand, simply). **License:** MPL-2.0.
-> **Audience:** beginners, hobbyists & 3D-printing users, and professional mechanical designers. Defaults are simple and guided; depth is one click away ("progressive disclosure").
+> **Audience:** people new to 3D design, makers and hobbyists, product and industrial designers, engineers, teachers and students. A first-run profile tunes the defaults; everything is one click away ("progressive disclosure").
 > **Goal:** an open-source parametric 3D CAD app in Fusion 360's category: lighter, easier to install, easier to learn, nicer to use. It runs on Windows, macOS and Linux, and in any modern browser when hosted.
 > **Status (v0.2):** Phases 0–1 are done; 3 and 4 are nearly complete and 2 is partly done (constraints are next). See the [status table](#status).
 
@@ -23,12 +23,15 @@
 | Area | Features | Status |
 |---|---|---|
 | Sketch | outline (straight, rounded corners, smooth spline), rectangle (rounded, rotated), circle, ellipse, polygon, slot, text, spur gear; construction; snapping (points, centers, mids, grid, H/V alignment); typed dimensions; automatic holes (touching edges included, with a warning when a hole would split a shape); shaded solid regions; duplicate/mirror/rotate/circular and row copies | ✅ |
-| Sketch, next | arcs, trim/offset, **constraints via PlaneGCS** (coincident, tangent, equal…), DOF colouring | ⏳ |
+| Sketch, advanced | three-point arcs in outlines and paths (A while drawing), parametric shape offset | ✅ |
+| Sketch, constraints | points / lines / arcs / circles beside the whole shapes; **PlaneGCS** (WASM, in the kernel worker) with coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed and driving distance / radius / angle dimensions that take formulas; DOF colouring and named conflicts; trim / extend; `constrain_sketch` design API | ✅ |
+| Sketch, next | symmetric / midpoint / collinear constraints, dimension labels on the canvas, constraining whole shapes | ⏳ |
 | Features | extrude (one side/both, new/join/cut/intersect), revolve, loft, holes (simple/counterbore/countersink), fillet, chamfer, shell, move/rotate/copy, combine, box/cylinder/sphere/cone/torus/tube | ✅ |
-| Features, next | sweep, threads, draft, thicken, split | ⏳ |
+| Features, advanced | sweep, coils and threads, draft faces, tapered / twisted / two-sided / through-all / thin-wall extrude, ribs from open paths, revolve about a sketch line, offset mirror planes, grid patterns, split, offset, scale, hole standards | ✅ |
+
 | Parts library | gear, nut, washer, standoff, L bracket, plate, open box + lid, knob, name tag, vase, pulley; inserted as editable features with prefixed parameters | ✅ |
 | Repeat | mirror, linear/circular pattern | ✅ |
-| Construction | origin planes, face sketches with offset | ✅ · offset/angled planes, axes ⏳ |
+| Construction | origin planes, face sketches with offset, tilted planes, open paths | ✅ · axes ⏳ |
 | Parameters | named, unit-aware formulas, dependency-checked | ✅ |
 | Timeline | edit, suppress, roll back (drag marker), delete with dependency warning, drag to reorder with dependency check | ✅ |
 | Inspect | volume, area, size, mass by material; measure (distance, parallel gap, angle, diameter); section view; print check (overhangs); display styles; orthographic; image export | ✅ |
@@ -121,7 +124,7 @@ CI (`.github/workflows/ci.yml`) runs typecheck, unit and geometry tests, the web
 |---|---|---|
 | 0. Spike | OCCT WASM in a worker, sketch → extrude → fillet → edit survives | ✅ done |
 | 1. Foundations | design system, document model, undo, regen cache, viewport, file format | ✅ done |
-| 2. Sketcher | tools, snapping, typed dims, text, gears, splines, arrange ✅ · **constraints (PlaneGCS)**, arcs, trim ⏳ | in progress |
+| 2. Sketcher | tools, snapping, typed dims, text, gears, splines, arrange, arcs, **constraints (PlaneGCS)**, DOF colouring, trim / extend ✅ | ✅ done |
 | 3. Part features | extrude, revolve, loft, holes, fillet, chamfer, shell, move, combine, patterns ✅ · sweep, threads, draft ⏳ | in progress |
 | 4. I/O & polish | export, import STEP/STL, measure, section view, print check, parts library ✅ | done |
 | 4b. Platforms | desktop file handling + local history, self-hosted accounts/storage/versions, release pipeline | ✅ done |

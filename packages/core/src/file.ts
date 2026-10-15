@@ -12,7 +12,7 @@ import { uid } from "./factory";
 
 export const FILE_EXTENSION = ".whittle";
 export const MIME_TYPE = "application/vnd.whittle+zip";
-export const APP_VERSION = "0.3.0";
+export const APP_VERSION = "0.4.0";
 
 interface Manifest {
   format: "whittle";
@@ -60,7 +60,11 @@ export function deserializeDocument(bytes: Uint8Array): WhittleDocument {
 type Migration = (doc: Record<string, unknown>) => Record<string, unknown>;
 
 /** Forward migrations, indexed by the schema version they upgrade *from*. */
-const MIGRATIONS: Record<number, Migration> = {};
+const MIGRATIONS: Record<number, Migration> = {
+  // Format 2 adds optional constraint-driven sketch geometry. Nothing to convert; the
+  // bump makes older apps refuse these files instead of silently dropping the geometry.
+  1: (d) => d,
+};
 
 export function migrate(input: unknown): WhittleDocument {
   if (!input || typeof input !== "object") throw new FileFormatError("The document is empty.");

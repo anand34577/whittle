@@ -1,21 +1,32 @@
 /** Mounts the viewport engine and keeps it in sync with application state. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  type ConstraintType,
+  type Id,
   type SketchEntity,
+  type SketchFeature,
+  type SketchSolution,
   type Vec2,
   type Vec3,
+  CONSTRAINT_LABELS,
   LENGTH_TO_MM,
   activeEnd,
   documentEvaluator,
   entityLoops,
+  geomOutline,
   isSketchConsumed,
+  geomType,
+  pointAt,
   resolveEntity,
+  resolveGeometry,
   trim,
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace } from "../state/actions";
+import { addArcGeometry, addCircleGeometry, addLines, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure } from "../state/measure";
+import { cancelImagePick, imagePickPointer, placeImage, useImagePick } from "../state/refImage";
 import { type Pick, editFeature, findFeature, setSketchTool, setView, sketchMutate, toast, useApp } from "../state/store";
 import { type SketchUIState, SketchController } from "../viewport/sketchTools";
 import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/Viewport";
@@ -28,6 +39,65 @@ export const sketchKeys: { handle: ((e: KeyboardEvent) => boolean) | null; typeD
   handle: null,
   typeDigit: null,
 };
+
+const GLYPHS: Partial<Record<ConstraintType, string>> = {
+  horizontal: "H",
+  vertical: "V",
+  parallel: "∥",
+  perpendicular: "⊥",
+  equal: "=",
+  tangent: "⌒",
+  fixed: "⌖",
+  symmetric: "⇔",
+  midpoint: "½",
+  collinear: "⋯",
+};
+
+interface ConstraintMark {
+  key: string;
+  id: Id;
+  /** Sketch mm. */
+  at: Vec2;
+  text: string;
+  dim: boolean;
+}
+
+/** Where to label each constraint on the canvas: dimensions show their value, relations a glyph on each thing they relate. */
+function constraintMarks(sk: SketchFeature, sol?: SketchSolution): ConstraintMark[] {
+  const geo = new Map(resolveGeometry(sk, sol).map((g) => [g.id, g]));
+  const mid = (a: Vec2, b: Vec2): Vec2 => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  // ponytail: the axes get no label of their own; a dimension to one sits at the other end.
+  const anchor = (id: Id): Vec2 | null => {
+    const g = geo.get(id);
+    if (!g) return id === "origin" ? [0, 0] : null;
+    if (g.type === "point") return g.p;
+    if (g.type === "line") return mid(g.a, g.b);
+    const t = g.type === "arc" ? g.a0 + g.sweep / 2 : Math.PI / 4;
+    return [g.c[0] + g.r * Math.cos(t), g.c[1] + g.r * Math.sin(t)];
+  };
+  const out: ConstraintMark[] = [];
+  for (const c of sk.constraints ?? []) {
+    if (c.value !== undefined) {
+      const pts = c.refs.map(anchor).filter((p): p is Vec2 => !!p);
+      if (!pts.length) continue;
+      const prefix = c.type === "radius" ? "R" : c.type === "angle" ? "∠" : "";
+      out.push({ key: c.id, id: c.id, at: pts.length > 1 ? mid(pts[0]!, pts[1]!) : pts[0]!, text: prefix + c.value, dim: true });
+      continue;
+    }
+    const glyph = GLYPHS[c.type];
+    if (!glyph) continue;
+    let at: (Vec2 | null)[];
+    if (c.type === "symmetric") {
+      // Halfway between the mirrored points, which is on the mirror.
+      const mirror = c.refs.find((r) => geomType(sk, r) === "line") ?? c.refs[2];
+      const [a, b] = c.refs.filter((r) => r !== mirror).map(anchor);
+      at = [a && b ? mid(a, b) : null];
+    } else if (c.type === "midpoint") at = c.refs.filter((r) => geomType(sk, r) === "point").map(anchor);
+    else at = c.refs.map(anchor);
+    at.forEach((p, i) => p && out.push({ key: `${c.id}.${i}`, id: c.id, at: p, text: glyph, dim: false }));
+  }
+  return out;
+}
 
 const PLAIN = /^\s*-?\d*\.?\d+\s*$/;
 
@@ -224,6 +294,7 @@ export function ViewportView() {
   const picks = useApp((s) => s.measure);
   const radial = useApp((s) => s.radial);
   const selectedEntity = useApp((s) => s.selectedEntity);
+  const sketchSel = useApp((s) => s.sketchSel);
   const viewRequest = useApp((s) => s.viewRequest);
   const regenBusy = useApp((s) => s.regenBusy);
   const kernelReady = useApp((s) => s.kernelReady);
@@ -278,6 +349,25 @@ export function ViewportView() {
           setSketchUI(st);
           if (useApp.getState().sketchStep !== st.step) useApp.setState({ sketchStep: st.step });
         },
+        geometry: () => {
+          const o = openSketch();
+          return o ? resolveGeometry(o.sk, o.sol) : [];
+        },
+        addLines: (pts, closed) => {
+          const o = openSketch();
+          addLines(pts, closed, (p) => (typeof p === "string" ? pointAt(o!.sk, p, o!.sol) : p));
+        },
+        addArc: addArcGeometry,
+        addCircle: addCircleGeometry,
+        trim: trimAt,
+        extend: extendAt,
+        selectGeom: (id, additive) => {
+          const cur = useApp.getState().sketchSel;
+          if (!id) return useApp.setState({ sketchSel: additive ? cur : [] });
+          useApp.setState({ sketchSel: additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id], selectedEntity: null });
+        },
+        selectedGeom: () => useApp.getState().sketchSel,
+        moveGeom: movePoints,
       }),
     [],
   );
@@ -296,7 +386,10 @@ export function ViewportView() {
         if (p?.kind === "sketch") editFeature(p.sketchId);
         else if (p && (p.kind === "face" || p.kind === "edge" || p.kind === "body")) editFeature(p.bodyId);
       },
-      onSketchPointer: (e) => controller.pointer(e),
+      onSketchPointer: (e) => {
+        if ((e.type === "move" || e.type === "down") && imagePickPointer(e.type, e.p, e.button)) return;
+        controller.pointer(e);
+      },
       onCamera: () => {
         for (const fn of cameraListeners) fn();
         setCamTick((t) => t + 1);
@@ -440,15 +533,67 @@ export function ViewportView() {
           /* errors show in the panel */
         }
       }
-      list.push({ id: f.id, frame: fr, active, shapes, fill: active || selected || inLoft || !isSketchConsumed(doc, f.id) ? fr.fill : undefined });
+      // Constraint-driven geometry, coloured by how well it's defined while editing.
+      const sol = fr.solution;
+      const bad = new Set((f.constraints ?? []).filter((c) => sol?.bad.includes(c.id)).flatMap((c) => c.refs));
+      const defined = new Set(sol?.defined);
+      const markers: SketchDrawable["markers"] = [];
+      for (const g of resolveGeometry(f, sol)) {
+        const tone = !active ? undefined : bad.has(g.id) ? "bad" : defined.has(g.id) ? "defined" : "free";
+        const isSel = active ? sketchSel.includes(g.id) : selected || inLoft;
+        const isHover = active ? g.id === sketchUI?.hoverEntity : hovered;
+        if (g.type === "point") {
+          if (active) markers.push({ p: g.p, tone: tone!, selected: isSel, hovered: isHover });
+          continue;
+        }
+        shapes.push({ id: g.id, pts: geomOutline(g), closed: false, construction: g.construction, selected: isSel, hovered: isHover, tone });
+      }
+      list.push({ id: f.id, frame: fr, active, shapes, markers, fill: active || selected || inLoft || !isSketchConsumed(doc, f.id) ? fr.fill : undefined });
     }
     vp.setSketches(list);
-  }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchUI?.hoverEntity, sessionFeature]);
+  }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature]);
+
+  // Reference pictures: the edited sketch's always, others unless hidden.
+  useEffect(() => {
+    if (!vp || !regen) return;
+    const list: Parameters<Viewport["setReferenceImages"]>[0] = [];
+    for (const f of doc.features.slice(0, activeEnd(doc))) {
+      if (f.type !== "sketch" || !f.image || (f.image.hidden && f.id !== sketchId)) continue;
+      const fr = regen.sketches.find((s) => s.id === f.id);
+      if (fr) list.push({ frame: fr, image: f.image, active: f.id === sketchId });
+    }
+    vp.setReferenceImages(list);
+  }, [vp, regen, doc, sketchId]);
+
+  const imagePick = useImagePick();
+  useEffect(() => {
+    if (mode.kind !== "sketch" && imagePick.kind) cancelImagePick();
+  }, [mode.kind, imagePick.kind]);
+  // Paste a picture (screenshot, copied image) while sketching.
+  useEffect(() => {
+    if (mode.kind !== "sketch") return;
+    const paste = (e: ClipboardEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable]")) return;
+      const f = [...(e.clipboardData?.files ?? [])].find((x) => x.type.startsWith("image/"));
+      if (!f) return;
+      e.preventDefault();
+      void placeImage(f, f.name || "Pasted picture");
+    };
+    window.addEventListener("paste", paste);
+    return () => window.removeEventListener("paste", paste);
+  }, [mode.kind]);
 
   useEffect(() => {
     if (!vp) return;
-    vp.setSketchPreview(frame, sketchUI?.preview ?? [], sketchUI?.guides ?? []);
-  }, [vp, frame, sketchUI]);
+    const extra: { pts: Vec2[]; closed: boolean }[] = [];
+    if (imagePick.kind) {
+      const pts = imagePick.cursor ? [...imagePick.pts, imagePick.cursor] : imagePick.pts;
+      extra.push({ pts, closed: imagePick.kind === "flatten" && pts.length === 4 });
+      const r = 6 * vp.pixelSize;
+      for (const [x, y] of imagePick.pts) extra.push({ pts: [[x - r, y - r], [x + r, y + r], [x, y], [x - r, y + r], [x + r, y - r]], closed: false });
+    }
+    vp.setSketchPreview(frame, [...(sketchUI?.preview ?? []), ...extra], sketchUI?.guides ?? []);
+  }, [vp, frame, sketchUI, imagePick]);
 
   // Measure.
   const measured = useMemo(() => (mode.kind === "measure" ? measure(picks, regen?.bodies ?? [], doc.units) : null), [mode.kind, picks, regen, doc.units]);
@@ -493,6 +638,10 @@ export function ViewportView() {
   useEffect(() => {
     sketchKeys.handle = (e) => {
       if (mode.kind !== "sketch") return false;
+      if (e.key === "Escape" && useImagePick.getState().kind) {
+        cancelImagePick();
+        return true;
+      }
       return controller.key(e);
     };
     sketchKeys.typeDigit = (key) => {
@@ -572,6 +721,20 @@ export function ViewportView() {
         </div>
       )}
 
+      {imagePick.kind && (
+        <div className="viewport__banner" role="status">
+          <Icon name="image" size={16} />
+          {imagePick.kind === "calibrate"
+            ? `Calibrate: click ${imagePick.pts.length ? "the second point" : "the first of two points whose distance you know"}`
+            : imagePick.kind === "flatten"
+              ? `Flatten photo: click corner ${imagePick.pts.length + 1} of 4 of the known rectangle, in order around it`
+              : "Trace one area: click inside the shape (or the gap) to outline"}
+          <button className="btn btn--small btn--ghost" onClick={cancelImagePick}>
+            Cancel
+          </button>
+        </div>
+      )}
+
       {mode.kind === "measure" && (
         <div className="viewport__banner">
           <Icon name="measure" size={16} /> Measure: click one or two things
@@ -610,6 +773,45 @@ export function ViewportView() {
       {snapScreen && sketchUI?.snap && sketchUI.snap.kind !== "free" && (
         <div className={`snap snap--${sketchUI.snap.kind}`} style={{ left: snapScreen[0], top: snapScreen[1] }} aria-hidden="true" />
       )}
+
+      {frame &&
+        vp &&
+        mode.kind === "sketch" &&
+        (() => {
+          const sk = findFeature(doc, mode.sketchId, "sketch");
+          if (!sk?.constraints?.length) return null;
+          const bad = new Set(frame.solution?.bad);
+          // Glyphs that land on the same spot line up side by side.
+          const taken = new Map<string, number>();
+          return constraintMarks(sk, frame.solution).map((m) => {
+            const pos = vp.sketchToScreen(m.at, frame);
+            if (!pos) return null;
+            const spot = `${m.dim}:${Math.round(pos[0] / 6)}:${Math.round(pos[1] / 6)}`;
+            const n = taken.get(spot) ?? 0;
+            taken.set(spot, n + 1);
+            const c = sk.constraints!.find((x) => x.id === m.id)!;
+            const unit = c.type === "angle" ? "°" : m.dim ? doc.units : "";
+            return (
+              <button
+                key={m.key}
+                className={`cmark ${m.dim ? "cmark--dim mono" : "cmark--glyph"} ${sketchSel.includes(m.id) ? "is-selected" : ""} ${bad.has(m.id) ? "is-bad" : ""}`}
+                style={{ left: pos[0] + n * (m.dim ? 0 : 20), top: pos[1] + n * (m.dim ? 22 : 0) }}
+                data-constraint={m.id}
+                aria-label={`${CONSTRAINT_LABELS[c.type]}${c.value !== undefined ? ` ${c.value}` : ""}`}
+                title={m.dim ? `${CONSTRAINT_LABELS[c.type]} · double-click to edit` : CONSTRAINT_LABELS[c.type]}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  const cur = useApp.getState().sketchSel;
+                  useApp.setState({ sketchSel: e.shiftKey ? (cur.includes(m.id) ? cur.filter((x) => x !== m.id) : [...cur, m.id]) : [m.id], selectedEntity: null });
+                }}
+                onDoubleClick={() => m.dim && void editDimension(m.id)}
+              >
+                {m.text}
+                {unit && <small>{unit}</small>}
+              </button>
+            );
+          });
+        })()}
 
       {frame &&
         sketchUI?.dims.map((d) => {

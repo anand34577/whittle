@@ -1879,3 +1879,50 @@ kbd {
 * {
   scrollbar-color: var(--line-strong) transparent;
 }
+/* Constraint-driven sketch geometry (properties panel). */
+.constraints__state { margin: 0 0 8px; padding: 6px 8px; border-radius: 6px; background: var(--bg-inset); font-size: var(--fs-sm); }
+.constraints__state--full { color: var(--ok); }
+.constraints__state--over, .constraints__state--error { color: var(--danger); background: var(--danger-soft); }
+.constraints__actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 10px; }
+.constraints__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.constraints__list li { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 6px; }
+.constraints__list li.is-selected { background: var(--select-soft); }
+.constraints__list li.is-bad { background: var(--danger-soft); color: var(--danger); }
+.constraints__name { all: unset; cursor: pointer; font-size: var(--fs-sm); }
+.constraints__name:focus-visible { outline: 2px solid var(--select); border-radius: 4px; }
+.constraints__list li > .field { margin: 0; }
+
+/* Constraint labels on the sketch: dimension values above, relation glyphs beside the geometry. */
+.cmark {
+  position: absolute;
+  transform: translate(-50%, -130%);
+  padding: 1px 5px;
+  background: color-mix(in oklch, var(--bg-0) 88%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cmark small {
+  color: var(--text-3);
+  margin-left: 2px;
+}
+.cmark--glyph {
+  transform: translate(-50%, 35%);
+  min-width: 18px;
+  padding: 0 3px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.cmark:hover,
+.cmark.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.cmark.is-bad {
+  border-color: var(--danger);
+  color: var(--danger);
+}

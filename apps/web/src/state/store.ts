@@ -36,8 +36,11 @@ export type Pick =
   | { kind: "plane"; plane: OriginPlane }
   | { kind: "sketch"; sketchId: Id };
 
-/** "path" draws an open polyline (for sweeps and guides). */
-export type SketchTool = EntityType | "select" | "path";
+/**
+ * "path" draws an open polyline (for sweeps and guides). "segment", "arc" and
+ * "pcircle" draw constraint-driven geometry; "trim" and "extend" edit it.
+ */
+export type SketchTool = EntityType | "select" | "path" | "segment" | "arc" | "pcircle" | "trim" | "extend";
 
 export type Mode =
   | { kind: "model" }
@@ -93,6 +96,8 @@ export interface AppState {
   selection: Pick[];
   hover: Pick | null;
   selectedEntity: Id | null;
+  /** Selected constraint-driven geometry and constraints in the open sketch (may hold stale ids; check before use). */
+  sketchSel: Id[];
   /** Points placed so far by the active sketch tool (drives the hint line). */
   sketchStep: number;
 
@@ -135,6 +140,7 @@ export const useApp = create<AppState>(() => ({
   selection: [],
   hover: null,
   selectedEntity: null,
+  sketchSel: [],
   sketchStep: 0,
   theme: resolveTheme(initialPrefs.theme),
   prefs: initialPrefs,
@@ -392,6 +398,7 @@ export function enterSketch(sketchId: Id, isNew: boolean) {
     selection: [],
     hover: null,
     selectedEntity: null,
+    sketchSel: [],
     viewRequest: { kind: "normal", at: Date.now() },
   });
 }
@@ -405,7 +412,7 @@ export function finishSketch() {
   const { mode, doc } = get();
   if (mode.kind !== "sketch") return;
   const sk = findFeature(doc, mode.sketchId, "sketch");
-  const empty = !sk || sk.entities.length === 0;
+  const empty = !sk || (sk.entities.length === 0 && !sk.geometry?.length);
   if (mode.isNew && empty) {
     cancelSession();
     set({ mode: { kind: "model" } });
@@ -416,6 +423,7 @@ export function finishSketch() {
   set({
     mode: { kind: "model" },
     selectedEntity: null,
+    sketchSel: [],
     selection: sk ? [{ kind: "sketch", sketchId: sk.id }] : [],
   });
   if (mode.isNew && sk) toast("ok", "Sketch finished. Press E to extrude it.");

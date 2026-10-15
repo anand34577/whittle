@@ -5,6 +5,7 @@ Whittle is MPL-2.0. It builds on these open-source projects:
 | Component | License | Notes |
 |---|---|---|
 | [Open CASCADE Technology](https://dev.opencascade.org/) (via `replicad-opencascadejs`) | LGPL-2.1 (with OCCT exception) | Shipped as a **separate, replaceable** `replicad_single.wasm` file. You may rebuild it from source with the scripts in the `replicad-opencascadejs` package and drop it in. |
+| [PlaneGCS](https://github.com/Salusoft89/planegcs) (FreeCAD's sketch solver, via `@salusoft89/planegcs`) | LGPL-2.1 or later | Shipped as a **separate, replaceable** `planegcs.wasm` file (about 480 KB, 176 KB compressed). It can be rebuilt from source with the package's Docker build scripts and dropped in. |
 | [replicad](https://replicad.xyz) | MIT | JavaScript API over OCCT |
 | [three.js](https://threejs.org) | MIT | Viewport rendering |
 | [React](https://react.dev) | MIT | UI |
