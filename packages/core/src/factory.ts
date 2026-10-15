@@ -184,6 +184,11 @@ export function makeSweep(doc: WhittleDocument, profile: Id, path: Id): Feature 
   return { id: uid("sw"), type: "sweep", name: nextName(doc, "Sweep"), profile, path, orientation: "frenet", op: "new" };
 }
 
+/** A tube along a path sketch: round or square, solid or hollow (wall 0 = solid). */
+export function makePipe(doc: WhittleDocument, path: Id): Feature {
+  return { id: uid("pi"), type: "sweep", name: nextName(doc, "Pipe"), profile: "", path, orientation: "fixed", pipe: { shape: "circle", size: "10", wall: "2" }, op: "new" };
+}
+
 /** A coil or thread. `kind` picks sensible starting sizes. */
 export function makeCoil(doc: WhittleDocument, kind: "spring" | "thread" = "spring"): Feature {
   return {

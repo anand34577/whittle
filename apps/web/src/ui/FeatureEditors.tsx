@@ -519,7 +519,30 @@ function ImportEditor({ f }: { f: ImportFeature }) {
   );
 }
 
+function PipeEditor({ f }: { f: SweepFeature }) {
+  const pipe = f.pipe!;
+  const set = (label: string, recipe: (p: NonNullable<SweepFeature["pipe"]>) => void) => upd(f, label, (d) => void (d.type === "sweep" && d.pipe && recipe(d.pipe)));
+  return (
+    <>
+      <SketchSelect f={f} label="Path" value={f.path} placeholder="The path to follow…" onChange={(v) => upd(f, "Path", (d) => void (d.type === "sweep" && (d.path = v)))} />
+      <Segmented
+        label="Section"
+        value={pipe.shape}
+        options={[
+          { value: "circle", label: "Round" },
+          { value: "square", label: "Square" },
+        ]}
+        onChange={(v) => set("Section", (p) => void (p.shape = v))}
+      />
+      <ExprInput label={pipe.shape === "circle" ? "Outer diameter" : "Outer width"} kind="length" value={pipe.size} min={0} onChange={(v) => set("Size", (p) => void (p.size = v))} />
+      <ExprInput label="Wall thickness" kind="length" value={pipe.wall} min={0} hint="0 makes a solid rod" onChange={(v) => set("Wall", (p) => void (p.wall = v))} />
+      <OpField f={f} />
+    </>
+  );
+}
+
 function SweepEditor({ f }: { f: SweepFeature }) {
+  if (f.pipe) return <PipeEditor f={f} />;
   return (
     <>
       <SketchSelect f={f} label="Profile" value={f.profile} placeholder="The cross-section…" onChange={(v) => upd(f, "Profile", (d) => void (d.profile = v))} />

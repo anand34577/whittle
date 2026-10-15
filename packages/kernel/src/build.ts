@@ -1102,7 +1102,38 @@ function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire {
   return w;
 }
 
+/** A round or square tube along a path: the section is made here, square to the path at its start. */
+function pipeTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator): Shape3D {
+  const pipe = f.pipe!;
+  const path = sketches.get(f.path);
+  if (!f.path || !path?.source) throw new FeatureError("Pick the path sketch (an open line or outline).", undefined, true);
+  const size = ev.num(pipe.size, "length", "Outer size");
+  const wall = ev.num(pipe.wall, "length", "Wall");
+  if (size <= 0) throw new FeatureError("The pipe size must be greater than zero.");
+  if (wall < 0 || wall * 2 >= size) throw new FeatureError("The wall must be at least zero and less than half the size.");
+  const config = { frenet: false, transitionMode: "round" as const };
+  const solid = (d: number): Shape3D => {
+    const wire = sketchPath(path.source!, path.frame, ev);
+    const at = wire.startPoint;
+    const plane = new Plane(at, null, wire.tangentAt(0));
+    const h = d / 2;
+    const draw = pipe.shape === "circle" ? drawCircle(h) : polyDrawing([[-h, -h], [h, -h], [h, h], [-h, h]]);
+    const section = (draw.sketchOnPlane(plane) as unknown as AnySketch).wire!;
+    return genericSweep(section, wire, config) as Shape3D;
+  };
+  try {
+    let out = solid(size);
+    if (wall > 0) out = out.cut(solid(size - 2 * wall));
+    if (!(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");
+    return clean(out);
+  } catch (e) {
+    if (e instanceof FeatureError) throw e;
+    throw new FeatureError("The pipe couldn't be built. Make it thinner than the tightest bend of the path.");
+  }
+}
+
 function sweepTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator): Shape3D {
+  if (f.pipe) return pipeTool(f, sketches, ev);
   if (!f.profile || !f.path) throw new FeatureError("Pick a profile sketch and a path sketch.", undefined, true);
   if (f.profile === f.path) throw new FeatureError("Pick different sketches for the profile and the path.", undefined, true);
   const prof = sketches.get(f.profile);

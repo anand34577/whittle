@@ -20,6 +20,7 @@ import {
   makeDraft,
   makeExtrude,
   makeOffset,
+  makePipe,
   makePrimitive,
   makeScale,
   makeSketch,
@@ -143,6 +144,32 @@ describe("tilted sketch planes", () => {
     expect(max[1] - min[1]).toBeCloseTo(10, 3);
     expect(max[2] - min[2]).toBeCloseTo(10, 3);
     expect(min[1]).toBeCloseTo(-10, 3);
+  });
+});
+
+describe("pipe", () => {
+  const straight = (doc: WhittleDocument) => sketch(doc, [{ id: uid("e"), type: "polyline", open: true, points: [["0", "0"], ["0", "30"]] }], { kind: "origin", plane: "XZ", offset: "0" });
+
+  it("makes a hollow round tube along a path with no profile sketch", () => {
+    const doc = newDocument();
+    const f = makePipe(doc, straight(doc).id) as SweepFeature;
+    f.pipe = { shape: "circle", size: "10", wall: "2" };
+    push(doc, f, true);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    // Ring: outer radius 5, inner 3.
+    expect(r.bodies[0]!.volume).toBeCloseTo(Math.PI * (25 - 9) * 30, 0);
+  });
+
+  it("makes a solid square rod when the wall is zero, and rejects a wall that is too thick", () => {
+    const doc = newDocument();
+    const f = makePipe(doc, straight(doc).id) as SweepFeature;
+    f.pipe = { shape: "square", size: "6", wall: "0" };
+    push(doc, f, true);
+    ok(new Builder().regen(doc, "final"));
+    expect(new Builder().regen(doc, "final").bodies[0]!.volume).toBeCloseTo(36 * 30, 0);
+    f.pipe.wall = "3";
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === f.id)?.state).toBe("error");
   });
 });
 

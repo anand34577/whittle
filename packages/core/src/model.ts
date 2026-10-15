@@ -375,6 +375,8 @@ export interface SweepFeature extends FeatureBase {
   path: Id;
   /** "frenet" follows the path's curvature; "fixed" keeps the profile upright (better for flat paths). */
   orientation: "frenet" | "fixed";
+  /** Pipe mode: no profile sketch; a round or square tube (optionally hollow) built at the path's start. */
+  pipe?: { shape: "circle" | "square"; size: Expr; wall: Expr };
   op: BodyOp;
   target?: Id;
 }

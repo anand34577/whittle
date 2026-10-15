@@ -79,6 +79,7 @@ export function hintFor(s: AppState): string {
       case "move":
         return "Click a body to move it · type distances or drag the labels to scrub · Enter to finish";
       case "sweep":
+        if (f.pipe) return !f.path ? "Click the path sketch (an open line or outline)" : "Set the size and wall · wall 0 makes a solid rod · Enter to finish";
         return !f.profile ? "Click the cross-section sketch (a closed shape)" : !f.path ? "Now click the path sketch (an open line or outline)" : "Adjust the orientation if the profile twists · Enter to finish";
       case "coil":
         return "Set radius, pitch and height · Join a thread to a rod, Cut it from a hole · Enter to finish";

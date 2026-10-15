@@ -27,7 +27,7 @@ export function featureInputs(f: Feature): Id[] {
     case "combine":
       return [...(f.target ? [f.target] : []), ...f.tools];
     case "sweep":
-      return [f.profile, f.path, ...(f.target ? [f.target] : [])];
+      return [f.profile, f.path, ...(f.target ? [f.target] : [])].filter(Boolean);
     case "coil":
       return f.target ? [f.target] : [];
     case "split":

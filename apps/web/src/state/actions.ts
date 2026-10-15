@@ -19,6 +19,7 @@ import {
   makeOffset,
   makeScale,
   makeSplit,
+  makePipe,
   makeSweep,
   makeExtrude,
   makeFillet,
@@ -307,6 +308,19 @@ export function startSweep() {
   if (!ids[0] || !ids[1]) toast("info", "A sweep needs two sketches: a closed cross-section, and a path (an open line) for it to follow.");
 }
 
+/** Pipe: a tube along the selected (or newest unused) path sketch. */
+export function startPipe() {
+  const { selection, doc } = get();
+  const sketches = doc.features.slice(0, activeEnd(doc)).filter((f) => f.type === "sketch" && f.entities.length > 0);
+  const picked = selection.find((p) => p.kind === "sketch");
+  const path =
+    (picked?.kind === "sketch" ? picked.sketchId : undefined) ??
+    [...sketches].reverse().find((s) => s.type === "sketch" && s.entities.some((e) => e.type === "polyline" && e.open))?.id ??
+    "";
+  beginNewFeature(makePipe(doc, path), "New Pipe");
+  if (!path) toast("info", "A pipe needs a path: draw an open line with the Path tool, then click its sketch.");
+}
+
 export function startCoil(kind: "spring" | "thread") {
   const f = makeCoil(get().doc, kind);
   beginNewFeature(f, `New ${f.name}`);
@@ -406,7 +420,8 @@ export function handlePick(p: Pick | null, additive: boolean) {
     mutate("Pick sketch", (d) => {
       const x = d.features.find((y) => y.id === f.id);
       if (!x || x.type !== "sweep") return;
-      if (x.profile === p.sketchId) x.profile = "";
+      if (x.pipe) x.path = x.path === p.sketchId ? "" : p.sketchId;
+      else if (x.profile === p.sketchId) x.profile = "";
       else if (x.path === p.sketchId) x.path = "";
       else if (!x.profile) x.profile = p.sketchId;
       else x.path = p.sketchId;
