@@ -46,6 +46,29 @@ const MIGRATIONS: &[&[&str]] = &[&[
         author_id TEXT,
         PRIMARY KEY (design_id, version)
     )",
+], &[
+    // v2: sign-in tracking, single sign-on linking, server settings, password resets, audit log.
+    "ALTER TABLE users ADD COLUMN last_login_at BIGINT",
+    // 1 = link this account to the single sign-on identity with the same verified email on next sign-in.
+    "ALTER TABLE users ADD COLUMN sso_link BIGINT NOT NULL DEFAULT 0",
+    "CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS password_resets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at BIGINT NOT NULL
+    )",
+    "CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        at BIGINT NOT NULL,
+        actor TEXT,
+        action TEXT NOT NULL,
+        target TEXT,
+        detail TEXT
+    )",
+    "CREATE INDEX IF NOT EXISTS audit_at ON audit_log (at)",
 ]];
 
 pub async fn connect(url: &str) -> Result<Db, sqlx::Error> {
@@ -103,12 +126,15 @@ pub struct User {
     pub disabled: bool,
     pub has_password: bool,
     pub sso: bool,
+    /// Waiting to be linked to single sign-on by email on the next sign-in.
+    pub sso_link: bool,
     pub created_at: i64,
+    pub last_login_at: Option<i64>,
     #[serde(skip)]
     pub password_hash: Option<String>,
 }
 
-pub const USER_COLUMNS: &str = "id, username, display_name, email, password_hash, oidc_subject, is_admin, disabled, created_at";
+pub const USER_COLUMNS: &str = "id, username, display_name, email, password_hash, oidc_subject, is_admin, disabled, created_at, last_login_at, sso_link";
 
 pub fn user_from_row(r: &AnyRow) -> Result<User, sqlx::Error> {
     let password_hash: Option<String> = r.try_get("password_hash")?;
@@ -122,7 +148,9 @@ pub fn user_from_row(r: &AnyRow) -> Result<User, sqlx::Error> {
         disabled: r.try_get::<i64, _>("disabled")? != 0,
         has_password: password_hash.is_some(),
         sso: oidc.is_some(),
+        sso_link: r.try_get::<i64, _>("sso_link")? != 0,
         created_at: r.try_get("created_at")?,
+        last_login_at: r.try_get("last_login_at")?,
         password_hash,
     })
 }
@@ -133,6 +161,45 @@ pub async fn user_by(db: &Db, column: &str, value: &str) -> Result<Option<User>,
     match sqlx::query(&sql).bind(value).fetch_optional(db).await? {
         Some(r) => Ok(Some(user_from_row(&r)?)),
         None => Ok(None),
+    }
+}
+
+/// Another account (not `except`) already using this email, case-insensitively.
+pub async fn email_taken(db: &Db, email: &str, except: Option<&str>) -> Result<bool, sqlx::Error> {
+    let n: i64 = sqlx::query("SELECT COUNT(*) AS n FROM users WHERE LOWER(email) = LOWER($1) AND id <> $2")
+        .bind(email)
+        .bind(except.unwrap_or(""))
+        .fetch_one(db)
+        .await?
+        .try_get("n")?;
+    Ok(n > 0)
+}
+
+pub async fn get_setting(db: &Db, key: &str) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query("SELECT value FROM settings WHERE key = $1").bind(key).fetch_optional(db).await?.map(|r| r.try_get("value")).transpose()
+}
+
+pub async fn set_setting(db: &Db, key: &str, value: &str) -> Result<(), sqlx::Error> {
+    // Portable upsert (SQLite and PostgreSQL).
+    let mut tx = db.begin().await?;
+    sqlx::query("DELETE FROM settings WHERE key = $1").bind(key).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO settings (key, value) VALUES ($1, $2)").bind(key).bind(value).execute(&mut *tx).await?;
+    tx.commit().await
+}
+
+/// Record an administrative or security-relevant event.
+pub async fn audit(db: &Db, actor: Option<&str>, action: &str, target: Option<&str>, detail: &str) {
+    let r = sqlx::query("INSERT INTO audit_log (id, at, actor, action, target, detail) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(crate::random_token(12))
+        .bind(now_ms())
+        .bind(actor.map(str::to_owned))
+        .bind(action)
+        .bind(target.map(str::to_owned))
+        .bind(detail)
+        .execute(db)
+        .await;
+    if let Err(e) = r {
+        tracing::warn!("couldn't write the audit log: {e}");
     }
 }
 

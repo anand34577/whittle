@@ -30,6 +30,7 @@ base64 = "0.22"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
 url = "2"
+lettre = { version = "0.11.19", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls", "ring", "webpki-roots", "hostname"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
