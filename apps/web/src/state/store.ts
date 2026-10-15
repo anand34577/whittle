@@ -26,6 +26,7 @@ import {
 } from "@whittle/core";
 import type { RegenResult } from "@whittle/kernel";
 import { type Platform, ask } from "./platform";
+import { type Prefs, type ThemeId, type ThemePref, applyPrefs, loadPrefs, resolveTheme, savePrefs } from "./prefs";
 
 /** `at` is the world point that was clicked (used by holes and measuring). */
 export type Pick =
@@ -35,7 +36,8 @@ export type Pick =
   | { kind: "plane"; plane: OriginPlane }
   | { kind: "sketch"; sketchId: Id };
 
-export type SketchTool = EntityType | "select";
+/** "path" draws an open polyline (for sweeps and guides). */
+export type SketchTool = EntityType | "select" | "path";
 
 export type Mode =
   | { kind: "model" }
@@ -48,8 +50,8 @@ export type DisplayMode = "edges" | "shaded" | "wire" | "xray";
 export interface ViewSettings {
   display: DisplayMode;
   section: { axis: "x" | "y" | "z"; offset: number; flip: boolean } | null;
-  /** Highlight faces that need support when 3D printing. */
-  overhang: boolean;
+  /** Face coloring: overhangs (3D printing), draft angle (moulding) or zebra stripes (surface quality). */
+  analysis: "overhang" | "draft" | "zebra" | null;
   grid: boolean;
   ortho: boolean;
 }
@@ -70,7 +72,8 @@ export interface Toast {
   action?: { label: string; run: () => void };
 }
 
-export type Theme = "graphite" | "paper";
+/** The concrete theme on screen (preferences may say "system"). */
+export type Theme = ThemeId;
 
 export interface AppState {
   doc: WhittleDocument;
@@ -79,6 +82,8 @@ export interface AppState {
   fileName: string | null;
 
   regen: RegenResult | null;
+  /** The document `regen` was built from (so callers can wait for a specific change). */
+  builtDoc: WhittleDocument | null;
   regenBusy: boolean;
   kernelReady: boolean;
   kernelError: string | null;
@@ -92,12 +97,15 @@ export interface AppState {
   sketchStep: number;
 
   theme: Theme;
+  prefs: Prefs;
   view: ViewSettings;
   /** Picks collected by the measure tool (at most two). */
   measure: Pick[];
   /** Open radial (marking) menu, in viewport pixels. */
   radial: { x: number; y: number } | null;
-  panel: "palette" | "params" | "export" | "welcome" | "shortcuts" | "parts" | "versions" | "account" | "users" | null;
+  panel: "palette" | "params" | "export" | "welcome" | "shortcuts" | "parts" | "versions" | "account" | "users" | "settings" | null;
+  /** The AI assistant panel (stays open alongside dialogs). */
+  assistant: boolean;
   /** Desktop app, self-hosted server or plain browser (see platform.ts). */
   platform: Platform;
   platformReady: boolean;
@@ -110,15 +118,7 @@ export interface AppState {
 
 export const history = new History<WhittleDocument>();
 
-function loadTheme(): Theme {
-  try {
-    const t = localStorage.getItem("whittle.theme");
-    if (t === "paper" || t === "graphite") return t;
-  } catch {
-    /* storage unavailable */
-  }
-  return "graphite";
-}
+const initialPrefs = loadPrefs();
 
 export const useApp = create<AppState>(() => ({
   doc: newDocument(),
@@ -126,6 +126,7 @@ export const useApp = create<AppState>(() => ({
   dirty: false,
   fileName: null,
   regen: null,
+  builtDoc: null,
   regenBusy: false,
   kernelReady: false,
   kernelError: null,
@@ -135,11 +136,13 @@ export const useApp = create<AppState>(() => ({
   hover: null,
   selectedEntity: null,
   sketchStep: 0,
-  theme: loadTheme(),
-  view: { display: "edges", section: null, overhang: false, grid: true, ortho: false },
+  theme: resolveTheme(initialPrefs.theme),
+  prefs: initialPrefs,
+  view: { display: "edges", section: null, analysis: null, grid: true, ortho: false },
   measure: [],
   radial: null,
   panel: null,
+  assistant: false,
   platform: { kind: "browser" },
   platformReady: false,
   coach: false,
@@ -362,7 +365,17 @@ export async function confirmDeleteFeature(id: Id) {
   const f = findFeature(doc, id);
   if (!f) return;
   const deps = dependents(doc, id);
-  if (deps.length && !(await ask(`${deps.length} later step${deps.length > 1 ? "s depend" : " depends"} on ${f.name} (${deps.map((d) => d.name).join(", ")}). Delete anyway? They may fail until you fix them.`, "Delete"))) return;
+  if (
+    deps.length &&
+    !(await ask({
+      title: `Delete ${f.name}?`,
+      message: `${deps.length} later step${deps.length > 1 ? "s depend" : " depends"} on it and may fail until you fix ${deps.length > 1 ? "them" : "it"}:`,
+      details: deps.map((d) => d.name),
+      confirmLabel: "Delete anyway",
+      danger: true,
+    }))
+  )
+    return;
   deleteFeature(id);
 }
 
@@ -444,13 +457,17 @@ export function toast(kind: Toast["kind"], text: string, action?: Toast["action"
   setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), action ? 7000 : 3200);
 }
 
-export function setTheme(theme: Theme) {
-  set({ theme });
-  try {
-    localStorage.setItem("whittle.theme", theme);
-  } catch {
-    /* ignore */
-  }
+export function setTheme(theme: ThemePref) {
+  setPrefs({ theme });
+}
+
+/** Change preferences: applied immediately and remembered on this device. */
+export function setPrefs(patch: Partial<Prefs>) {
+  const prefs = { ...get().prefs, ...patch };
+  const theme = resolveTheme(prefs.theme);
+  savePrefs(prefs);
+  applyPrefs(prefs, theme);
+  set({ prefs, theme });
 }
 
 export function requestView(kind: "home" | "fit" | "normal") {

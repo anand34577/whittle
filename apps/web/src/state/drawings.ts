@@ -3,6 +3,7 @@
  *   - export a sketch as SVG or DXF (laser cutters, CNC routers, vinyl cutters, plotters, other CAD)
  *   - import an SVG (logos, lettering, traced outlines) as editable sketch shapes
  */
+import { promptDialog } from "./dialogs";
 import { type Evaluator, type ResolvedEntity, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, entityLoops, resolveEntity, trim, uid } from "@whittle/core";
 import { exportText } from "./files";
 import { findFeature, sketchMutate, toast, useApp } from "./store";
@@ -283,10 +284,18 @@ export function importSvgIntoSketch() {
     if (!file) return;
     try {
       const loops = svgLoops(await file.text());
-      const answer = window.prompt("How wide should it be? (mm)", "50");
+      const answer = await promptDialog({
+        title: `Import ${file.name}`,
+        message: "The artwork keeps its proportions. Shapes inside shapes become holes.",
+        label: "Width",
+        initial: "50",
+        unit: "mm",
+        type: "number",
+        confirmLabel: "Import",
+        validate: (v) => (parseFloat(v) > 0 ? null : "Enter a width greater than zero"),
+      });
       if (answer === null) return;
       const width = parseFloat(answer);
-      if (!(width > 0)) return toast("warn", "Enter a width greater than zero.");
       const entities = loopsToEntities(loops, width);
       if (entities.length === 0) return toast("warn", "No closed shapes were found in that SVG. Convert strokes and text to paths first.");
       sketchMutate(`Import ${file.name}`, (sk) => {

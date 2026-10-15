@@ -32,6 +32,8 @@ const waitBuilt = async () => {
 await step("01-welcome", async () => {
   await page.goto(url);
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
+  // First run asks how Whittle will be used; any answer leads to the start screen.
+  await page.getByRole("button", { name: /Maker & hobbyist/ }).click();
   await waitBuilt();
 });
 
@@ -53,10 +55,11 @@ await step("03-param-change", async () => {
 });
 
 await step("04-new-sketch", async () => {
-  page.once("dialog", (d) => d.accept());
   await page.keyboard.press("Control+k");
   await page.keyboard.type("new design");
   await page.keyboard.press("Enter");
+  // Unsaved work: Whittle asks in its own dialog (never the browser's).
+  await page.getByRole("alertdialog").getByRole("button", { name: "Discard changes" }).click();
   await page.waitForTimeout(300);
   await page.keyboard.press("s");
   await page.locator(".tree__row", { hasText: "XY plane" }).click();
@@ -132,7 +135,7 @@ await step("06b-export-3mf", async () => {
   console.log("    downloaded", d.suggestedFilename());
 });
 await step("07-paper-theme", async () => {
-  await page.getByTitle("Paper theme").click();
+  await page.getByTitle("Light theme").click();
   await page.waitForTimeout(400);
 });
 

@@ -8,6 +8,10 @@ import { Browser } from "./ui/Browser";
 import { CommandPalette, StatusBar, TitleBar, Toasts, Toolbar } from "./ui/Chrome";
 import { AccountDialog, SignIn, UsersDialog } from "./ui/Account";
 import { Coach, ExportDialog, ParamsDialog, ShortcutsDialog, VersionsDialog, Welcome } from "./ui/Dialogs";
+import { DialogHost, TooltipLayer } from "./ui/DialogHost";
+import { SettingsDialog } from "./ui/Settings";
+import { AssistantPanel } from "./ui/Assistant";
+import { applyPrefs, resolveTheme } from "./state/prefs";
 import { PartsDialog } from "./ui/PartsDialog";
 import { PropertiesPanel } from "./ui/PropertiesPanel";
 import { Timeline } from "./ui/Timeline";
@@ -26,6 +30,12 @@ function onKey(e: KeyboardEvent) {
   if (mod && e.key.toLowerCase() === "k") {
     e.preventDefault();
     useApp.setState({ panel: s.panel === "palette" ? null : "palette" });
+    return;
+  }
+  if (document.querySelector(".scrim--dialog")) return;
+  // Escape closes the open panel even when focus isn't inside it.
+  if (s.panel && e.key === "Escape" && !isTyping(e)) {
+    useApp.setState({ panel: null });
     return;
   }
   if (s.panel || isTyping(e)) return;
@@ -66,6 +76,8 @@ function onKey(e: KeyboardEvent) {
 
 export function App() {
   const theme = useApp((s) => s.theme);
+  const prefs = useApp((s) => s.prefs);
+  const assistant = useApp((s) => s.assistant);
   const panel = useApp((s) => s.panel);
   const session = useApp((s) => s.session);
   const mode = useApp((s) => s.mode);
@@ -73,9 +85,16 @@ export function App() {
   const platformReady = useApp((s) => s.platformReady);
   const signedOut = platform.kind === "server" && platform.config.auth === "required" && !platform.user;
 
+  useEffect(() => applyPrefs(prefs, theme), [prefs, theme]);
+
+  // "Match system" follows the OS switching between light and dark.
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+    if (prefs.theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const on = () => useApp.setState({ theme: resolveTheme("system") });
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [prefs.theme]);
 
   useEffect(() => {
     startKernel();
@@ -98,8 +117,18 @@ export function App() {
         toast("error", err);
         window.history.replaceState(null, "", window.location.pathname);
       }
+      if (new URLSearchParams(window.location.search).get("linked") === "1") {
+        toast("ok", "Single sign-on is linked to your account.");
+        window.history.replaceState(null, "", window.location.pathname);
+      }
     });
     window.addEventListener("keydown", onKey);
+    // The browser's own context menu never appears inside the app (text fields keep theirs).
+    const noMenu = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!(t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) e.preventDefault();
+    };
+    window.addEventListener("contextmenu", noMenu);
     const prevent = (e: DragEvent) => e.preventDefault();
     const drop = (e: DragEvent) => {
       e.preventDefault();
@@ -110,6 +139,7 @@ export function App() {
     window.addEventListener("drop", drop);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("contextmenu", noMenu);
       window.removeEventListener("dragover", prevent);
       window.removeEventListener("drop", drop);
     };
@@ -118,7 +148,7 @@ export function App() {
   const panelOpen = !!session || mode.kind === "sketch";
 
   return (
-    <div className={`app ${panelOpen ? "has-session" : ""}`}>
+    <div className={`app ${panelOpen ? "has-session" : ""} ${prefs.hints ? "" : "no-hints"}`}>
       <TitleBar />
       <Toolbar />
       <Browser />
@@ -138,6 +168,10 @@ export function App() {
       {signedOut && <SignIn />}
       {panel === "shortcuts" && <ShortcutsDialog />}
       {panel === "parts" && <PartsDialog />}
+      {panel === "settings" && <SettingsDialog />}
+      {assistant && !signedOut && (platform.kind !== "server" || platform.config.ai !== false) && <AssistantPanel />}
+      <DialogHost />
+      <TooltipLayer />
     </div>
   );
 }

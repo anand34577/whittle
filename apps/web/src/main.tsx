@@ -9,11 +9,14 @@ import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/enhance.css";
 import "./styles/platform.css";
+import "./styles/controls.css";
+import "./styles/themes.css";
 import { App } from "./App";
 import { useApp } from "./state/store";
+import { designApi } from "./state/designApi";
 
-// Handy for debugging and end-to-end tests.
-(window as unknown as { whittle: unknown }).whittle = { useApp };
+// Debugging, end-to-end tests and scripting: `await whittle.api.run("get_design", {})`.
+(window as unknown as { whittle: unknown }).whittle = { useApp, api: designApi };
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

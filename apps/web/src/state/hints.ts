@@ -10,6 +10,7 @@ const TOOL_HINTS: Record<string, [string, string]> = {
   gear: ["Click the center of the gear", "Drag out its size · or type the pitch diameter · set teeth and module on the right"],
   text: ["Click where the text should start", "Type the text on the right"],
   polyline: ["Click the first point", "Click the next point \u00b7 click the first point to close \u00b7 Backspace removes the last point"],
+  path: ["Click where the path starts", "Click the next point \u00b7 Enter (or click the last point again) finishes \u00b7 Backspace removes the last point"],
 };
 
 export function hintFor(s: AppState): string {
@@ -41,7 +42,7 @@ export function hintFor(s: AppState): string {
       case "fillet":
       case "chamfer":
         return f.edges.length === 0
-          ? "Click the edges you want to soften \u00b7 click again to deselect"
+          ? "Click the edges to round or bevel \u00b7 click a face to take all of its edges \u00b7 click again to deselect"
           : `${f.edges.length} edge${f.edges.length > 1 ? "s" : ""} selected \u00b7 adjust the size \u00b7 Enter to finish`;
       case "shell":
         return f.faces.length === 0 ? "Click the face(s) to remove: that side stays open" : "Set the wall thickness \u00b7 Enter to finish";
@@ -57,6 +58,18 @@ export function hintFor(s: AppState): string {
         return !f.target ? "Click the body to keep" : "Click the tool bodies · choose Join, Cut or Keep overlap · Enter to finish";
       case "move":
         return "Click a body to move it · type distances or drag the labels to scrub · Enter to finish";
+      case "sweep":
+        return !f.profile ? "Click the cross-section sketch (a closed shape)" : !f.path ? "Now click the path sketch (an open line or outline)" : "Adjust the orientation if the profile twists · Enter to finish";
+      case "coil":
+        return "Set radius, pitch and height · Join a thread to a rod, Cut it from a hole · Enter to finish";
+      case "split":
+        return "Choose the plane and offset · keep both halves or one side · Enter to finish";
+      case "offset":
+        return "Positive grows the body, negative shrinks it (clearances for fits and printing) · Enter to finish";
+      case "scale":
+        return "Type a factor (2 = twice the size) · Enter to finish";
+      case "draft":
+        return f.faces.length === 0 ? "Click the side faces to tilt (walls along the pull direction)" : "Set the angle and pull direction · Enter to finish";
       default:
         return "Adjust the values \u00b7 Enter to finish \u00b7 Esc to cancel";
     }

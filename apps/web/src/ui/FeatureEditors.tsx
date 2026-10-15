@@ -18,9 +18,17 @@ import type {
   RevolveFeature,
   ShellFeature,
   SketchFeature,
+  SweepFeature,
+  CoilFeature,
+  SplitFeature,
+  OffsetFeature,
+  ScaleFeature,
+  DraftFeature,
 } from "@whittle/core";
 import { setBodyOp, updateFeature, useApp } from "../state/store";
 import { ExprInput, Segmented, Toggle } from "./ExprInput";
+import { Checkbox, Disclosure, Select } from "./controls";
+import { HoleStandard } from "./HoleStandards";
 import { Icon } from "./icons";
 
 function upd<T extends Feature>(f: T, label: string, recipe: (d: Draft<T>) => void, key?: string) {
@@ -34,24 +42,36 @@ const OPS: { value: BodyOp; label: string; title: string }[] = [
   { value: "intersect", label: "Keep overlap", title: "Keep only where they overlap" },
 ];
 
+const AUTO = "__auto__";
+
 function BodySelect({ value, onChange, allowAuto, exclude, label = "Body" }: { value?: Id; onChange: (v: Id | undefined) => void; allowAuto: string; exclude?: Id; label?: string }) {
   const regen = useApp((s) => s.regen);
   const bodies = regen?.pickBodies ?? regen?.bodies ?? [];
   const meta = useApp((s) => s.doc.bodies);
   return (
-    <div className="field">
-      <span className="field__label">{label}</span>
-      <select className="select" value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
-        <option value="">{allowAuto}</option>
-        {bodies
-          .filter((b) => b.id !== exclude)
-          .map((b) => (
-            <option key={b.id} value={b.id}>
-              {meta[b.id]?.name ?? "Body"}
-            </option>
-          ))}
-      </select>
-    </div>
+    <Select
+      label={label}
+      value={value ?? AUTO}
+      onChange={(v) => onChange(v === AUTO ? undefined : v)}
+      options={[
+        { value: AUTO, label: allowAuto, icon: "sparkStep" as const },
+        ...bodies.filter((b) => b.id !== exclude).map((b) => ({ value: b.id, label: meta[b.id]?.name ?? "Body", swatch: meta[b.id]?.color })),
+      ]}
+    />
+  );
+}
+
+/** A sketch picker limited to sketches earlier in the timeline. */
+function SketchSelect({ f, value, onChange, label, placeholder = "Choose a sketch…" }: { f: Feature; value: Id; onChange: (v: Id) => void; label: string; placeholder?: string }) {
+  const sketches = useSketchesBefore(f.id);
+  return (
+    <Select
+      label={label}
+      value={sketches.some((s) => s.id === value) ? value : ""}
+      placeholder={placeholder}
+      onChange={onChange}
+      options={sketches.map((s) => ({ value: s.id, label: s.name, icon: "sketch" as const, hint: `${s.entities.length} shape${s.entities.length === 1 ? "" : "s"}` }))}
+    />
   );
 }
 
@@ -62,7 +82,7 @@ function useSketchesBefore(id: Id): SketchFeature[] {
   return features.slice(0, i < 0 ? features.length : i).filter((x): x is SketchFeature => x.type === "sketch");
 }
 
-function OpField({ f }: { f: ExtrudeFeature | RevolveFeature | PrimitiveFeature | LoftFeature }) {
+function OpField({ f }: { f: ExtrudeFeature | RevolveFeature | PrimitiveFeature | LoftFeature | SweepFeature | CoilFeature }) {
   return (
     <>
       <Segmented label="Result" value={f.op} options={OPS} onChange={(op) => setBodyOp(f.id, op)} />
@@ -79,30 +99,41 @@ function OpField({ f }: { f: ExtrudeFeature | RevolveFeature | PrimitiveFeature 
 }
 
 function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
-  const sketches = useSketchesBefore(f.id);
+  const advanced = !!(f.taper || f.twist);
   return (
     <>
-      <div className="field">
-        <span className="field__label">Profile</span>
-        <select className="select" value={f.sketch} onChange={(e) => upd(f, "Profile", (d) => void (d.sketch = e.target.value))}>
-          {sketches.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void (d.sketch = v))} />
       <ExprInput label="Distance" kind="length" value={f.distance} autoFocus onChange={(v) => upd(f, "Distance", (d) => void (d.distance = v))} />
       <Segmented
         label="Direction"
         value={f.extent}
         options={[
           { value: "one", label: "One side" },
-          { value: "symmetric", label: "Both sides" },
+          { value: "symmetric", label: "Symmetric", title: "Half the distance each way" },
+          { value: "two", label: "Two sides", title: "A different distance each way" },
         ]}
         onChange={(v) => upd(f, "Direction", (d) => void (d.extent = v))}
       />
-      {f.extent === "one" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
+      {f.extent === "two" && (
+        <ExprInput label="Other side" kind="length" value={f.distance2 ?? "0"} min={0} onChange={(v) => upd(f, "Second distance", (d) => void (d.distance2 = v))} />
+      )}
+      {f.extent !== "symmetric" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
+      <Disclosure summary="Taper and twist" defaultOpen={advanced}>
+        <ExprInput
+          label="Taper"
+          kind="angle"
+          value={f.taper ?? "0"}
+          hint="Draft for moulding and casting; negative flares out"
+          onChange={(v) => upd(f, "Taper", (d) => void (d.taper = v === "0" ? undefined : v))}
+        />
+        <ExprInput
+          label="Twist"
+          kind="angle"
+          value={f.twist ?? "0"}
+          hint="Turns the profile along the way: vases, grips, knobs"
+          onChange={(v) => upd(f, "Twist", (d) => void (d.twist = v === "0" ? undefined : v))}
+        />
+      </Disclosure>
       <OpField f={f} />
     </>
   );
@@ -161,7 +192,7 @@ function ShellEditor({ f }: { f: ShellFeature }) {
           </button>
         )}
       </div>
-      <ExprInput label="Wall" kind="length" value={f.thickness} autoFocus min={0} hint="1.2 to 2 mm is typical for 3D printing" onChange={(v) => upd(f, "Thickness", (d) => void (d.thickness = v))} />
+      <ExprInput label="Wall" kind="length" value={f.thickness} autoFocus min={0} hint="Typical: moulded plastic 1.5–3 mm, 3D prints 1.2–2 mm, cast metal 3+ mm" onChange={(v) => upd(f, "Thickness", (d) => void (d.thickness = v))} />
     </>
   );
 }
@@ -291,7 +322,8 @@ function HoleEditor({ f }: { f: HoleFeature }) {
         ]}
         onChange={(v) => upd(f, "Hole type", (d) => void (d.style = v))}
       />
-      <ExprInput label="Diameter" kind="length" value={f.diameter} autoFocus min={0} hint="Clearance: M3 = 3.4, M4 = 4.5, M5 = 5.5 mm" onChange={(v) => upd(f, "Diameter", (d) => void (d.diameter = v))} />
+      <HoleStandard f={f} />
+      <ExprInput label="Diameter" kind="length" value={f.diameter} autoFocus min={0} onChange={(v) => upd(f, "Diameter", (d) => void (d.diameter = v))} />
       <Toggle label="Through all" checked={f.through} onChange={(v) => upd(f, "Through", (d) => void (d.through = v))} />
       {!f.through && <ExprInput label="Depth" kind="length" value={f.depth} min={0} onChange={(v) => upd(f, "Depth", (d) => void (d.depth = v))} />}
       {f.style !== "simple" && (
@@ -332,19 +364,13 @@ function LoftEditor({ f }: { f: LoftFeature }) {
           </li>
         ))}
       </ol>
-      <div className="field">
-        <span className="field__label">Add</span>
-        <select className="select" value="" onChange={(e) => e.target.value && upd(f, "Add profile", (d) => void d.sketches.push(e.target.value))}>
-          <option value="">Choose a sketch…</option>
-          {sketches
-            .filter((s) => !f.sketches.includes(s.id))
-            .map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-        </select>
-      </div>
+      <Select
+        label="Add"
+        value=""
+        placeholder="Add a sketch…"
+        onChange={(v) => upd(f, "Add profile", (d) => void d.sketches.push(v))}
+        options={sketches.filter((s) => !f.sketches.includes(s.id)).map((s) => ({ value: s.id, label: s.name, icon: "sketch" as const }))}
+      />
       <Toggle label="Straight sides (ruled)" checked={f.ruled} onChange={(v) => upd(f, "Ruled", (d) => void (d.ruled = v))} />
       <OpField f={f} />
     </>
@@ -398,19 +424,22 @@ function CombineEditor({ f }: { f: CombineFeature }) {
           {bodies
             .filter((b) => b.id !== f.target)
             .map((b) => (
-              <label key={b.id} className="checkrow">
-                <input
-                  type="checkbox"
-                  checked={f.tools.includes(b.id)}
-                  onChange={(e) =>
-                    upd(f, "Tools", (d) => {
-                      d.tools = e.target.checked ? [...d.tools, b.id] : d.tools.filter((x) => x !== b.id);
-                    })
-                  }
-                />
-                <span className="tree__swatch" style={{ background: meta[b.id]?.color ?? "#ccc" }} />
-                {meta[b.id]?.name ?? "Body"}
-              </label>
+              <Checkbox
+                key={b.id}
+                className="checkrow"
+                checked={f.tools.includes(b.id)}
+                onChange={(on) =>
+                  upd(f, "Tools", (d) => {
+                    d.tools = on ? [...d.tools, b.id] : d.tools.filter((x) => x !== b.id);
+                  })
+                }
+                label={
+                  <>
+                    <span className="tree__swatch" style={{ background: meta[b.id]?.color ?? "#ccc" }} />
+                    {meta[b.id]?.name ?? "Body"}
+                  </>
+                }
+              />
             ))}
         </div>
       </div>
@@ -433,8 +462,169 @@ function ImportEditor({ f }: { f: ImportFeature }) {
   );
 }
 
+function SweepEditor({ f }: { f: SweepFeature }) {
+  return (
+    <>
+      <SketchSelect f={f} label="Profile" value={f.profile} placeholder="The cross-section…" onChange={(v) => upd(f, "Profile", (d) => void (d.profile = v))} />
+      <SketchSelect f={f} label="Path" value={f.path} placeholder="The path to follow…" onChange={(v) => upd(f, "Path", (d) => void (d.path = v))} />
+      <p className="field__note">
+        Draw the cross-section where the path starts, facing along it. A path is an open line (switch on <b>Open path</b> for a line) or any outline.
+      </p>
+      <Segmented
+        label="Orientation"
+        value={f.orientation}
+        options={[
+          { value: "fixed", label: "Minimal twist", title: "Keeps the profile steady: best for most paths" },
+          { value: "frenet", label: "Follow curve", title: "Turns with the curvature of the path: helices and 3D curves" },
+        ]}
+        onChange={(v) => upd(f, "Orientation", (d) => void (d.orientation = v))}
+      />
+      <OpField f={f} />
+    </>
+  );
+}
+
+function CoilEditor({ f }: { f: CoilFeature }) {
+  return (
+    <>
+      <Segmented
+        label="Section"
+        value={f.section}
+        options={[
+          { value: "circle", label: "Round", title: "Springs and wire coils" },
+          { value: "triangle", label: "V thread", title: "60 degree screw thread" },
+          { value: "square", label: "Square", title: "Square or power thread" },
+        ]}
+        onChange={(v) => upd(f, "Section", (d) => void (d.section = v))}
+      />
+      <ExprInput
+        label="Radius"
+        kind="length"
+        value={f.radius}
+        autoFocus
+        min={0}
+        hint={f.section === "circle" ? "To the middle of the wire" : "Where the thread starts: the rod or hole radius"}
+        onChange={(v) => upd(f, "Radius", (d) => void (d.radius = v))}
+      />
+      <div className="field-row">
+        <ExprInput label="Pitch" kind="length" value={f.pitch} min={0} onChange={(v) => upd(f, "Pitch", (d) => void (d.pitch = v))} />
+        <ExprInput label="Height" kind="length" value={f.height} min={0} onChange={(v) => upd(f, "Height", (d) => void (d.height = v))} />
+      </div>
+      <ExprInput label={f.section === "circle" ? "Wire Ø" : "Depth"} kind="length" value={f.size} min={0} onChange={(v) => upd(f, "Size", (d) => void (d.size = v))} />
+      <div className="field-row">
+        {(["X", "Y", "Z"] as const).map((axis, i) => (
+          <ExprInput key={axis} label={axis} kind="length" value={f.position[i]!} onChange={(v) => upd(f, "Position", (d) => void (d.position[i] = v))} />
+        ))}
+      </div>
+      <Toggle label="Left-handed" checked={f.lefthand} onChange={(v) => upd(f, "Hand", (d) => void (d.lefthand = v))} />
+      <p className="field__note">For a screw, Join a V thread to a rod of the same radius. For a tapped hole, Cut it from the wall of a hole.</p>
+      <OpField f={f} />
+    </>
+  );
+}
+
+function SplitEditor({ f }: { f: SplitFeature }) {
+  return (
+    <>
+      <BodySelect value={f.bodyId} allowAuto="Latest body" exclude={f.id} onChange={(v) => upd(f, "Body", (d) => void (d.bodyId = v))} />
+      <Segmented
+        label="Plane"
+        value={f.plane}
+        options={[
+          { value: "XY", label: "XY (horizontal)" },
+          { value: "XZ", label: "XZ (front)" },
+          { value: "YZ", label: "YZ (side)" },
+        ]}
+        onChange={(v) => upd(f, "Plane", (d) => void (d.plane = v))}
+      />
+      <ExprInput label="Offset" kind="length" value={f.offset} autoFocus onChange={(v) => upd(f, "Offset", (d) => void (d.offset = v))} />
+      <Segmented
+        label="Keep"
+        value={f.keep}
+        options={[
+          { value: "both", label: "Both halves" },
+          { value: "above", label: "Above" },
+          { value: "below", label: "Below" },
+        ]}
+        onChange={(v) => upd(f, "Keep", (d) => void (d.keep = v))}
+      />
+    </>
+  );
+}
+
+function OffsetEditor({ f }: { f: OffsetFeature }) {
+  return (
+    <>
+      <BodySelect value={f.bodyId} allowAuto="Latest body" exclude={f.id} onChange={(v) => upd(f, "Body", (d) => void (d.bodyId = v))} />
+      <ExprInput label="Distance" kind="length" value={f.distance} autoFocus hint="Positive grows the body, negative shrinks it" onChange={(v) => upd(f, "Distance", (d) => void (d.distance = v))} />
+      <Toggle label="Keep the original (make a copy)" checked={f.copy} onChange={(v) => upd(f, "Copy", (d) => void (d.copy = v))} />
+    </>
+  );
+}
+
+function ScaleEditor({ f }: { f: ScaleFeature }) {
+  return (
+    <>
+      <BodySelect value={f.bodyId} allowAuto="Latest body" exclude={f.id} onChange={(v) => upd(f, "Body", (d) => void (d.bodyId = v))} />
+      <ExprInput label="Factor" kind="number" value={f.factor} autoFocus min={0} hint="2 doubles every dimension; 25.4 turns inches into mm" onChange={(v) => upd(f, "Factor", (d) => void (d.factor = v))} />
+      <Segmented
+        label="About"
+        value={f.center}
+        options={[
+          { value: "body", label: "Its center" },
+          { value: "origin", label: "The origin" },
+        ]}
+        onChange={(v) => upd(f, "Center", (d) => void (d.center = v))}
+      />
+      <Toggle label="Keep the original (make a copy)" checked={f.copy} onChange={(v) => upd(f, "Copy", (d) => void (d.copy = v))} />
+    </>
+  );
+}
+
+function DraftEditor({ f }: { f: DraftFeature }) {
+  const n = f.faces.length;
+  return (
+    <>
+      <div className="picker">
+        <Icon name="draft" size={16} />
+        <span>{n === 0 ? "Click the side faces to tilt" : `${n} face${n > 1 ? "s" : ""}`}</span>
+        {n > 0 && (
+          <button className="link" onClick={() => upd(f, "Clear faces", (d) => void (d.faces = []))}>
+            Clear
+          </button>
+        )}
+      </div>
+      <ExprInput label="Angle" kind="angle" value={f.angle} autoFocus hint="1 to 3 degrees is typical for moulded parts" onChange={(v) => upd(f, "Angle", (d) => void (d.angle = v))} />
+      <Segmented
+        label="Pull direction"
+        value={f.pull}
+        options={[
+          { value: "z", label: "Z" },
+          { value: "y", label: "Y" },
+          { value: "x", label: "X" },
+        ]}
+        onChange={(v) => upd(f, "Pull", (d) => void (d.pull = v))}
+      />
+      <ExprInput label="Neutral plane" kind="length" value={f.neutral} hint="Faces keep their size at this height" onChange={(v) => upd(f, "Neutral", (d) => void (d.neutral = v))} />
+      <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />
+    </>
+  );
+}
+
 export function FeatureEditor({ f }: { f: Feature }) {
   switch (f.type) {
+    case "sweep":
+      return <SweepEditor f={f} />;
+    case "coil":
+      return <CoilEditor f={f} />;
+    case "split":
+      return <SplitEditor f={f} />;
+    case "offset":
+      return <OffsetEditor f={f} />;
+    case "scale":
+      return <ScaleEditor f={f} />;
+    case "draft":
+      return <DraftEditor f={f} />;
     case "hole":
       return <HoleEditor f={f} />;
     case "loft":

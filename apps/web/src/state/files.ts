@@ -127,7 +127,7 @@ function thumbnail(): Uint8Array | undefined {
 
 async function confirmDiscard(): Promise<boolean> {
   if (!useApp.getState().dirty) return true;
-  return ask("You have unsaved changes. Discard them?", "Discard");
+  return ask({ title: "Discard unsaved changes?", message: "Your changes to this design haven't been saved. They'll be lost if you continue.", confirmLabel: "Discard changes", danger: true });
 }
 
 function show(doc: WhittleDocument, fileName: string | null, loc: DocLocation) {
@@ -136,7 +136,7 @@ function show(doc: WhittleDocument, fileName: string | null, loc: DocLocation) {
   useApp.setState({ panel: null, viewRequest: { kind: "home", at: Date.now() } });
 }
 
-export async function newDesign(units: LengthUnit = "mm", name = "Untitled") {
+export async function newDesign(units: LengthUnit = useApp.getState().prefs.units, name = "Untitled") {
   if (!(await confirmDiscard())) return false;
   show(newDocument(name, units), null, { kind: "none" });
   return true;
@@ -300,7 +300,7 @@ async function saveToServer(bytes: Uint8Array, saveAs: boolean): Promise<string>
         return r.name;
       }
       if (!(e instanceof ApiError) || e.status !== 409) throw e;
-      if (!(await ask(`${e.message}\n\nSave your changes as the newest version anyway? (The other version stays in the history.)`, "Save anyway"))) {
+      if (!(await ask({ title: "There's a newer version", message: `${e.message} Save your changes as the newest version anyway? The other version stays in the history.`, confirmLabel: "Save anyway" }))) {
         throw new DOMException("", "AbortError");
       }
       const r = await apiJson<{ id: string; version: number; name: string }>(path, { method: "PUT", body });
@@ -332,7 +332,10 @@ const EXPORT_FILTERS: Record<string, { name: string; extensions: string[] }> = {
   step: { name: "STEP", extensions: ["step", "stp"] },
   stl: { name: "STL mesh", extensions: ["stl"] },
   "3mf": { name: "3MF", extensions: ["3mf"] },
-  png: { name: "PNG image", extensions: ["png"] },
+  obj: { name: "Wavefront OBJ", extensions: ["obj"] },
+  glb: { name: "glTF binary", extensions: ["glb"] },
+  ply: { name: "PLY mesh", extensions: ["ply"] },
+  png:{ name: "PNG image", extensions: ["png"] },
   svg: { name: "SVG drawing", extensions: ["svg"] },
   dxf: { name: "DXF drawing", extensions: ["dxf"] },
 };
@@ -515,7 +518,7 @@ export async function startDesktop() {
   // Ask before closing a window with unsaved work.
   const win = (window as unknown as { __TAURI__?: { window?: { getCurrentWindow(): { onCloseRequested(cb: (e: { preventDefault(): void }) => unknown): Promise<unknown> } } } }).__TAURI__?.window;
   await win?.getCurrentWindow().onCloseRequested(async (e) => {
-    if (useApp.getState().dirty && !(await ask("You have unsaved changes. Close Whittle anyway?", "Close without saving"))) e.preventDefault();
+    if (useApp.getState().dirty && !(await ask({ title: "Close without saving?", message: "You have unsaved changes. Close Whittle anyway?", confirmLabel: "Close without saving", danger: true }))) e.preventDefault();
   });
 }
 

@@ -31,6 +31,9 @@ import { apiJson, ask } from "../state/platform";
 import { mutate, selectedBodyId, useApp } from "../state/store";
 import { TEMPLATES } from "../state/templates";
 import { Icon } from "./icons";
+import { Checkbox, Select } from "./controls";
+import { ProfilePicker } from "./Settings";
+import type { ExportFormat } from "@whittle/kernel";
 
 export function Modal({ title, children, wide, onClose }: { title: string; children: React.ReactNode; wide?: boolean; onClose?: () => void }) {
   const close = onClose ?? (() => useApp.setState({ panel: null }));
@@ -83,6 +86,13 @@ function ParamName({ p, params }: { p: Parameter; params: Parameter[] }) {
   );
 }
 
+const KIND_OPTIONS: { value: QuantityKind; label: string; hint: string }[] = [
+  { value: "length", label: "Length", hint: "Sizes and distances" },
+  { value: "angle", label: "Angle", hint: "Degrees by default" },
+  { value: "number", label: "Number", hint: "Ratios and factors" },
+  { value: "count", label: "Count", hint: "Whole numbers: copies, teeth" },
+];
+
 export function ParamsDialog() {
   const doc = useApp((s) => s.doc);
   const ev = useMemo(() => documentEvaluator(doc), [doc]);
@@ -133,12 +143,7 @@ export function ParamsDialog() {
             <div className="ptable__row" role="row" key={p.id}>
               <ParamName p={p} params={doc.parameters} />
               <input className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onChange={(e) => update(p.id, { expr: e.target.value })} aria-label="Formula" title={v?.error} />
-              <select className="select" value={p.kind} onChange={(e) => update(p.id, { kind: e.target.value as QuantityKind })} aria-label="Kind">
-                <option value="length">Length</option>
-                <option value="angle">Angle</option>
-                <option value="number">Number</option>
-                <option value="count">Count</option>
-              </select>
+              <Select<QuantityKind> size="sm" ariaLabel="Kind" value={p.kind} onChange={(v) => update(p.id, { kind: v })} options={KIND_OPTIONS} />
               <span className={`mono ptable__result ${v?.ok ? "" : "is-error"}`} title={v?.error}>
                 {v?.ok ? formatQuantity(v.value, p.kind, doc.units) : v?.error ?? ""}
               </span>
@@ -148,7 +153,7 @@ export function ParamsDialog() {
                 aria-label={`Delete ${p.name}`}
                 title={n ? `Used by ${n} feature(s)` : "Delete"}
                 onClick={async () => {
-                  if (n && !(await ask(`${p.name} is used by ${n} feature(s). Delete it anyway?`, "Delete"))) return;
+                  if (n && !(await ask({ title: `Delete ${p.name}?`, message: `${p.name} is used ${n} time${n > 1 ? "s" : ""} in this design. Formulas that use it will show an error until you change them.`, confirmLabel: "Delete", danger: true }))) return;
                   mutate("Delete parameter", (d) => {
                     d.parameters = d.parameters.filter((x) => x.id !== p.id);
                   });
@@ -169,12 +174,7 @@ export function ParamsDialog() {
         >
           <input className={`input mono ${nameError ? "is-error" : ""}`} placeholder="name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} title={nameError ?? ""} aria-label="New parameter name" />
           <input className="input mono" placeholder="e.g. 40 or width / 2" value={draft.expr} onChange={(e) => setDraft({ ...draft, expr: e.target.value })} aria-label="New parameter formula" />
-          <select className="select" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as QuantityKind })} aria-label="New parameter kind">
-            <option value="length">Length</option>
-            <option value="angle">Angle</option>
-            <option value="number">Number</option>
-            <option value="count">Count</option>
-          </select>
+          <Select<QuantityKind> size="sm" ariaLabel="New parameter kind" value={draft.kind} onChange={(v) => setDraft({ ...draft, kind: v })} options={KIND_OPTIONS} />
           <span className="muted small">{nameError}</span>
           <span />
           <button className="btn btn--accent btn--small" type="submit" disabled={!draft.name || !!nameError || !draft.expr}>
@@ -194,10 +194,13 @@ export function ExportDialog() {
   const selected = bodies > 1 ? selectedBodyId() : undefined;
   const selectedName = useApp((s) => (selected ? s.doc.bodies[selected]?.name : undefined));
   const [onlySelected, setOnlySelected] = useState(true);
-  const items = [
-    { f: "step" as const, title: "STEP", sub: "Other CAD, machining, manufacturing", body: "Exact geometry for Fusion, SolidWorks, Onshape, FreeCAD, CAM software and manufacturers." },
-    { f: "3mf" as const, title: "3MF", sub: "3D printing", body: "Best for slicers (Bambu Studio, PrusaSlicer, OrcaSlicer, Cura). Keeps units, names and colors." },
-    { f: "stl" as const, title: "STL", sub: "3D printing, rendering, games", body: "The universal mesh format. Works with every slicer, renderer and printing service." },
+  const items: { f: ExportFormat; title: string; sub: string; body: string }[] = [
+    { f: "step", title: "STEP", sub: "Engineering & manufacturing", body: "Exact geometry for other CAD (Fusion, SolidWorks, Onshape, FreeCAD), CNC machining, CAM and manufacturers." },
+    { f: "glb", title: "glTF (GLB)", sub: "Web, AR, games, rendering", body: "Colors and finishes included. For Blender, Unity, Unreal, three.js, product viewers and AR." },
+    { f: "obj", title: "OBJ", sub: "Rendering & visualisation", body: "Opens in virtually every 3D and rendering tool: Blender, KeyShot, Cinema 4D, Rhino." },
+    { f: "3mf", title: "3MF", sub: "3D printing", body: "Best for slicers (Bambu Studio, PrusaSlicer, OrcaSlicer, Cura). Keeps units, names and colors." },
+    { f: "stl", title: "STL", sub: "3D printing & meshes", body: "The universal mesh format. Works with every slicer, printing service and mesh tool." },
+    { f: "ply", title: "PLY", sub: "Scanning & mesh analysis", body: "For MeshLab, CloudCompare and scan-comparison workflows." },
   ];
   return (
     <Modal title="Export">
@@ -222,10 +225,7 @@ export function ExportDialog() {
             </button>
           ))}
           {selected && (
-            <label className="checkrow">
-              <input type="checkbox" checked={onlySelected} onChange={(e) => setOnlySelected(e.target.checked)} />
-              Only the selected body ({selectedName ?? "Body"})
-            </label>
+            <Checkbox className="checkrow" checked={onlySelected} onChange={setOnlySelected} label={`Only the selected body (${selectedName ?? "Body"})`} />
           )}
         </div>
       )}
@@ -321,6 +321,48 @@ function TemplateArt({ id }: { id: string }) {
         <path d="M32 52 A28 9 0 0 0 88 52" />
       </svg>
     );
+  if (id === "bolt")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <path d="M44 14 L60 8 L76 14 L76 22 L60 28 L44 22 Z" />
+        <path d="M44 14 L60 20 L76 14 M60 20 V28" opacity=".6" />
+        <path d="M54 26 V70 M66 26 V70" />
+        {[32, 38, 44, 50, 56, 62].map((y) => (
+          <path key={y} d={`M54 ${y} L66 ${y + 4}`} opacity=".7" />
+        ))}
+      </svg>
+    );
+  if (id === "vase")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <ellipse cx="60" cy="12" rx="16" ry="5" />
+        <path d="M44 12 C 40 30, 52 40, 46 70 M76 12 C 80 30, 68 40, 74 70 M54 15 C 60 35, 50 50, 58 74 M66 15 C 72 35, 62 50, 66 74" opacity=".7" />
+        <path d="M46 70 Q 60 78 74 70" />
+      </svg>
+    );
+  if (id === "bottle")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <path d="M54 6 H66 V16 L76 26 V72 Q60 77 44 72 V26 L54 16 Z" />
+        <path d="M44 34 Q60 38 76 34" opacity=".5" />
+      </svg>
+    );
+  if (id === "bracket")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <path d="M30 10 V70 H40 V36 L78 20 H96 V10 Z" />
+        <path d="M30 10 L36 6 H102 L96 10 M96 20 L102 16 V6" opacity=".6" />
+        <circle cx="35" cy="30" r="2.5" />
+        <circle cx="35" cy="56" r="2.5" />
+      </svg>
+    );
+  if (id === "handle")
+    return (
+      <svg viewBox="0 0 120 80" {...common}>
+        <path d="M28 64 V44 C 28 26, 44 22, 60 22 C 76 22, 92 26, 92 44 V64" strokeWidth="5" opacity=".9" />
+        <path d="M20 66 H100" opacity=".4" strokeDasharray="3 3" />
+      </svg>
+    );
   return (
     <svg viewBox="0 0 120 80" {...common}>
       <path d="M30 56 L60 42 L90 56" opacity=".4" strokeDasharray="3 3" />
@@ -361,7 +403,7 @@ function ServerLibrary() {
       .catch((e: Error) => setError(e.message));
   useEffect(() => void load(), []);
   const remove = async (d: ServerDesign) => {
-    if (!(await ask(`Delete "${d.name}" and all of its versions? This can't be undone.`, "Delete"))) return;
+    if (!(await ask({ title: `Delete "${d.name}"?`, message: "The design and all of its versions will be removed from the server. This can't be undone.", confirmLabel: "Delete design", danger: true }))) return;
     try {
       await apiJson(`/designs/${encodeURIComponent(d.id)}`, { method: "DELETE" });
       void load();
@@ -441,7 +483,16 @@ function RecentLibrary() {
 export function Welcome() {
   const recovered = useMemo(() => readAutosave(), []);
   const platform = useApp((s) => s.platform.kind);
+  const profile = useApp((s) => s.prefs.profile);
+  const [asked, setAsked] = useState(false);
   const close = () => useApp.setState({ panel: null });
+  if (profile === null && !asked) {
+    return (
+      <Modal title="Welcome to Whittle" wide onClose={close}>
+        <ProfilePicker onDone={() => setAsked(true)} />
+      </Modal>
+    );
+  }
   return (
     <Modal title="Welcome to Whittle" wide onClose={close}>
       <div className="welcome">
@@ -512,7 +563,9 @@ export function Welcome() {
                   <span className="tpl__art">
                     <TemplateArt id={t.id} />
                   </span>
-                  <span className="tpl__title">{t.title}</span>
+                  <span className="tpl__title">
+                    {t.title} <span className="badge">{t.tag}</span>
+                  </span>
                   <span className="tpl__blurb">{t.blurb}</span>
                 </button>
               ))}

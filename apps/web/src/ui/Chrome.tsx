@@ -4,6 +4,7 @@ import { COMMANDS, type Command, commandById, isAvailable } from "../state/comma
 import { hintFor } from "../state/hints";
 import { history, mutate, setTheme, useApp } from "../state/store";
 import { AccountButton } from "./Account";
+import { type Profile, THEMES } from "../state/prefs";
 import { Icon } from "./icons";
 
 /* ───────────────────────────── Title bar ───────────────────────────── */
@@ -12,6 +13,9 @@ export function TitleBar() {
   const doc = useApp((s) => s.doc);
   const dirty = useApp((s) => s.dirty);
   const theme = useApp((s) => s.theme);
+  const assistant = useApp((s) => s.assistant);
+  const aiAllowed = useApp((s) => s.platform.kind !== "server" || s.platform.config.ai !== false);
+  const dark = THEMES.find((t) => t.id === theme)?.dark ?? true;
   useApp((s) => s.historyTick);
   const session = useApp((s) => s.session);
   const [name, setName] = useState(doc.name);
@@ -80,8 +84,16 @@ export function TitleBar() {
         <button className="iconbtn" onClick={() => useApp.setState({ panel: "params" })} title="Parameters">
           <Icon name="params" size={18} />
         </button>
-        <button className="iconbtn" onClick={() => setTheme(theme === "graphite" ? "paper" : "graphite")} title={theme === "graphite" ? "Paper theme" : "Graphite theme"}>
-          <Icon name={theme === "graphite" ? "sun" : "moon"} size={18} />
+        {aiAllowed && (
+          <button className={`iconbtn ${assistant ? "is-on" : ""}`} onClick={() => useApp.setState({ assistant: !assistant })} title="AI assistant (Ctrl+I)" aria-pressed={assistant}>
+            <Icon name="assistant" size={18} />
+          </button>
+        )}
+        <button className="iconbtn" onClick={() => setTheme(dark ? "paper" : "graphite")} title={dark ? "Light theme" : "Dark theme"}>
+          <Icon name={dark ? "sun" : "moon"} size={18} />
+        </button>
+        <button className="iconbtn" onClick={() => useApp.setState({ panel: "settings" })} title="Settings (Ctrl+,)">
+          <Icon name="settings" size={18} />
         </button>
         <button className="iconbtn" onClick={() => useApp.setState({ panel: "welcome" })} title="Start screen, your designs, templates & help">
           <Icon name="help" size={18} />
@@ -179,16 +191,35 @@ function Group({ label, ids, more, activeId }: { label: string; ids: string[]; m
   );
 }
 
+/**
+ * Which tools sit on the toolbar and which wait in the group menu depends on
+ * the workspace profile: newcomers see the essentials, professionals the lot.
+ */
+function toolsFor(profile: Profile | null) {
+  const pro = profile === "engineer" || profile === "designer";
+  return {
+    create: pro
+      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["thread", "spring", "import"] }
+      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "loft", "thread", "spring", "import"] },
+    modify: pro
+      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
+      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
+  };
+}
+
 export function Toolbar() {
   const mode = useApp((s) => s.mode);
+  const profile = useApp((s) => s.prefs.profile);
+  const labels = useApp((s) => s.prefs.toolLabels);
+  const { create, modify } = toolsFor(profile);
   if (mode.kind === "sketch") {
     const active = mode.tool === "select" ? "tool-select" : mode.tool === "polyline" ? "tool-line" : `tool-${mode.tool}`;
     return (
-      <div className="toolbar toolbar--sketch" role="toolbar" aria-label="Sketch tools">
+      <div className={`toolbar toolbar--sketch ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Sketch tools">
         <div className="toolbar__mode">
           <span className="pill pill--accent">Sketch</span>
         </div>
-        <Group label="Draw" ids={["tool-line", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} activeId={active} />
+        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} activeId={active} />
         <Group label="Special" ids={["tool-text", "tool-gear", "import-svg"]} more={["export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
         <Group label="Arrange" ids={["tool-select", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "delete"]} activeId={active} />
         <div className="toolbar__spacer" />
@@ -199,17 +230,17 @@ export function Toolbar() {
     );
   }
   return (
-    <div className="toolbar" role="toolbar" aria-label="Modeling tools">
+    <div className={`toolbar ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Modeling tools">
       <div className="toolgroup toolgroup--primary">
         <div className="toolgroup__tools">
           <ToolButton c={commandById("sketch")} active={mode.kind === "pickPlane"} big />
         </div>
         <span className="toolgroup__label">Start</span>
       </div>
-      <Group label="Create" ids={["extrude", "revolve", "loft", "hole"]} more={["import"]} />
-      <Group label="Shapes" ids={["box", "cylinder", "sphere"]} more={["cone", "torus", "tube"]} />
-      <Group label="Modify" ids={["fillet", "chamfer", "shell", "move"]} more={["combine", "mirror", "pattern"]} />
-      <Group label="Inspect" ids={["measure", "section", "overhang"]} more={["display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />
+      <Group label="Create" ids={create.primary} more={create.more} />
+      <Group label="Shapes" ids={["box", "cylinder", "sphere"]} more={["cone", "torus", "tube", "spring"]} />
+      <Group label="Modify" ids={modify.primary} more={modify.more} />
+      <Group label="Inspect" ids={["measure", "section"]} more={["overhang", "draft-analysis", "zebra", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />
       <div className="toolbar__spacer" />
       <div className="toolgroup toolgroup--feature">
         <div className="toolgroup__tools">
