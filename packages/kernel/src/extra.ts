@@ -2,7 +2,9 @@
 import {
   type AlignFeature,
   type BoundaryFillFeature,
+  type CurveFeature,
   type DeleteFaceFeature,
+  entityOutline,
   type JointFeature,
   type WhittleDocument,
   frameAxes,
@@ -21,8 +23,12 @@ import {
   type Face,
   type Shape3D,
   Plane,
+  type Wire,
   assembleWire,
   basicFaceExtrusion,
+  makeBSplineApproximation,
+  makeLine,
+  makeVertex,
   cast,
   downcast,
   getOC,
@@ -37,9 +43,9 @@ import {
 import type { SketchFrame } from "./protocol";
 import { FeatureError, bodyForRefs, boxCenter, clean, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./build";
 import { circleOf } from "./construct";
-import { add, cross, dist, dot, norm, resolveFace, scale, sub } from "./refs";
+import { add, cross, dist, dot, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 
-type SketchLike = { frame: SketchFrame; source?: SketchFeature; error?: string };
+type SketchLike = { frame: SketchFrame; source?: SketchFeature; error?: string; wire?: Wire };
 
 const volume = (s: Shape3D) => measureShapeVolumeProperties(s).volume;
 
@@ -332,9 +338,9 @@ export function boundaryCells(f: BoundaryFillFeature, bodies: Map<Id, Shape3D>):
 /** Copies of a body spaced evenly along a sketch path (optionally turning with it). */
 export function patternOnPath(f: PatternFeature, src: Shape3D, sketches: Map<Id, SketchLike>, ev: Evaluator): Shape3D[] {
   const sk = f.path ? sketches.get(f.path) : undefined;
-  if (!f.path || !sk?.source) throw new FeatureError("Pick the sketch with the path the copies follow.", undefined, true);
+  if (!f.path || !sk || !(sk.source || sk.wire)) throw new FeatureError("Pick the sketch (or 3D curve) with the path the copies follow.", undefined, true);
   const count = Math.round(ev.num(f.count, "count", "Count"));
-  const wire = sketchPath(sk.source, sk.frame, ev);
+  const wire = sk.wire ?? sketchPath(sk.source!, sk.frame, ev);
   const p0 = wire.pointAt(0).toTuple();
   const t0 = norm(wire.tangentAt(0).toTuple());
   const copies: Shape3D[] = [];
@@ -441,4 +447,108 @@ export function applyJoint(f: JointFeature, bodies: Map<Id, Shape3D>, sketches: 
     if (s && b !== f.fixedId && !doc.bodies[b]?.grounded) bodies.set(b, move(s));
   }
   return warning;
+}
+
+/* ───────────────────────────── 3D curves ───────────────────────────── */
+
+export interface CurveBuilt {
+  polys: Vec3[][];
+  /** The first curve as a wire, so sweeps and pipes can follow it. */
+  wire?: Wire;
+}
+
+const wireFromPoints = (pts: Vec3[], smooth: boolean): Wire | undefined => {
+  try {
+    if (smooth && pts.length >= 3) return assembleWire([makeBSplineApproximation(pts, { tolerance: 1e-3 })]);
+    return assembleWire(pts.slice(0, -1).map((p, i) => makeLine(p, pts[i + 1]!)));
+  } catch {
+    return undefined;
+  }
+};
+
+const sampleEdge = (e: Edge, n = 48): Vec3[] => Array.from({ length: n + 1 }, (_, i) => e.pointAt(i / n).toTuple());
+
+export function curveTool(f: CurveFeature, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchLike>, ev: Evaluator): CurveBuilt {
+  switch (f.source) {
+    case "points": {
+      if (f.points.length < 2) throw new FeatureError("Click at least two points on the model.", undefined, true);
+      const pts = f.points;
+      if (f.smooth && pts.length >= 3) {
+        const edge = makeBSplineApproximation(pts, { tolerance: 1e-3 });
+        return { polys: [sampleEdge(edge, 64)], wire: assembleWire([edge]) };
+      }
+      return { polys: [pts], wire: wireFromPoints(pts, false) };
+    }
+    case "edges": {
+      if (!f.edges.length) throw new FeatureError("Click the model edges to copy.", undefined, true);
+      const found: Edge[] = [];
+      for (const ref of f.edges) {
+        const r = resolveEdge(bodyForRefs(bodies, ref.bodyId), ref);
+        if (!r) throw new FeatureError("An edge is gone. Pick it again.");
+        found.push(r.item);
+      }
+      let wire: Wire | undefined;
+      try {
+        wire = assembleWire(found);
+      } catch {
+        wire = found.length === 1 ? assembleWire([found[0]!]) : undefined;
+      }
+      return { polys: found.map((e) => sampleEdge(e)), wire };
+    }
+    case "faces": {
+      if (f.faces.length < 2) throw new FeatureError(f.faces.length ? "Click the second face." : "Click two faces that meet.", undefined, true);
+      const [a, b] = f.faces.map((ref) => {
+        const r = resolveFace(bodyForRefs(bodies, ref.bodyId), ref);
+        if (!r) throw new FeatureError("A face is gone. Pick it again.");
+        return r.item;
+      }) as [Face, Face];
+      const oc = getOC();
+      const sec = new oc.BRepAlgoAPI_Section(a.wrapped, b.wrapped, true);
+      try {
+        const shape = cast(downcast(sec.Shape())) as unknown as { edges: Edge[] };
+        const edges = shape.edges;
+        if (!edges.length) throw new FeatureError("These faces don't meet. Pick faces that cross each other.");
+        let wire: Wire | undefined;
+        try {
+          wire = assembleWire(edges);
+        } catch {
+          wire = edges.length === 1 ? assembleWire([edges[0]!]) : undefined;
+        }
+        return { polys: edges.map((e) => sampleEdge(e)), wire };
+      } finally {
+        sec.delete();
+      }
+    }
+    case "project": {
+      if (!f.faces.length) throw new FeatureError("Click the face to project onto.", undefined, true);
+      const sk = f.sketch ? sketches.get(f.sketch) : undefined;
+      if (!f.sketch || !sk?.source) throw new FeatureError("Now click the sketch to lay onto the face.", undefined, true);
+      const r = resolveFace(bodyForRefs(bodies, f.faces[0]!.bodyId), f.faces[0]!);
+      if (!r) throw new FeatureError("The face is gone. Pick it again.");
+      const oc = getOC();
+      const { origin, xDir, yDir } = sk.frame;
+      const polys: Vec3[][] = [];
+      for (const ent of sk.source.entities) {
+        if (ent.construction) continue;
+        const res = resolveEntity(ent, ev);
+        const open = res.type === "polyline" && res.open;
+        const pts2 = entityOutline(res, 64);
+        const pts3 = (open ? pts2 : [...pts2, pts2[0]!]).map(([x, y]) => add(origin, add(scale(xDir, x), scale(yDir, y))));
+        const onFace = pts3.map((p) => {
+          const v = makeVertex(p);
+          const d = new oc.BRepExtrema_DistShapeShape(v.wrapped, r.item.wrapped);
+          try {
+            if (!d.IsDone() || d.NbSolution() < 1) return p;
+            const q = d.PointOnShape2(1);
+            return [q.X(), q.Y(), q.Z()] as Vec3;
+          } finally {
+            d.delete();
+          }
+        });
+        polys.push(onFace);
+      }
+      if (!polys.length) throw new FeatureError("The sketch has no shapes to project.");
+      return { polys, wire: wireFromPoints(polys[0]!, false) };
+    }
+  }
 }

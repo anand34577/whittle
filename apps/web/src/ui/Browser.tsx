@@ -30,7 +30,7 @@ export function Browser() {
   const bodies = regen?.bodies ?? [];
   const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch");
   const cplanes = doc.features.slice(0, end).filter((f) => f.type === "cplane" || (f.type === "construct" && (f.mode.startsWith("plane") || f.mode === "midplane")));
-  const refs = doc.features.slice(0, end).filter((f) => f.type === "construct" && !(f.mode.startsWith("plane") || f.mode === "midplane"));
+  const refs = doc.features.slice(0, end).filter((f) => (f.type === "construct" && !(f.mode.startsWith("plane") || f.mode === "midplane")) || f.type === "curve");
   const isSel = (fn: (p: (typeof selection)[number]) => boolean) => selection.some(fn);
 
   return (
@@ -84,7 +84,7 @@ export function Browser() {
           <Section title="Axes & points" count={refs.length} defaultOpen={false}>
             {refs.map((c) => (
               <button key={c.id} className="tree__row" onClick={() => editFeature(c.id)} title="Edit">
-                <Icon name={c.type === "construct" && c.mode.startsWith("axis") ? "axis" : "point"} size={16} />
+                <Icon name={c.type === "curve" ? "path" : c.type === "construct" && c.mode.startsWith("axis") ? "axis" : "point"} size={16} />
                 <span className="tree__name">{c.name}</span>
               </button>
             ))}

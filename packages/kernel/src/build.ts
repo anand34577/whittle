@@ -66,12 +66,14 @@ import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } 
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { constructFrame } from "./construct";
-import { CELL_INFO, alignBody, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
+import { CELL_INFO, alignBody, curveTool, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
 
 interface SketchBuilt {
   frame: SketchFrame;
+  /** 3D curve features: a wire sweeps, pipes and path patterns can follow. */
+  wire?: Wire;
   /** The sketch feature itself, with solved geometry as entities (sweeps read open paths from it). */
   source?: SketchFeature;
   solution?: SketchSolution;
@@ -485,8 +487,8 @@ export class Builder {
     }
     const planes: SketchFrame[] = [];
     for (const f of doc.features.slice(0, end)) {
-      const s = f.type === "cplane" || f.type === "construct" ? prev.sketches.get(f.id) : undefined;
-      if (s) planes.push({ ...s.frame });
+      const s = f.type === "cplane" || f.type === "construct" || f.type === "curve" ? prev.sketches.get(f.id) : undefined;
+      if (s) planes.push({ ...s.frame, line: s.frame.line ? s.frame.line.slice() : undefined });
     }
     let pickBodies: BodyResult[] | undefined;
     if (pickBefore) {
@@ -583,6 +585,15 @@ export class Builder {
   /** Mutates the body/sketch maps; returns a warning message, if any. */
   private apply(f: Feature, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchBuilt>, ev: Evaluator): string | undefined {
     switch (f.type) {
+      case "curve": {
+        const built = curveTool(f, bodies, sketches, ev);
+        const flat: number[] = [];
+        for (const poly of built.polys) for (let i = 0; i + 1 < poly.length; i++) flat.push(...poly[i]!, ...poly[i + 1]!);
+        const first = built.polys[0]![0]!;
+        sketches.set(f.id, { frame: { id: f.id, origin: first, xDir: [1, 0, 0], yDir: [0, 1, 0], normal: [0, 0, 1], kind: "curve", line: new Float32Array(flat) }, drawing: null, wire: built.wire });
+        return;
+      }
+
       case "rib":
         return applyOp(bodies, f.id, f.op, f.target, ribTool(f, sketches, ev));
 
@@ -1186,14 +1197,14 @@ export function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator):
 function pipeTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator): Shape3D {
   const pipe = f.pipe!;
   const path = sketches.get(f.path);
-  if (!f.path || !path?.source) throw new FeatureError("Pick the path sketch (an open line or outline).", undefined, true);
+  if (!f.path || !(path?.source || path?.wire)) throw new FeatureError("Pick the path sketch (an open line or outline).", undefined, true);
   const size = ev.num(pipe.size, "length", "Outer size");
   const wall = ev.num(pipe.wall, "length", "Wall");
   if (size <= 0) throw new FeatureError("The pipe size must be greater than zero.");
   if (wall < 0 || wall * 2 >= size) throw new FeatureError("The wall must be at least zero and less than half the size.");
   const config = { frenet: false, transitionMode: "round" as const };
   const solid = (d: number): Shape3D => {
-    const wire = sketchPath(path.source!, path.frame, ev);
+    const wire = path.wire ?? sketchPath(path.source!, path.frame, ev);
     const at = wire.startPoint;
     const plane = new Plane(at, null, wire.tangentAt(0));
     const h = d / 2;
@@ -1218,14 +1229,15 @@ function sweepTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluato
   if (f.profile === f.path) throw new FeatureError("Pick different sketches for the profile and the path.", undefined, true);
   const prof = sketches.get(f.profile);
   const path = sketches.get(f.path);
-  if (!prof || !path?.source) throw new FeatureError("The profile or path sketch is missing. Re-pick them.");
+  if (!prof || !(path?.source || path?.wire)) throw new FeatureError("The profile or path sketch is missing. Re-pick them.");
   if (prof.error || !prof.drawing) throw new FeatureError("The profile needs a closed shape.");
   const config = { frenet: f.orientation === "frenet", transitionMode: "round" as const };
   try {
     let out: Shape3D | null = null;
     for (const r of regions(prof.drawing.clone().sketchOnPlane(planeFromFrame(prof.frame)) as unknown as AnySketch)) {
-      let solid = genericSweep(r.outer, sketchPath(path.source, path.frame, ev), config) as Shape3D;
-      for (const w of r.inner) solid = solid.cut(genericSweep(w, sketchPath(path.source, path.frame, ev), config) as Shape3D);
+      const route = () => path.wire ?? sketchPath(path.source!, path.frame, ev);
+      let solid = genericSweep(r.outer, route(), config) as Shape3D;
+      for (const w of r.inner) solid = solid.cut(genericSweep(w, route(), config) as Shape3D);
       out = out ? out.fuse(solid) : solid;
     }
     if (!out || !(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");

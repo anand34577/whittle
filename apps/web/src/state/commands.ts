@@ -13,6 +13,7 @@ import {
   startAlign,
   startBoundaryFill,
   startConstruct,
+  startCurve,
   startDeleteFace,
   startEmboss,
   startReplaceFace,
@@ -41,7 +42,7 @@ import {
   startSketch,
 } from "./actions";
 import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
-import { exportSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
+import { exportSketch, importDxfIntoSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
 import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS } from "@whittle/core";
 import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
@@ -280,6 +281,7 @@ export const COMMANDS: Command[] = [
   { id: "flatten-image", label: "Flatten photo", group: "Sketch", icon: "flatten", keywords: "perspective straighten deskew rectify keystone a4 paper card photo image", hint: "Click the corners of a sheet of paper or a card in the photo to straighten and scale it", when: hasImage, run: () => startImagePick("flatten") },
   { id: "trace-image", label: "Trace whole picture", group: "Sketch", icon: "trace", keywords: "auto trace vectorize outline silhouette image photo convert", hint: "Turn the picture's shapes into editable outlines; round holes become circles", when: hasImage, run: () => void traceImage() },
   { id: "trace-area", label: "Trace one area of the picture", group: "Sketch", icon: "trace", keywords: "magic wand flood fill select region outline image photo", hint: "Click one shape in the picture to outline just that", when: hasImage, run: () => startImagePick("wand") },
+  { id: "import-dxf", label: "Import DXF into sketch", short: "DXF", group: "Sketch", icon: "drawing", keywords: "autocad cad 2d drawing lines arcs circles import cnc laser outline", hint: "Bring in lines, arcs, circles and outlines from a DXF drawing", when: inSketch, run: importDxfIntoSketch },
   { id: "import-svg", label: "Import SVG into sketch", short: "SVG", group: "Sketch", icon: "vector", keywords: "logo trace vector illustrator inkscape figma outline artwork drawing image", hint: "Bring in a logo or outline as editable shapes", when: inSketch, run: importSvgIntoSketch },
   { id: "export-sketch-svg", label: "Export sketch as SVG", group: "File", icon: "drawing", keywords: "laser cut vinyl cricut plotter 2d drawing vector", hint: "True-size 2D drawing for laser cutters, vinyl cutters and plotters", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "svg") },
   { id: "export-sketch-dxf", label: "Export sketch as DXF", group: "File", icon: "drawing", keywords: "cnc router laser cam 2d drawing autocad", hint: "2D drawing for CNC, CAM and other CAD", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "dxf") },
@@ -436,6 +438,10 @@ export const COMMANDS: Command[] = [
 ];
 
 COMMANDS.push(
+  { id: "curve-3d", label: "3D sketch (curve through points)", short: "3D sketch", group: "Create", icon: "path", keywords: "3d curve spline wire path points space rail", hint: "Click points on the model; a curve runs through them", when: NEEDS_BODY, run: model(() => startCurve("points")) },
+  { id: "curve-edges", label: "Include 3D geometry", short: "Include 3D", group: "Create", icon: "path", keywords: "copy edges curve reference wire project 3d", hint: "Copy model edges as a curve you can sweep along", when: NEEDS_BODY, run: model(() => startCurve("edges")) },
+  { id: "curve-faces", label: "Intersection curve", short: "Intersection", group: "Create", icon: "path", keywords: "where faces meet curve section edge between", hint: "The curve where two faces meet", when: NEEDS_BODY, run: model(() => startCurve("faces")) },
+  { id: "curve-project", label: "Project to surface", short: "Project", group: "Create", icon: "path", keywords: "wrap sketch onto face curved engrave curve on surface", hint: "Lay a sketch onto a face (each point goes to the nearest spot on it)", when: NEEDS_BODY, run: model(() => startCurve("project")) },
   { id: "rib", label: "Rib", group: "Create", icon: "extrude", keywords: "reinforce stiffen gusset support wall", hint: "A thin reinforcing wall from a line sketched through the part", when: inModel, run: model(startRib) },
   { id: "web", label: "Web", group: "Create", icon: "extrude", keywords: "thin wall reinforce open line", hint: "A thin wall from an open line, standing up from the sketch", when: inModel, run: model(startWeb) },
   { id: "emboss", label: "Emboss", group: "Create", icon: "text", keywords: "raise text logo label relief", hint: "Raise the newest sketch's shapes or text off the face it sits on", when: inModel, run: model(() => startEmboss(false)) },

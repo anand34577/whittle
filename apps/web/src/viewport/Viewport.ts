@@ -435,6 +435,15 @@ export class Viewport {
     this.clearGroup(this.cplanes);
     const s = Math.max(30, this.sceneRadius * 0.5);
     for (const f of frames) {
+      if (f.kind === "curve") {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(f.line ?? new Float32Array(0), 3));
+        const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: this.theme.sketch, depthTest: false }));
+        lines.raycast = () => {};
+        lines.renderOrder = 5;
+        this.cplanes.add(lines);
+        continue;
+      }
       if (f.kind === "axis") {
         const o = new THREE.Vector3(...f.origin);
         const d = new THREE.Vector3(...f.normal).multiplyScalar(s * 0.8);
@@ -632,7 +641,9 @@ export class Viewport {
     for (let i = 0; i < p.length; i += 3) {
       const x = Math.min(N - 1, Math.max(0, Math.round((p[i]! - lo[0]) * sx)));
       const y = Math.min(N - 1, Math.max(0, Math.round((p[i + 1]! - lo[1]) * sy)));
-      const reach = p[i + 2]! >= top[y * N + x]! - tol;
+      // Walls parallel to the tool (normal sideways) are reachable by its flank; up-facing surfaces need clear air above, down-facing ones can't be reached.
+      const nz = b.normals[i + 2]!;
+      const reach = Math.abs(nz) < 0.05 ? true : nz < 0 ? false : p[i + 2]! >= top[y * N + x]! - tol;
       const c = reach ? base : hidden;
       out[i] = c.r;
       out[i + 1] = c.g;

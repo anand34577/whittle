@@ -1,7 +1,7 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
 import { useEffect, useRef, useState } from "react";
-import { CONSTRUCT_MODES } from "@whittle/core";
+import { CONSTRUCT_MODES, CURVE_SOURCES } from "@whittle/core";
 import type {
   BodyOp,
   ChamferFeature,
@@ -27,6 +27,7 @@ import type {
   ScaleFeature,
   ConstructionPlaneFeature,
   ConstructFeature,
+  CurveFeature,
   RibFeature,
   ThreadFeature,
   ReplaceFaceFeature,
@@ -92,6 +93,16 @@ function BodySelect({ value, onChange, allowAuto, exclude, label = "Body" }: { v
 }
 
 /** A sketch picker limited to sketches earlier in the timeline. */
+/** A path to follow: a sketch (open line or outline) or a 3D curve. */
+function PathSelect({ f, value, onChange, label, placeholder = "The path to follow…" }: { f: Feature; value: Id; onChange: (v: Id) => void; label: string; placeholder?: string }) {
+  const sketches = useSketchesBefore(f.id);
+  const features = useApp((s) => s.doc.features);
+  const idx = features.findIndex((x) => x.id === f.id);
+  const curves = features.slice(0, idx < 0 ? features.length : idx).filter((x) => x.type === "curve");
+  const all = [...sketches.map((s) => ({ id: s.id, name: s.name, icon: "sketch" as const })), ...curves.map((c) => ({ id: c.id, name: c.name, icon: "path" as const }))];
+  return <Select label={label} value={all.some((s) => s.id === value) ? value : ""} placeholder={placeholder} onChange={onChange} options={all.map((s) => ({ value: s.id, label: s.name, icon: s.icon }))} />;
+}
+
 function SketchSelect({ f, value, onChange, label, placeholder = "Choose a sketch…" }: { f: Feature; value: Id; onChange: (v: Id) => void; label: string; placeholder?: string }) {
   const sketches = useSketchesBefore(f.id);
   return (
@@ -358,7 +369,7 @@ function PatternEditor({ f }: { f: PatternFeature }) {
             placeholder="Choose a sketch with a path…"
             options={useApp
               .getState()
-              .doc.features.filter((x) => x.type === "sketch")
+              .doc.features.filter((x) => x.type === "sketch" || x.type === "curve")
               .map((x) => ({ value: x.id, label: x.name, icon: "path" as const }))}
             onChange={(v) => upd(f, "Path", (d) => void (d.path = v))}
           />
@@ -563,7 +574,7 @@ function PipeEditor({ f }: { f: SweepFeature }) {
   const set = (label: string, recipe: (p: NonNullable<SweepFeature["pipe"]>) => void) => upd(f, label, (d) => void (d.type === "sweep" && d.pipe && recipe(d.pipe)));
   return (
     <>
-      <SketchSelect f={f} label="Path" value={f.path} placeholder="The path to follow…" onChange={(v) => upd(f, "Path", (d) => void (d.type === "sweep" && (d.path = v)))} />
+      <PathSelect f={f} label="Path" value={f.path} onChange={(v) => upd(f, "Path", (d) => void (d.type === "sweep" && (d.path = v)))} />
       <Segmented
         label="Section"
         value={pipe.shape}
@@ -585,7 +596,7 @@ function SweepEditor({ f }: { f: SweepFeature }) {
   return (
     <>
       <SketchSelect f={f} label="Profile" value={f.profile} placeholder="The cross-section…" onChange={(v) => upd(f, "Profile", (d) => void (d.profile = v))} />
-      <SketchSelect f={f} label="Path" value={f.path} placeholder="The path to follow…" onChange={(v) => upd(f, "Path", (d) => void (d.path = v))} />
+      <PathSelect f={f} label="Path" value={f.path} onChange={(v) => upd(f, "Path", (d) => void (d.path = v))} />
       <p className="field__note">
         Draw the cross-section where the path starts, facing along it. A path is an open line (switch on <b>Open path</b> for a line) or any outline.
       </p>
@@ -985,6 +996,43 @@ function Drive({ f, field, min, max, unit }: { f: JointFeature; field: "angle" |
   );
 }
 
+function CurveEditor({ f }: { f: CurveFeature }) {
+  const set = (label: string, recipe: (d: CurveFeature) => void) => upd(f, label, (d) => void (d.type === "curve" && recipe(d)));
+  const text =
+    f.source === "points"
+      ? f.points.length
+        ? `${f.points.length} point${f.points.length > 1 ? "s" : ""}`
+        : CURVE_SOURCES.points.hint
+      : f.source === "edges"
+        ? f.edges.length
+          ? `${f.edges.length} edge${f.edges.length > 1 ? "s" : ""}`
+          : CURVE_SOURCES.edges.hint
+        : f.source === "faces"
+          ? f.faces.length >= 2
+            ? "Two faces chosen"
+            : f.faces.length === 1
+              ? "Now click the second face"
+              : CURVE_SOURCES.faces.hint
+          : !f.faces.length
+            ? "Click the face to project onto"
+            : !f.sketch
+              ? "Now click the sketch to lay onto it"
+              : "Face and sketch chosen";
+  const any = f.points.length + f.edges.length + f.faces.length > 0 || !!f.sketch;
+  return (
+    <>
+      <PickLine icon="plane" text={text} clearable={any} onClear={() => set("Clear picks", (d) => ((d.points = []), (d.edges = []), (d.faces = []), (d.sketch = undefined)))} />
+      {f.source === "points" && f.points.length > 0 && (
+        <button className="link" onClick={() => set("Remove last point", (d) => void d.points.pop())}>
+          Remove the last point
+        </button>
+      )}
+      {f.source === "points" && <Toggle label="Smooth curve" hint="Off draws straight segments between the points" checked={f.smooth} onChange={(v) => set("Smooth", (d) => void (d.smooth = v))} />}
+      <p className="field__note">Sweeps, pipes and path patterns can follow this curve.</p>
+    </>
+  );
+}
+
 function JointEditor({ f }: { f: JointFeature }) {
   const features = useApp((s) => s.doc.features);
   const t = f.joint;
@@ -1130,6 +1178,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <JointEditor f={f} />;
     case "construct":
       return <ConstructEditor f={f} />;
+    case "curve":
+      return <CurveEditor f={f} />;
     case "rib":
       return <RibEditor f={f} />;
     case "thread":

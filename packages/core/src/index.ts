@@ -11,3 +11,4 @@ export * from "./constraints";
 export * from "./sketchShapes";
 export * from "./sketchCopy";
 export * from "./section";
+export * from "./dxf";

@@ -1,6 +1,7 @@
 /** High-level commands used by the toolbar, shortcuts, palette and context bar. */
 import {
   CONSTRUCT_MODES,
+  CURVE_SOURCES,
   type ConstructMode,
   type EdgeRef,
   type FaceRef,
@@ -20,6 +21,7 @@ import {
   makeAlign,
   makeBoundaryFill,
   makeConstruct,
+  makeCurve,
   makeDeleteFace,
   makeReplaceFace,
   makeRib,
@@ -391,6 +393,24 @@ export function startConstructionPlane() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+/** 3D curve: through points, from edges, where faces meet, or a sketch projected onto a face. */
+export function startCurve(source: "points" | "edges" | "faces" | "project") {
+  const f = makeCurve(get().doc, source);
+  if (f.type === "curve") {
+    const sel = get().selection;
+    if (source === "edges") f.edges = sel.map((p) => edgeRefFromPick(p)).filter((x): x is EdgeRef => !!x);
+    if (source === "faces") f.faces = sel.map((p) => faceRefFromPick(p)).filter((x): x is FaceRef => !!x).slice(0, 2);
+    if (source === "project") {
+      const face = sel.map((p) => faceRefFromPick(p)).find((x): x is FaceRef => !!x);
+      if (face) f.faces = [face];
+      const sk = sel.find((p) => p.kind === "sketch");
+      if (sk?.kind === "sketch") f.sketch = sk.sketchId;
+    }
+  }
+  beginNewFeature(f, `New ${f.name}`);
+  toast("info", CURVE_SOURCES[source].hint);
+}
+
 /** The newest sketch with an open line (or the selected one): a rib or web path. */
 function openLineSketch(): Id | null {
   const { selection, doc } = get();
@@ -633,6 +653,36 @@ export function handlePick(p: Pick | null, additive: boolean) {
       if (point && (!fr || x.mode === "axisPerp")) {
         x.points.push(point);
         cap(x.points, need.points);
+      }
+    });
+    return;
+  }
+  if (f && f.type === "curve" && p) {
+    const sp = p;
+    mutate("Pick", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "curve") return;
+      if (x.source === "points") {
+        const pt = (sp.kind === "face" || sp.kind === "edge") ? snapPoint(sp) : null;
+        if (pt) x.points.push(pt);
+      } else if (x.source === "edges") {
+        const er = sp.kind === "edge" ? edgeRefFromPick(sp) : null;
+        if (!er) return;
+        const i = x.edges.findIndex((e) => d3(e.mid, er.mid) < 1e-6);
+        if (i >= 0) x.edges.splice(i, 1);
+        else x.edges.push(er);
+      } else if (x.source === "faces") {
+        const fr = sp.kind === "face" ? faceRefFromPick(sp) : null;
+        if (!fr) return;
+        const i = x.faces.findIndex((e) => sameFace(e, fr));
+        if (i >= 0) x.faces.splice(i, 1);
+        else x.faces.push(fr);
+        while (x.faces.length > 2) x.faces.shift();
+      } else {
+        if (sp.kind === "face") {
+          const fr = faceRefFromPick(sp);
+          if (fr) x.faces = [fr];
+        } else if (sp.kind === "sketch") x.sketch = sp.sketchId;
       }
     });
     return;

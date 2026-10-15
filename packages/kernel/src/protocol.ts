@@ -52,7 +52,9 @@ export interface SketchFrame {
   yDir: Vec3;
   normal: Vec3;
   /** Construction geometry kind (planes by default). */
-  kind?: "plane" | "axis" | "point";
+  kind?: "plane" | "axis" | "point" | "curve";
+  /** Curves: line segments as xyz pairs, for display. */
+  line?: Float32Array;
   /** Triangles (xyz per vertex, world space) of the closed profile regions. */
   fill?: Float32Array;
   /** Solved constraint-driven geometry, when the sketch has any. */

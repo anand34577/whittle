@@ -142,3 +142,28 @@ describe("sketch intersect", () => {
     expect(Math.max(...pts.map((p) => p[0]))).toBeCloseTo(10, 3);
   });
 });
+
+describe("DXF import", () => {
+  const dxf = (...ents: string[]) => ["0", "SECTION", "2", "ENTITIES", ...ents, "0", "ENDSEC", "0", "EOF"].join("\n");
+  const line = (a: number[], b: number[]) => ["0", "LINE", "10", a[0], "20", a[1], "11", b[0], "21", b[1]].map(String).join("\n");
+
+  it("joins loose lines into a closed outline and reads circles", async () => {
+    const { parseDxf } = await import("@whittle/core");
+    const r = parseDxf(dxf(line([0, 0], [10, 0]), line([10, 0], [10, 10]), line([10, 10], [0, 10]), line([0, 10], [0, 0]), ["0", "CIRCLE", "10", "5", "20", "5", "40", "2"].join("\n")));
+    expect(r.loops).toHaveLength(1);
+    expect(r.loops[0]!.closed).toBe(true);
+    expect(r.loops[0]!.pts).toHaveLength(4);
+    expect(r.circles).toEqual([{ c: [5, 5], r: 2 }]);
+  });
+
+  it("turns a bulged polyline segment into a true arc", async () => {
+    const { parseDxf } = await import("@whittle/core");
+    // A semicircle (bulge 1) from (0,0) to (10,0) bulges to the right of travel (below, y < 0).
+    const poly = ["0", "LWPOLYLINE", "70", "0", "10", "0", "20", "0", "42", "1", "10", "10", "20", "0"].join("\n");
+    const r = parseDxf(dxf(poly));
+    expect(r.loops).toHaveLength(1);
+    const ys = r.loops[0]!.pts.map((p) => p[1]);
+    expect(Math.max(...ys.map(Math.abs))).toBeCloseTo(5, 1);
+    expect(Math.min(...ys)).toBeCloseTo(-5, 1);
+  });
+});

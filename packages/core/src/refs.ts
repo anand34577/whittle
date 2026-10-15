@@ -20,6 +20,8 @@ export function featureInputs(f: Feature): Id[] {
       return [...new Set([...(f.bodyId ? [f.bodyId] : []), ...(f.from ? [f.from.bodyId] : []), ...(f.to ? [f.to.bodyId] : [])])];
     case "boundaryFill":
       return f.tools;
+    case "curve":
+      return [...new Set([...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId), ...(f.sketch ? [f.sketch] : [])])];
     case "construct":
       return [...new Set([...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId)])];
     case "extrude":

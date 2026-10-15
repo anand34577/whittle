@@ -1,6 +1,7 @@
 import type {
   BodyOp,
   ConstructMode,
+  CurveFeature,
   CircleEntity,
   EllipseEntity,
   GearEntity,
@@ -71,6 +72,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   offsetFace: "Press/Pull",
   cplane: "Plane",
   construct: "Construct",
+  curve: "Curve",
   rib: "Rib",
   thread: "Thread",
   replaceFace: "Replace Face",
@@ -292,6 +294,17 @@ export function makeAlign(doc: WhittleDocument, bodyId?: Id): Feature {
 
 export function makeBoundaryFill(doc: WhittleDocument, tools: Id[]): Feature {
   return { id: uid("bf"), type: "boundaryFill", name: nextName(doc, "Boundary Fill"), tools, cells: [], keepTools: true };
+}
+
+export const CURVE_SOURCES: Record<CurveFeature["source"], { label: string; name: string; hint: string }> = {
+  points: { label: "3D sketch", name: "3D Sketch", hint: "Click points on the model (corners snap); the curve runs through them" },
+  edges: { label: "Include 3D geometry", name: "3D Curve", hint: "Click model edges to copy them as a curve" },
+  faces: { label: "Intersection curve", name: "Intersection", hint: "Click two faces: the curve is where they meet" },
+  project: { label: "Project to surface", name: "Projected", hint: "Click a face, then the sketch to lay onto it" },
+};
+
+export function makeCurve(doc: WhittleDocument, source: CurveFeature["source"]): Feature {
+  return { id: uid("cv"), type: "curve", name: nextName(doc, CURVE_SOURCES[source].name), source, points: [], edges: [], faces: [], smooth: source === "points" };
 }
 
 export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {

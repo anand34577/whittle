@@ -301,6 +301,20 @@ export interface BoundaryFillFeature extends FeatureBase {
   keepTools: boolean;
 }
 
+/**
+ * A 3D curve: through clicked points (3D sketch), copied from model edges (include 3D geometry),
+ * where two faces meet (intersection curve) or a sketch laid onto a face (project to surface).
+ */
+export interface CurveFeature extends FeatureBase {
+  type: "curve";
+  source: "points" | "edges" | "faces" | "project";
+  points: Vec3[];
+  edges: EdgeRef[];
+  faces: FaceRef[];
+  sketch?: Id;
+  smooth: boolean;
+}
+
 export interface SketchFeature extends FeatureBase {
   type: "sketch";
   plane: PlaneRef;
@@ -608,6 +622,7 @@ export type Feature =
   | JointFeature
   | ConstructionPlaneFeature
   | ConstructFeature
+  | CurveFeature
   | RibFeature
   | ThreadFeature
   | ReplaceFaceFeature

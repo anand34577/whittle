@@ -189,8 +189,8 @@ function toolsFor(profile: Profile | null) {
   const pro = profile === "engineer" || profile === "designer";
   return {
     create: pro
-      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["pipe", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] }
-      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "loft", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] },
+      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["pipe", "curve-3d", "curve-edges", "curve-faces", "curve-project", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] }
+      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "loft", "curve-3d", "curve-edges", "curve-faces", "curve-project", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] },
     modify: pro
       ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["press-pull", "replace-face", "delete-face", "align", "split-faces", "make-component", "ground", "joint", "combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
       : { primary: ["fillet", "chamfer", "shell", "move"], more: ["press-pull", "replace-face", "delete-face", "align", "split-faces", "make-component", "ground", "joint", "combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
@@ -216,7 +216,7 @@ export function Toolbar() {
           <span className="pill pill--accent">Sketch</span>
         </div>
         <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic", "tool-cspline", "tool-earc", "tool-tan2c", "tool-tan3c"]} activeId={active} />
-        <Group label="Special" ids={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
+        <Group label="Special" ids={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg", "import-dxf"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
         <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-stretch", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
         <Group
           label="Constrain"
