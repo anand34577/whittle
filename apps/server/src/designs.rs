@@ -46,6 +46,9 @@ pub struct Saved {
     name: String,
 }
 
+/// The most a design's document.json may expand to.
+const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
+
 struct Parsed {
     name: String,
     thumbnail: Option<Vec<u8>>,
@@ -59,18 +62,22 @@ fn parse_whittle(bytes: &[u8]) -> Result<Parsed, String> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| "The design file is damaged".to_string())?;
     let doc: serde_json::Value = {
         let mut f = zip.by_name("document.json").map_err(|_| "The design file has no document.json".to_string())?;
-        if f.size() > 256 * 1024 * 1024 {
+        if f.size() > MAX_DOCUMENT_BYTES {
             return Err("The design is too large".into());
         }
+        // The size in the ZIP header is only a claim; cap what is actually decompressed.
         let mut s = String::new();
-        f.read_to_string(&mut s).map_err(|_| "The design file is damaged".to_string())?;
+        f.by_ref().take(MAX_DOCUMENT_BYTES + 1).read_to_string(&mut s).map_err(|_| "The design file is damaged".to_string())?;
+        if s.len() as u64 > MAX_DOCUMENT_BYTES {
+            return Err("The design is too large".into());
+        }
         serde_json::from_str(&s).map_err(|_| "The design's document.json isn't valid".to_string())?
     };
     let name = doc.get("name").and_then(|n| n.as_str()).unwrap_or("Untitled").chars().take(200).collect::<String>();
     let thumbnail = match zip.by_name("thumbnail.png") {
         Ok(mut f) if f.size() <= 4 * 1024 * 1024 => {
             let mut v = Vec::new();
-            f.read_to_end(&mut v).ok().map(|_| v)
+            f.by_ref().take(4 * 1024 * 1024 + 1).read_to_end(&mut v).ok().filter(|_| v.len() <= 4 * 1024 * 1024).map(|_| v)
         }
         _ => None,
     };
@@ -204,7 +211,8 @@ async fn add_version(s: &Shared, user_id: &str, id: &str, head: i64, expected: O
     }
     let next = head + 1;
     let path = version_path(s, id, next);
-    let tmp = path.with_extension("pending");
+    // A name of its own: two saves racing for the same version must not share one file.
+    let tmp = path.with_extension(format!("pending-{}", random_token(6)));
     tokio::fs::write(&tmp, bytes).await?;
     let now = now_ms();
     let mut tx = s.db.begin().await?;

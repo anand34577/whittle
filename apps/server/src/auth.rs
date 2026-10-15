@@ -221,8 +221,19 @@ pub fn base_url(s: &Shared, headers: &HeaderMap) -> String {
     if let Some(u) = &s.config.public_url {
         return u.clone();
     }
-    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("localhost");
-    let proto = headers.get("x-forwarded-proto").and_then(|h| h.to_str().ok()).unwrap_or(if s.config.secure_cookies { "https" } else { "http" });
+    // Never put header text we haven't checked into a link: only a plain host[:port] is accepted.
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .filter(|h| !h.is_empty() && h.len() <= 255 && h.chars().all(|c| c.is_ascii_alphanumeric() || ".-:[]".contains(c)))
+        .unwrap_or("localhost");
+    let default_proto = if s.config.secure_cookies { "https" } else { "http" };
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|h| h.to_str().ok())
+        .map(|p| p.trim().to_ascii_lowercase())
+        .filter(|p| p == "http" || p == "https")
+        .unwrap_or_else(|| default_proto.to_owned());
     format!("{proto}://{host}")
 }
 
@@ -454,7 +465,10 @@ pub struct ForgotBody {
 
 /// Email a reset link. Always answers the same way, so it can't reveal who has an account.
 pub async fn forgot(State(s): State<Shared>, headers: HeaderMap, ClientAddr(addr): ClientAddr, Json(b): Json<ForgotBody>) -> ApiResult<StatusCode> {
-    if !s.config.auth_local || !s.settings.read().await.smtp.configured() {
+    // The link in the email must point at the server's own address. Without WHITTLE_PUBLIC_URL it
+    // would be built from the request's Host header, which the person asking controls, so a
+    // stranger could have a reset link for someone else's account sent pointing at their site.
+    if !s.config.auth_local || s.config.public_url.is_none() || !s.settings.read().await.smtp.configured() {
         return Err(ApiError::bad_request("Password reset by email isn't available. Ask an administrator."));
     }
     // Share the sign-in rate limit, so this can't be used to flood someone's inbox.
