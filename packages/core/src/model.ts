@@ -106,9 +106,10 @@ export interface SlotEntity extends EntityBase {
 
 /**
  * An outline or path point. A third element "arc" makes the point the middle of
- * a three-point arc from the previous point to the next one.
+ * a three-point arc from the previous point to the next one. "spline" makes it a
+ * fit point of a smooth curve that runs from the last plain point to the next one.
  */
-export type PolyPoint = [Expr, Expr] | [Expr, Expr, "arc"];
+export type PolyPoint = [Expr, Expr] | [Expr, Expr, "arc" | "spline"];
 
 export interface PolylineEntity extends EntityBase {
   type: "polyline";
@@ -168,7 +169,9 @@ export type SketchGeom =
   | { id: Id; type: "line"; a: Id; b: Id; construction?: boolean }
   /** Counter-clockwise from `a` to `b` about the center `c`. */
   | { id: Id; type: "arc"; c: Id; a: Id; b: Id; construction?: boolean }
-  | { id: Id; type: "circle"; c: Id; r: number; construction?: boolean };
+  | { id: Id; type: "circle"; c: Id; r: number; construction?: boolean }
+  /** A smooth curve through the fit points (solver points, so constraints and dragging move it). */
+  | { id: Id; type: "spline"; pts: Id[]; closed?: boolean; construction?: boolean };
 
 export type GeomType = SketchGeom["type"];
 

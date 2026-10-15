@@ -35,6 +35,12 @@ const P = {
       <path d="M3 11.6 L4.5 13.6 L6.6 12.4" opacity=".6" />
     </>
   ),
+  point: (
+    <>
+      <circle cx="10" cy="10" r="1.8" fill="currentColor" />
+      <path d="M10 3.5 V6.5 M10 13.5 V16.5 M3.5 10 H6.5 M13.5 10 H16.5" opacity=".6" />
+    </>
+  ),
   fillet: (
     <>
       <path d="M3.5 16.5 H9 A7.5 7.5 0 0 0 16.5 9 V3.5" />

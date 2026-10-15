@@ -10,7 +10,7 @@ export type ResolvedEntity =
   | { id: string; type: "circle"; cx: number; cy: number; r: number; construction: boolean; mode: string }
   | { id: string; type: "polygon"; cx: number; cy: number; r: number; sides: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "slot"; cx: number; cy: number; length: number; width: number; angle: number; construction: boolean; mode: string }
-  | { id: string; type: "polyline"; points: Vec2[]; arcs: boolean[]; corner: number; smooth: boolean; open: boolean; construction: boolean; mode: string }
+  | { id: string; type: "polyline"; points: Vec2[]; arcs: boolean[]; splines: boolean[]; corner: number; smooth: boolean; open: boolean; construction: boolean; mode: string }
   | { id: string; type: "ellipse"; cx: number; cy: number; rx: number; ry: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "text"; x: number; y: number; text: string; size: number; bold: boolean; angle: number; construction: boolean; mode: string }
   | { id: string; type: "gear"; cx: number; cy: number; teeth: number; module: number; bore: number; construction: boolean; mode: string };
@@ -78,12 +78,17 @@ export function resolveEntity(e: SketchEntity, ev: Evaluator): ResolvedEntity {
       if (corner < 0) throw new Error("Corner radius can't be negative");
       if (!e.open && points.length < 3) throw new Error("A closed outline needs at least three points");
       const arcs = e.points.map((p) => p[2] === "arc");
+      const splines = e.points.map((p) => p[2] === "spline");
       arcs.forEach((a, i) => {
         if (!a) return;
         if (i === 0 || (e.open && i === points.length - 1)) throw new Error("An arc needs a point before and after it");
         if (arcs[i - 1] || arcs[(i + 1) % arcs.length]) throw new Error("Two arc points can't follow each other; put a corner point between them");
+        if (splines[i - 1] || splines[(i + 1) % splines.length]) throw new Error("An arc point can't sit next to a spline point; put a corner point between them");
       });
-      return { ...common, type: "polyline", points, arcs, corner, smooth: !!e.smooth, open: !!e.open };
+      splines.forEach((s, i) => {
+        if (s && (i === 0 || (e.open && i === points.length - 1))) throw new Error("A spline needs a plain point before and after it");
+      });
+      return { ...common, type: "polyline", points, arcs, splines, corner, smooth: !!e.smooth, open: !!e.open };
     }
     case "ellipse": {
       const rx = L(e.rx, "Radius X");
@@ -184,7 +189,7 @@ export function entityOutline(r: ResolvedEntity, segments = 64): Vec2[] {
     }
     case "polyline": {
       if (r.smooth && r.points.length >= 3) return r.open ? smoothOpen(r.points, 12) : smoothClosed(r.points, 12);
-      if (r.arcs.some(Boolean)) return polylinePath(r.points, r.arcs, !r.open);
+      if (r.arcs.some(Boolean) || r.splines.some(Boolean)) return polylinePath(r.points, r.arcs, !r.open, 16, r.splines);
       if (!r.open && r.corner > 0 && r.points.length >= 3) return roundCorners(r.points, r.corner);
       return r.points;
     }
@@ -260,22 +265,55 @@ export function arcPoints(a: Vec2, m: Vec2, b: Vec2, segments = 16): Vec2[] {
   return out;
 }
 
-/** An outline or path whose "arc" points bend the segment around them. */
-export function polylinePath(pts: Vec2[], arcs: boolean[], closed: boolean, segments = 16): Vec2[] {
+/** One piece of an outline or path: a straight line, a three-point arc, or a spline through its points (ends included). */
+export type ChainSegment = { kind: "line"; a: Vec2; b: Vec2 } | { kind: "arc"; a: Vec2; mid: Vec2; b: Vec2 } | { kind: "spline"; through: Vec2[] };
+
+/** Split an outline or path into its lines, arcs and splines, in order. */
+export function chainSegments(pts: Vec2[], arcs: boolean[], closed: boolean, splines: boolean[] = []): ChainSegment[] {
   const n = pts.length;
-  const out: Vec2[] = [];
+  const out: ChainSegment[] = [];
   const end = closed ? n : n - 1;
   for (let i = 0; i < end; ) {
     const j = (i + 1) % n;
     if (arcs[j] && (closed || j < n - 1)) {
-      out.push(...arcPoints(pts[i]!, pts[j]!, pts[(j + 1) % n]!, segments));
+      out.push({ kind: "arc", a: pts[i]!, mid: pts[j]!, b: pts[(j + 1) % n]! });
       i += 2;
+    } else if (splines[j] && (closed || j < n - 1)) {
+      const through: Vec2[] = [pts[i]!];
+      let k = j;
+      while (splines[k % n] && through.length <= n) through.push(pts[k++ % n]!);
+      through.push(pts[k % n]!);
+      out.push({ kind: "spline", through });
+      i += through.length - 1;
     } else {
-      out.push(pts[i]!);
+      out.push({ kind: "line", a: pts[i]!, b: pts[j]! });
       i += 1;
     }
   }
-  if (!closed) out.push(pts[n - 1]!);
+  return out;
+}
+
+/** The cubic Bezier pieces of the smooth curve through these points (the same curve the sketch draws): control points and end of each piece. */
+export function splineBeziers(t: Vec2[]): { c1: Vec2; c2: Vec2; end: Vec2 }[] {
+  const m = t.length;
+  const at = (i: number): Vec2 => (i < 0 ? [2 * t[0]![0] - t[1]![0], 2 * t[0]![1] - t[1]![1]] : i >= m ? [2 * t[m - 1]![0] - t[m - 2]![0], 2 * t[m - 1]![1] - t[m - 2]![1]] : t[i]!);
+  const out: { c1: Vec2; c2: Vec2; end: Vec2 }[] = [];
+  for (let i = 0; i < m - 1; i++) {
+    const [p0, p1, pa, pb] = [t[i]!, t[i + 1]!, at(i - 1), at(i + 2)];
+    out.push({ c1: [p0[0] + (p1[0] - pa[0]) / 6, p0[1] + (p1[1] - pa[1]) / 6], c2: [p1[0] - (pb[0] - p0[0]) / 6, p1[1] - (pb[1] - p0[1]) / 6], end: p1 });
+  }
+  return out;
+}
+
+/** An outline or path whose "arc" points bend the segment around them and whose "spline" points flow through a smooth curve. */
+export function polylinePath(pts: Vec2[], arcs: boolean[], closed: boolean, segments = 16, splines: boolean[] = []): Vec2[] {
+  const out: Vec2[] = [];
+  for (const s of chainSegments(pts, arcs, closed, splines)) {
+    if (s.kind === "arc") out.push(...arcPoints(s.a, s.mid, s.b, segments));
+    else if (s.kind === "spline") out.push(...(s.through.length >= 3 ? smoothOpen(s.through, Math.max(4, Math.round(segments * 0.75))).slice(0, -1) : [s.through[0]!]));
+    else out.push(s.a);
+  }
+  if (!closed) out.push(pts[pts.length - 1]!);
   return out;
 }
 
@@ -309,7 +347,7 @@ export function thickenPath(pts: Vec2[], t: number, side: "center" | "inside" | 
 }
 
 /** Closed Catmull-Rom curve through the points. */
-function smoothClosed(pts: Vec2[], perSeg: number): Vec2[] {
+export function smoothClosed(pts: Vec2[], perSeg: number): Vec2[] {
   const out: Vec2[] = [];
   const n = pts.length;
   for (let i = 0; i < n; i++) {
@@ -330,7 +368,7 @@ function smoothClosed(pts: Vec2[], perSeg: number): Vec2[] {
 }
 
 /** Open Catmull-Rom curve through the points (end tangents mirror the neighbours). */
-function smoothOpen(pts: Vec2[], perSeg: number): Vec2[] {
+export function smoothOpen(pts: Vec2[], perSeg: number): Vec2[] {
   const n = pts.length;
   const at = (i: number): Vec2 => {
     if (i < 0) return [2 * pts[0]![0] - pts[1]![0], 2 * pts[0]![1] - pts[1]![1]];
@@ -492,8 +530,8 @@ export function entitySnapPoints(r: ResolvedEntity): { p: Vec2; kind: "end" | "m
       break;
     case "polyline":
       r.points.forEach((p, i) => {
-        out.push({ p, kind: r.arcs[i] ? "mid" : "end" });
-        if (r.arcs[i] || r.arcs[(i + 1) % r.points.length]) return;
+        out.push({ p, kind: r.arcs[i] || r.splines[i] ? "mid" : "end" });
+        if (r.arcs[i] || r.arcs[(i + 1) % r.points.length] || r.splines[i] || r.splines[(i + 1) % r.points.length]) return;
         if (r.open && i === r.points.length - 1) return;
         const q = r.points[(i + 1) % r.points.length]!;
         out.push({ p: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], kind: "mid" });

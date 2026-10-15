@@ -8,3 +8,5 @@ export * from "./history";
 export * from "./file";
 export * from "./refs";
 export * from "./constraints";
+export * from "./sketchShapes";
+export * from "./sketchCopy";

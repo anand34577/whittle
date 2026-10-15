@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { Draft } from "immer";
 import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, geomType, trim } from "@whittle/core";
-import { availableConstraints, constrainSelection, geoMutate, setDimension } from "../state/constraintOps";
+import { availableConstraints, canConstrain, constrainSelection, geoMutate, makeConstrainable, offsetSelection, patternSelection, mirrorSelection, setDimension } from "../state/constraintOps";
 import { commandById } from "../state/commands";
 import { areaText, volumeText } from "../state/measure";
 import type { FeatureStatus } from "@whittle/kernel";
@@ -106,6 +106,48 @@ function ShapeActions() {
   );
 }
 
+/** Copies of the selected constraint geometry: mirror, offset and patterns. */
+function GeometryActions() {
+  const [count, setCount] = useState(4);
+  const [gap, setGap] = useState(20);
+  return (
+    <div className="shape-actions">
+      <h3 className="eyebrow">Copy</h3>
+      <div className="btnrow">
+        <button className="btn btn--small" onClick={() => void offsetSelection()} title="Parallel lines and concentric arcs at a distance">
+          <Icon name="offset" size={15} /> Offset
+        </button>
+        <button className="btn btn--small" onClick={() => mirrorSelection("y")} title="Mirrored copy across the vertical axis, held symmetric">
+          <Icon name="mirror" size={15} /> Mirror ↔
+        </button>
+        <button className="btn btn--small" onClick={() => mirrorSelection("x")} title="Mirrored copy across the horizontal axis, held symmetric">
+          <Icon name="mirror" size={15} style={{ transform: "rotate(90deg)" }} /> Mirror ↕
+        </button>
+        <button className="btn btn--small" onClick={() => mirrorSelection("line")} title="Select the geometry, then the mirror line last">
+          <Icon name="mirror" size={15} /> Mirror line
+        </button>
+      </div>
+      <div className="copyrow">
+        <span>Copies</span>
+        <NumberField value={count} min={2} max={100} onChange={setCount} ariaLabel="Number of copies" width={104} />
+        <button className="btn btn--small" onClick={() => patternSelection("circular", count, gap)} title="Evenly around the sketch origin">
+          Around origin
+        </button>
+      </div>
+      <div className="copyrow">
+        <span>Gap</span>
+        <NumberField value={gap} step={1} onChange={setGap} ariaLabel="Gap between copies" width={104} />
+        <button className="btn btn--small" onClick={() => patternSelection("row", count, gap)} title="In a row along X">
+          Row →
+        </button>
+        <button className="btn btn--small" onClick={() => patternSelection("column", count, gap)} title="In a column along Y">
+          ↑
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function StatusNote({ status, featureId }: { status?: FeatureStatus; featureId: string }) {
   if (!status || (status.state !== "error" && status.state !== "warning") || !status.message) return null;
   const fix = status.fix;
@@ -165,6 +207,11 @@ function EntityEditor({ e }: { e: SketchEntity }) {
   return (
     <div className="panel__section">
       <h3 className="eyebrow">{ENTITY_LABELS[e.type]}</h3>
+      {canConstrain(e) && (
+        <button className="btn btn--small" onClick={() => makeConstrainable(e.id)} title="Lines and arcs you can dimension, constrain, trim and fillet">
+          <Icon name="link" size={15} /> Make constrainable
+        </button>
+      )}
       {e.type === "text" && (
         <>
           <label className="field">
@@ -428,6 +475,7 @@ function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
           </div>
         </>
       )}
+      {picked.length > 0 && <GeometryActions />}
       {(sketch.constraints?.length ?? 0) > 0 && (
         <ul className="constraints__list" aria-label="Constraints">
           {sketch.constraints!.map((c) => (

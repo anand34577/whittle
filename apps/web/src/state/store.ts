@@ -40,7 +40,7 @@ export type Pick =
  * "path" draws an open polyline (for sweeps and guides). "segment", "arc" and
  * "pcircle" draw constraint-driven geometry; "trim" and "extend" edit it.
  */
-export type SketchTool = EntityType | "select" | "path" | "segment" | "arc" | "pcircle" | "trim" | "extend";
+export type SketchTool = EntityType | "select" | "path" | "crect" | "rect3" | "circle2" | "circle3" | "dimension" | "project" | "spline" | "sfillet" | "schamfer" | "gpoint" | "segment" | "arc" | "pcircle" | "trim" | "extend";
 
 export type Mode =
   | { kind: "model" }

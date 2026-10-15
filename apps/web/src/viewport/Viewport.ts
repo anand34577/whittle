@@ -50,6 +50,8 @@ export interface SketchPointerEvent {
   alt: boolean;
   ctrl: boolean;
   screen: Vec2;
+  /** The pointer in window coordinates (for picking the 3D model under it). */
+  client: Vec2;
 }
 
 export interface ViewportCallbacks {
@@ -921,7 +923,8 @@ export class Viewport {
 
   private screen(e: { clientX: number; clientY: number }): Vec2 {
     const r = this.renderer.domElement.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
+    // Layout pixels, whatever the interface zoom makes of the on-screen size.
+    return [((e.clientX - r.left) * this.size.x) / (r.width || 1), ((e.clientY - r.top) * this.size.y) / (r.height || 1)];
   }
 
   pick(e: { clientX: number; clientY: number }): Pick | null {
@@ -1040,7 +1043,7 @@ export class Viewport {
     if (!this.sketchFrame) return false;
     const p = this.sketchPoint(e);
     if (!p) return false;
-    this.cb.onSketchPointer({ type, p, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey, screen: this.screen(e) });
+    this.cb.onSketchPointer({ type, p, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey, screen: this.screen(e), client: [e.clientX, e.clientY] });
     return true;
   }
 
