@@ -117,7 +117,18 @@ after changes: `sudo systemctl restart whittle`.
 | `WHITTLE_MAX_UPLOAD_MB` | `64` | Largest design that can be saved. |
 | `WHITTLE_MAX_VERSIONS` | `50` | Versions kept per design; older ones are pruned. |
 | `WHITTLE_SESSION_DAYS` | `30` | How long a sign-in lasts. |
+| `WHITTLE_AI` | `true` | Allow the in-app AI assistant. `false` hides it and keeps the strictest browser security policy. |
+| `WHITTLE_SMTP_HOST` | | Mail server for invitations, password resets and notices (see [Email](#email-smtp)). |
+| `WHITTLE_SMTP_PORT` | by security: 587 / 465 / 25 | |
+| `WHITTLE_SMTP_SECURITY` | `starttls` | `starttls`, `tls`, `starttls-optional` or `none` (plain, unencrypted). |
+| `WHITTLE_SMTP_USERNAME`, `WHITTLE_SMTP_PASSWORD` | | Leave empty for servers without authentication. |
+| `WHITTLE_SMTP_FROM`, `WHITTLE_SMTP_FROM_NAME` | `Whittle` | Sender address and name. |
+| `WHITTLE_SMTP_ACCEPT_INVALID_CERTS` | `false` | Accept self-signed certificates (internal mail servers). |
 | `RUST_LOG` | `info` | Log detail. |
+
+Administrators can change sign-up, single sign-on behaviour and email **in the app** (Account →
+Administration → Sign-in & email). What's saved there wins over the environment, which only gives the
+starting values.
 
 ### Sign-in modes
 
@@ -153,12 +164,34 @@ Issuer examples: Authentik `https://auth.example.com/application/o/<slug>/` · K
 `https://kc.example.com/realms/<realm>` · Authelia `https://auth.example.com` · Google
 `https://accounts.google.com` · Microsoft Entra `https://login.microsoftonline.com/<tenant>/v2.0`.
 
-To invite people one by one instead of creating accounts automatically, set
-`WHITTLE_OIDC_AUTO_CREATE=false` and add each person in **Manage users** with the email address they sign in
-with and no password. Their first single sign-on (with a provider-verified email) is linked to that account.
+To invite people one by one instead of creating accounts automatically, turn off **Create accounts on
+first sign-in** (or set `WHITTLE_OIDC_AUTO_CREATE=false`) and add each person in **Administration →
+People** with the email address they sign in with and no password. Their first single sign-on (with a
+provider-verified email) is linked to that account.
 
 Whittle uses PKCE and a nonce, verifies the ID token signature, and matches accounts by issuer and
-subject (never by email), so an email change at the provider can't take over another account.
+subject. Email is used to *link* an identity to an account only in the cases below, and only when the
+provider says the email is verified.
+
+#### Linking existing accounts to single sign-on
+
+Turning on single sign-on for a server that already has password accounts? Pick one:
+
+- **People link it themselves.** Signed in with their password, anyone can open **Account → Link
+  single sign-on**. Their account and designs stay as they are; from then on either sign-in works.
+- **An administrator flags the account.** In **Administration → People**, choose **Link single sign-on
+  by email** on someone's menu. The next time they sign in with single sign-on using that (verified)
+  email, it joins their existing account.
+- **Link everyone by verified email.** Turn on **Link to existing accounts by verified email** in
+  *Sign-in & email*. Only do this if you trust your provider's email verification.
+
+#### Merging accounts
+
+If someone already ended up with two accounts (for example a single sign-on account created on first
+sign-in next to their old password account), choose **Merge into another account…** on one of them. The
+account you keep takes over all designs and version history, the sign-in method it lacked (password or
+single sign-on identity), the email if it had none, and administrator rights if either had them. The
+other account is removed. Merges, links and unlinks are recorded in **Activity**.
 
 ### PostgreSQL
 
@@ -174,15 +207,50 @@ WHITTLE_DATABASE_URL=postgres://whittle:change-me@localhost:5432/whittle
 Tables are created and upgraded automatically. Design files stay in `WHITTLE_DATA` either way, so back
 up both.
 
+## Administration
+
+Administrators open **Account → Administration** (or search for it with Ctrl+K):
+
+- **Overview**: version, uptime, database, people, active sessions, designs and storage.
+- **People**: search and filter; add people with a password, as single sign-on only, or by **emailing an
+  invitation** to choose their own password. Each person's menu can edit name, username and email, set
+  a password or email a reset link, link or unlink single sign-on, merge accounts, sign them out
+  everywhere, disable, or delete (deleting can **give their designs to someone else** instead of
+  deleting them). The last active administrator is always protected.
+- **Sign-in & email**: open or close sign-up, require email addresses, single sign-on behaviour, the
+  SMTP server (with **Send test**), and which notifications are sent.
+- **Activity**: an audit log of sign-ups, account changes, merges, settings changes, lockouts and
+  failed emails.
+
+## Email (SMTP)
+
+Email is optional. With it, people can reset forgotten passwords, administrators can send invitations
+and reset links, and Whittle sends notices (welcome, password changed, account disabled, new sign-ups to
+administrators).
+
+Set it in **Administration → Sign-in & email** (or with the `WHITTLE_SMTP_*` variables). Security modes:
+
+| Mode | Port | When |
+|---|---|---|
+| STARTTLS (required) | 587 | Most providers (Gmail, Microsoft 365, Fastmail, Postmark, SES...) |
+| TLS / SSL | 465 | Providers that use implicit TLS ("SMTPS") |
+| STARTTLS if offered | 587 / 25 | Mixed internal servers: encrypts when possible |
+| **None (unencrypted)** | 25 | A local relay (Postfix on the same host), a LAN mail server, test servers such as MailHog or Mailpit. Messages and any SMTP password travel unencrypted, so use it only on a trusted network. |
+
+Internal servers with self-signed certificates: turn on **Accept self-signed certificates**. Links in
+emails use `WHITTLE_PUBLIC_URL`, or the address people browse to when it isn't set.
+
 ## Managing accounts from the command line
 
 The installer adds a `whittle-server` command that runs as the `whittle` user with the service's settings:
 
 ```bash
 sudo whittle-server user list
-sudo whittle-server user add ada --admin
+sudo whittle-server user add ada --email ada@example.com --admin
 sudo whittle-server user passwd ada
+sudo whittle-server user email ada ada@example.com
 sudo whittle-server user admin ada on
+sudo whittle-server doctor        # check settings, database, data folder, email and single sign-on
 ```
 
 With Docker: `docker exec -it whittle whittle-server user list`.
@@ -190,13 +258,48 @@ With Docker: `docker exec -it whittle whittle-server user list`.
 Passwords are read from `WHITTLE_PASSWORD` or the first line of standard input. Locked out of the only
 administrator account? `user passwd` and `user admin` fix it.
 
-## Backups and storage layout
+## Upgrading and uninstalling
+
+Run the installer again to upgrade (`curl -fsSL .../install.sh | sh -s -- --server`, or
+`sudo ./deploy/install.sh` from a release). It:
+
+1. backs up everything first, to `/var/lib/whittle/backups/pre-upgrade-<version>-<date>.zip` (the five
+   newest are kept);
+2. installs the new version and restarts the service;
+3. checks that the server answers. **If the new version doesn't start, the previous one is put back
+   automatically**;
+4. runs `whittle-server doctor`.
+
+Database upgrades are automatic and forward-only. To remove the server:
+
+```bash
+sudo /opt/whittle/uninstall.sh            # keeps /var/lib/whittle and /etc/whittle
+sudo /opt/whittle/uninstall.sh --purge    # also deletes all data and settings (asks first)
+# or: curl -fsSL .../install.sh | sh -s -- --server --uninstall [--purge]
+```
+
+## Backups, restore and moving to PostgreSQL
+
+```bash
+sudo whittle-server backup /root/whittle-2026-10-15.zip     # safe while the server runs
+sudo whittle-server restore /root/whittle-2026-10-15.zip    # into an empty server
+sudo whittle-server restore backup.zip --force              # replace everything
+sudo whittle-server migrate-db postgres://whittle:pw@db/whittle   # copy to PostgreSQL, then switch WHITTLE_DATABASE_URL
+```
+
+A backup is one ZIP with the accounts, settings, design list and audit log (as database-neutral JSON
+lines) and every design file, so a backup from SQLite restores into PostgreSQL and the other way round.
+Moving to a new machine: install there, then `restore` the backup. Sessions aren't kept: people sign in
+again.
+
+Storage layout:
 
 ```
 /var/lib/whittle/
-  whittle.db                     SQLite database (accounts, sessions, design list)
+  whittle.db                     SQLite database (accounts, settings, design list, audit log)
   designs/<id>/v<n>.whittle      every kept version of every design
   designs/<id>/thumb.png         latest thumbnail
+  backups/                       automatic pre-upgrade backups
 ```
 
 `.whittle` files are ordinary ZIP files with a `document.json`, so they open in the desktop app too.
@@ -207,5 +310,12 @@ Everything the app does goes through a small JSON API under `/api` (state-changi
 `X-Whittle: 1` header): `GET /api/config`, `POST /api/auth/login|logout|register|password`,
 `GET /api/auth/me`, `GET|POST /api/designs`, `GET|PUT|DELETE /api/designs/{id}` (PUT accepts
 `If-Match: <version>`), `GET /api/designs/{id}/versions`, `GET /api/designs/{id}/versions/{n}`,
-`POST /api/designs/{id}/versions/{n}/restore`, `GET /api/designs/{id}/thumbnail`, `/api/admin/users`,
-`GET /api/health`.
+`POST /api/designs/{id}/versions/{n}/restore`, `GET /api/designs/{id}/thumbnail`, `GET /api/health`.
+
+Accounts: `GET|PATCH /api/auth/me`, `POST /api/auth/forgot`, `POST /api/auth/reset`,
+`GET /api/auth/oidc/start?link=1` (link single sign-on to the signed-in account).
+
+Administration (administrators only): `GET /api/admin/overview`, `GET /api/admin/audit`,
+`GET|PUT /api/admin/settings`, `POST /api/admin/settings/test-email`, `GET|POST /api/admin/users`,
+`PATCH|DELETE /api/admin/users/{id}` (`?transferTo=<id>` keeps their designs), and
+`POST /api/admin/users/{id}/merge|unlink-sso|signout|send-reset`.

@@ -216,10 +216,10 @@ jobs:
           mkdir -p "$name/deploy"
           cp "apps/server/target/${{ matrix.target }}/release/whittle-server" "$name/"
           cp -r web "$name/web"
-          cp deploy/whittle.service deploy/whittle.openrc deploy/whittle.env.example deploy/install.sh "$name/deploy/"
+          cp deploy/whittle.service deploy/whittle.openrc deploy/whittle.env.example deploy/install.sh deploy/uninstall.sh "$name/deploy/"
           cp docs/SELF_HOSTING.md "$name/README.md"
           cp LICENSE THIRD_PARTY_LICENSES.md "$name/"
-          chmod +x "$name/whittle-server" "$name/deploy/install.sh"
+          chmod +x "$name/whittle-server" "$name/deploy/install.sh" "$name/deploy/uninstall.sh"
           "$name/whittle-server" --version
           tar czf "$name.tar.gz" "$name"
           echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"

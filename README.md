@@ -1,6 +1,6 @@
 # Whittle
 
-**Open-source parametric 3D CAD for everyone: first-timers, makers, designers and engineers.**
+**Open-source parametric 3D CAD for everyone: first-timers, makers, product designers, engineers, teachers and students.**
 Sketch → Extrude → Fillet → Export. Use it as a desktop app (Windows, macOS, Linux), host it for your
 team or family on your own server, or open it in any modern browser.
 
@@ -22,6 +22,10 @@ design.
 | **Server** (Linux x86_64/arm64, bare metal or LXC) | `curl -fsSL https://raw.githubusercontent.com/anand34577/whittle/main/install.sh \| sh -s -- --server` |
 | **Server** (Docker) | `docker run -d --name whittle -p 8080:8080 -v whittle-data:/data --restart unless-stopped ghcr.io/anand34577/whittle:latest` |
 
+Upgrade by running the same line again (the server backs itself up first and rolls back if the new version doesn't start).
+Uninstall: add `--uninstall` (macOS/Linux; `--server --uninstall [--purge]` for the server), or on Windows
+`$env:WHITTLE_ACTION="uninstall"` before the PowerShell line.
+
 Or download an installer from the [latest release](https://github.com/anand34577/whittle/releases/latest).
 Step-by-step guides, configuration, single sign-on and troubleshooting are in the **[wiki](https://github.com/anand34577/whittle/wiki)**.
 
@@ -37,19 +41,22 @@ Step-by-step guides, configuration, single sign-on and troubleshooting are in th
 
 ## What you can do
 
-- **Sketch** on origin planes or any flat face: outline (straight, rounded corners or a smooth curve), rectangle (rounded, rotated), circle, ellipse, polygon, slot, **text** and **involute spur gears**. Snapping to points, centers, grid and alignments. **Type exact sizes while drawing.** Shapes inside shapes become holes automatically.
+- **Sketch** on origin planes (offset or **tilted**) or any flat face: outline (straight, rounded corners or a smooth curve), **open paths**, rectangle (rounded, rotated), circle, ellipse, polygon, slot, **text** and **involute spur gears**. Snapping to points, centers, grid and alignments. **Type exact sizes while drawing.** Shapes inside shapes become holes automatically.
 - **Bring in artwork:** **import an SVG** (logos, lettering, traced outlines from Inkscape, Illustrator, Figma) as editable sketch shapes, then extrude, emboss or engrave it.
 - **Arrange sketch shapes:** duplicate, mirror, rotate 90°, copies around a circle (bolt circles) or in a row.
-- **Create:** extrude (one side / both sides; new body, join, cut, keep overlap), revolve, **loft**, **holes** (simple, counterbore, countersink), quick box / cylinder / sphere / cone / torus / tube.
+- **Create:** extrude (one side, symmetric or two different distances; **draft taper**; **twist**; new body, join, cut, keep overlap), revolve, **loft**, **sweep** along a path, **coils and screw threads**, **holes** (simple, counterbore, countersink, with ISO metric and UNC clearance, tap-drill and heat-set-insert sizes), quick box / cylinder / sphere / cone / torus / tube.
 - **Parts library:** spur gear, hex nut, washer, standoff, L bracket, mounting plate, enclosure and lid, knob, name tag, vase, pulley. Each inserts as ordinary, fully editable features with named parameters.
-- **Modify:** fillet, chamfer, shell, move / rotate / copy, combine bodies (join, cut, keep overlap), mirror, linear and circular patterns.
+- **Modify:** fillet and chamfer (click edges, or a face to take all its edges, or round every edge at once), shell, **draft faces**, **split**, **offset** (grow/shrink), **scale**, move / rotate / copy, combine bodies (join, cut, keep overlap), mirror, linear and circular patterns.
 - **Parameters & formulas** everywhere: `width / 2 + 3 mm`, `2 * pi * r`, `atan(rise/run)`. Rename a parameter and every formula follows.
 - **Timeline:** edit any step, suppress, roll back, **drag to reorder** (Whittle refuses moves that would break the design and says why), delete with a dependency warning. Fillets stay on their edges when upstream sketches change.
-- **Inspect:** measure (distance, gap, angle, diameter, length, area), section view, overhang check for 3D printing, display styles, orthographic view, volume, area, size, and mass for 18 materials (plastics, metals, woods, glass, concrete).
+- **Inspect:** measure (distance, gap, angle, diameter, length, area), section view, **analysis**: overhangs (3D printing), **draft angle** (moulding and casting) and **zebra stripes** (surface quality), display styles, orthographic view, volume, area, size, and mass for 30 materials.
 - **Appearance:** body colors and matte, satin, metal or clear finishes; save a high-resolution image.
-- **Export:** **STEP** for other CAD, CNC and manufacturing; **3MF** and **STL** for 3D printing, rendering and games; **SVG** and **DXF** of any sketch for laser cutters, vinyl cutters, plotters and CAM. Import STEP and STL.
+- **Export:** **STEP** for other CAD, CNC and manufacturing; **glTF (GLB)** and **OBJ** for the web, AR, games and rendering; **3MF** and **STL** for 3D printing; **PLY** for scanning tools; **SVG** and **DXF** of any sketch for laser cutters, vinyl cutters, plotters and CAM. Import STEP and STL.
 - **Never lose work:** unlimited undo, autosave and crash recovery, **version history with restore** on every platform, and a warning before a save would overwrite newer work from another device.
-- **Ease of use:** Ctrl+K command search ("round edges" finds Fillet), right-click radial menu, contextual action bar, a hint line that always shows the next step, a guided first part, templates, view cube, dark and light themes.
+- **Ease of use:** a first-run question tunes the workspace (new to 3D, maker, engineer, designer, teacher/student); Ctrl+K command search ("round edges" finds Fillet), right-click radial menu, a hint line that always shows the next step, a guided first part, templates for engineering, product design, woodworking and making, view cube. Every control, dialog and tooltip is Whittle's own: no browser pop-ups.
+- **Make it yours:** six themes plus *match system*, seven accent colors, density, interface size, reduced motion, and **mouse navigation like Fusion 360, SolidWorks, Onshape or Blender**.
+- **AI assistant (optional):** describe a part or a change and it builds it with Whittle's own tools, as editable, undoable features. Works with **Claude**, **OpenAI** or a **local model** (Ollama, LM Studio). The same [design API](docs/AI_INTEGRATION.md) is open to scripts.
+- **Self-hosted server:** accounts with email, password reset, **single sign-on with linking and account merging**, an **administration console** (people, invitations, SMTP email including unencrypted relays, notifications, activity log), and `backup` / `restore` / `migrate-db` / `doctor` commands.
 
 ## Quick start (from source)
 
@@ -64,7 +71,7 @@ npm run dev          # http://localhost:5173
 | `npm run build` | Production web build → `apps/web/dist` |
 | `npm test` | Unit + geometry tests (runs the real OCCT kernel in Node) |
 | `npm run typecheck` | TypeScript, strict |
-| `node tests/e2e/smoke.mjs <url>` | Browser test of the core flow (also `features.mjs`, and `server.mjs` against a server) |
+| `node tests/e2e/smoke.mjs <url>` | Browser test of the core flow (also `features.mjs`, `advanced.mjs`, and `server.mjs` against a server) |
 | `cd apps/server && cargo test` | Server API tests (SQLite; set `WHITTLE_TEST_DATABASE_URL` for PostgreSQL) |
 
 ### Desktop app (Tauri 2)
@@ -106,12 +113,13 @@ deploy            systemd and OpenRC services, settings template, installer, rel
 tests/e2e         Browser tests: smoke.mjs (core flow), features.mjs (tools), server.mjs (accounts and storage)
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together and [PLAN.md](PLAN.md) for the product plan.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it fits together, [PLAN.md](PLAN.md) for the product plan,
+and [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md) for the design API.
 
 ## Keyboard
 
-`S` sketch · `E` extrude · `R` revolve · `D` hole · `F` fillet · `M` move · `J` combine · `I` measure · `P` parts library · `H` home view · `Shift+H` fit · `Ctrl+K` find any command · `Ctrl+S` save · `Ctrl+Z` undo · `Esc` cancel / finish sketch · right-click for quick actions · `?` all shortcuts.
-In a sketch: `L` line · `R` rectangle · `C` circle · `E` ellipse · `P` polygon · `O` slot · `T` text · `G` gear · `V` select · `Ctrl+D` duplicate · `Shift+R` rotate · `X` construction.
+`S` sketch · `E` extrude · `R` revolve · `D` hole · `F` fillet · `M` move · `J` combine · `I` measure · `P` parts library · `H` home view · `Shift+H` fit · `Ctrl+K` find any command · `Ctrl+I` AI assistant · `Ctrl+,` settings · `Ctrl+S` save · `Ctrl+Z` undo · `Esc` cancel / finish sketch · right-click for quick actions · `?` all shortcuts.
+In a sketch: `L` line · `A` path · `R` rectangle · `C` circle · `E` ellipse · `P` polygon · `O` slot · `T` text · `G` gear · `V` select · `Ctrl+D` duplicate · `Shift+R` rotate · `X` construction.
 
 ## License
 
