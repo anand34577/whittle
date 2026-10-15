@@ -48,8 +48,7 @@ const state = () =>
   });
 const runCommand = (id) =>
   page.evaluate(async (id) => {
-    const m = await import("/src/state/commands.ts");
-    m.COMMANDS.find((c) => c.id === id).run(window.whittle.useApp.getState());
+    window.whittle.commands.find((c) => c.id === id).run(window.whittle.useApp.getState());
   }, id);
 
 await step("01-start", async () => {
@@ -102,12 +101,12 @@ await step("05-tangent-chain-and-face-preselect", async () => {
   await api("add_feature", { type: "extrude", settings: { sketch: "Rounded", distance: 20, op: "new" } });
   await waitBuilt();
   const res = await page.evaluate(async () => {
-    const A = await import("/src/state/actions.ts");
+    const A = { handlePick: window.whittle.handlePick };
     const S = () => window.whittle.useApp.getState();
     const body = S().regen.bodies.find((b) => b.volume > 0 && b.bbox[0][2] > 55);
     const top = body.faces.findIndex((f) => f.normal[2] > 0.9);
     window.whittle.useApp.setState({ selection: [{ kind: "face", bodyId: body.id, index: top, at: body.faces[top].center }] });
-    const cmd = (await import("/src/state/commands.ts")).COMMANDS.find((c) => c.id === "fillet");
+    const cmd = window.whittle.commands.find((c) => c.id === "fillet");
     cmd.run(S());
     await new Promise((r) => setTimeout(r, 300));
     const fromFace = S().doc.features.filter((f) => f.type === "fillet").at(-1).edges.length;
