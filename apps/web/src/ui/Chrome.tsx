@@ -127,19 +127,30 @@ function ToolButton({ c, active, big }: { c: Command; active?: boolean; big?: bo
 }
 
 /** Every command of a group, with hints, in a dropdown that stays inside the window and scrolls. */
-function GroupMenu({ label, ids }: { label: string; ids: string[] }) {
+function GroupMenu({ label, ids, asTool }: { label: string; ids: string[]; asTool?: boolean }) {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const state = useApp();
   return (
     <div className="groupmenu">
-      <button ref={setAnchor} className={`groupmenu__btn ${open ? "is-open" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">
-        {label}
-        <Icon name="chevronDown" size={12} />
-      </button>
+      {asTool ? (
+        <button ref={setAnchor} className={`tool tool--menu ${open ? "is-active" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" title={`${label}: ${ids.length} tools`}>
+          <Icon name={commandById(ids.find((i) => !i.startsWith("#"))!).icon ?? "more"} size={20} />
+          <span className="tool__label">
+            {label}
+            <Icon name="chevronDown" size={10} />
+          </span>
+        </button>
+      ) : (
+        <button ref={setAnchor} className={`groupmenu__btn ${open ? "is-open" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu">
+          {label}
+          <Icon name="chevronDown" size={12} />
+        </button>
+      )}
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} className="groupmenu__pop" placement="bottom-start">
         <div role="menu">
           {ids.map((id) => {
+            if (id.startsWith("#")) return <div key={id} className="groupmenu__head">{id.slice(1)}</div>;
             const c = commandById(id);
             const enabled = isAvailable(c, state);
             return (
@@ -169,6 +180,14 @@ function GroupMenu({ label, ids }: { label: string; ids: string[] }) {
 }
 
 function Group({ label, ids, more, activeId }: { label: string; ids: string[]; more?: string[]; activeId?: string }) {
+  // No visible tools: the whole group is one button that opens its list.
+  if (!ids.length && more) {
+    return (
+      <div className="toolgroup toolgroup--menu" role="group" aria-label={label}>
+        <GroupMenu label={label} ids={more} asTool />
+      </div>
+    );
+  }
   return (
     <div className="toolgroup" role="group" aria-label={label}>
       <div className="toolgroup__tools">
@@ -189,11 +208,11 @@ function toolsFor(profile: Profile | null) {
   const pro = profile === "engineer" || profile === "designer";
   return {
     create: pro
-      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["pipe", "curve-3d", "curve-edges", "curve-faces", "curve-project", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] }
-      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "loft", "curve-3d", "curve-edges", "curve-faces", "curve-project", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] },
+      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["#More solids", "pipe", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "#3D curves", "curve-3d", "curve-edges", "curve-faces", "curve-project", "#Bring in", "import"] }
+      : { primary: ["extrude", "revolve", "hole"], more: ["#More solids", "sweep", "loft", "pipe", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "#3D curves", "curve-3d", "curve-edges", "curve-faces", "curve-project", "#Bring in", "import"] },
     modify: pro
-      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["press-pull", "replace-face", "delete-face", "align", "split-faces", "make-component", "ground", "joint", "combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
-      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["press-pull", "replace-face", "delete-face", "align", "split-faces", "make-component", "ground", "joint", "combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
+      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "#Bodies", "combine", "mirror", "pattern", "split", "offset", "scale", "align", "#Edges", "fillet-all", "chamfer-all", "#Assembly", "make-component", "ground", "joint"] }
+      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Bodies", "combine", "mirror", "pattern", "split", "offset", "scale", "align", "#Edges", "fillet-all", "chamfer-all", "#Assembly", "make-component", "ground", "joint"] },
   };
 }
 
@@ -216,7 +235,7 @@ export function Toolbar() {
           <span className="pill pill--accent">Sketch</span>
         </div>
         <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic", "tool-cspline", "tool-earc", "tool-tan2c", "tool-tan3c"]} activeId={active} />
-        <Group label="Special" ids={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg", "import-dxf"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
+        <Group label="Insert" ids={[]} more={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg", "import-dxf", "calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} />
         <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-stretch", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
         <Group
           label="Constrain"
@@ -240,11 +259,11 @@ export function Toolbar() {
         <span className="toolgroup__label">Start</span>
       </div>
       <Group label="Create" ids={create.primary} more={create.more} />
-      <Group label="Construct" ids={["plane", "construct-midplane", "construct-axisCyl", "construct-pointVertex"]} more={["construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
-      <Group label="Surface" ids={["surface-patch", "surface-stitch", "surface-thicken", "surface-trim"]} more={["surface-ruled", "surface-offset", "surface-untrim", "surface-extend", "surface-unstitch", "surface-merge", "surface-reverse"]} />
-      <Group label="Shapes" ids={["box", "cylinder", "sphere"]} more={["cone", "torus", "tube", "spring"]} />
+      <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
+      <Group label="Surface" ids={[]} more={["surface-patch", "surface-stitch", "surface-thicken", "surface-trim", "surface-ruled", "surface-offset", "surface-untrim", "surface-extend", "surface-unstitch", "surface-merge", "surface-reverse"]} />
+      <Group label="Shapes" ids={[]} more={["box", "cylinder", "sphere", "cone", "torus", "tube", "spring"]} />
       <Group label="Modify" ids={modify.primary} more={modify.more} />
-      <Group label="Inspect" ids={["measure", "section"]} more={["interference", "clear-interference", "min-radius", "curvature", "accessibility", "component-colors", "overhang", "draft-analysis", "zebra", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />
+      <Group label="Inspect" ids={["measure", "section"]} more={["#Check the model", "interference", "clear-interference", "min-radius", "overhang", "draft-analysis", "#Surface quality", "curvature", "zebra", "accessibility", "#Look", "component-colors", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />
       <div className="toolbar__spacer" />
       <div className="toolgroup toolgroup--feature">
         <div className="toolgroup__tools">
