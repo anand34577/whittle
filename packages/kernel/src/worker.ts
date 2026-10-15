@@ -8,7 +8,9 @@ import wasmUrl from "replicad-opencascadejs/wasm?url";
 import sansUrl from "@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff?url";
 import boldUrl from "@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-700-normal.woff?url";
 import { loadFont, setOC } from "replicad";
+import gcsWasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
 import { Builder } from "./build";
+import { initSolver } from "./solver";
 import { exportShapes } from "./exporters";
 import type { KernelRequest, KernelResponse } from "./protocol";
 
@@ -30,6 +32,7 @@ async function boot() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const oc = await (opencascade as any)({ locateFile: () => wasmUrl });
   setOC(oc);
+  await initSolver(gcsWasmUrl);
   // Fonts for sketch text. Failing to load them only disables text.
   await Promise.all(
     [

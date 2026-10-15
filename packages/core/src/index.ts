@@ -7,3 +7,4 @@ export * from "./sketch";
 export * from "./history";
 export * from "./file";
 export * from "./refs";
+export * from "./constraints";

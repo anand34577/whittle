@@ -1304,3 +1304,27 @@ textarea::placeholder {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Quick-value buttons under a prompt field. */
+.quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.quick__btn {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.quick__btn:hover {
+  color: var(--text);
+  border-color: var(--text-3);
+}
+.quick__btn.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}

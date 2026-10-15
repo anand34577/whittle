@@ -107,6 +107,15 @@ function PromptView({ req }: { req: PromptRequest }) {
             </span>
             {touched && error && <small className="tf__error">{error}</small>}
           </label>
+          {req.choices && (
+            <div className="quick" role="group" aria-label="Common values">
+              {req.choices.map((c) => (
+                <button key={c.label} type="button" className={`quick__btn ${value === c.value ? "is-on" : ""}`} onClick={() => setValue(c.value)}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <footer className="dialog__foot">
           <button type="button" className="btn btn--ghost" onClick={() => done(null)}>

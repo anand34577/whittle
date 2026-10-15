@@ -10,7 +10,7 @@ export type ResolvedEntity =
   | { id: string; type: "circle"; cx: number; cy: number; r: number; construction: boolean; mode: string }
   | { id: string; type: "polygon"; cx: number; cy: number; r: number; sides: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "slot"; cx: number; cy: number; length: number; width: number; angle: number; construction: boolean; mode: string }
-  | { id: string; type: "polyline"; points: Vec2[]; corner: number; smooth: boolean; open: boolean; construction: boolean; mode: string }
+  | { id: string; type: "polyline"; points: Vec2[]; arcs: boolean[]; corner: number; smooth: boolean; open: boolean; construction: boolean; mode: string }
   | { id: string; type: "ellipse"; cx: number; cy: number; rx: number; ry: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "text"; x: number; y: number; text: string; size: number; bold: boolean; angle: number; construction: boolean; mode: string }
   | { id: string; type: "gear"; cx: number; cy: number; teeth: number; module: number; bore: number; construction: boolean; mode: string };
@@ -77,7 +77,13 @@ export function resolveEntity(e: SketchEntity, ev: Evaluator): ResolvedEntity {
       const corner = e.corner ? L(e.corner, "Corner radius") : 0;
       if (corner < 0) throw new Error("Corner radius can't be negative");
       if (!e.open && points.length < 3) throw new Error("A closed outline needs at least three points");
-      return { ...common, type: "polyline", points, corner, smooth: !!e.smooth, open: !!e.open };
+      const arcs = e.points.map((p) => p[2] === "arc");
+      arcs.forEach((a, i) => {
+        if (!a) return;
+        if (i === 0 || (e.open && i === points.length - 1)) throw new Error("An arc needs a point before and after it");
+        if (arcs[i - 1] || arcs[(i + 1) % arcs.length]) throw new Error("Two arc points can't follow each other; put a corner point between them");
+      });
+      return { ...common, type: "polyline", points, arcs, corner, smooth: !!e.smooth, open: !!e.open };
     }
     case "ellipse": {
       const rx = L(e.rx, "Radius X");
@@ -176,11 +182,12 @@ export function entityOutline(r: ResolvedEntity, segments = 64): Vec2[] {
         return [q[0] + r.cx, q[1] + r.cy] as Vec2;
       });
     }
-    case "polyline":
-      if (r.open) return r.smooth && r.points.length >= 3 ? smoothOpen(r.points, 12) : r.points;
-      if (r.smooth && r.points.length >= 3) return smoothClosed(r.points, 12);
-      if (r.corner > 0 && r.points.length >= 3) return roundCorners(r.points, r.corner);
+    case "polyline": {
+      if (r.smooth && r.points.length >= 3) return r.open ? smoothOpen(r.points, 12) : smoothClosed(r.points, 12);
+      if (r.arcs.some(Boolean)) return polylinePath(r.points, r.arcs, !r.open);
+      if (!r.open && r.corner > 0 && r.points.length >= 3) return roundCorners(r.points, r.corner);
       return r.points;
+    }
     case "ellipse": {
       const pts: Vec2[] = [];
       for (let i = 0; i < segments; i++) {
@@ -222,6 +229,83 @@ function rotAbout(p: Vec2, c: Vec2, a: number): Vec2 {
   if (!a) return p;
   const q = rot([p[0] - c[0], p[1] - c[1]], a);
   return [q[0] + c[0], q[1] + c[1]];
+}
+
+/** Center of the circle through three points, or null when they're in a line. */
+export function circleThrough(a: Vec2, m: Vec2, b: Vec2): Vec2 | null {
+  const d = 2 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]));
+  const span = Math.hypot(b[0] - a[0], b[1] - a[1]) + Math.hypot(m[0] - a[0], m[1] - a[1]);
+  if (Math.abs(d) < 1e-9 * Math.max(1, span * span)) return null;
+  const sa = a[0] * a[0] + a[1] * a[1];
+  const sm = m[0] * m[0] + m[1] * m[1];
+  const sb = b[0] * b[0] + b[1] * b[1];
+  return [(sa * (m[1] - b[1]) + sm * (b[1] - a[1]) + sb * (a[1] - m[1])) / d, (sa * (b[0] - m[0]) + sm * (a[0] - b[0]) + sb * (m[0] - a[0])) / d];
+}
+
+/** Points along the arc from `a` through `m` to `b`, without `b`. */
+export function arcPoints(a: Vec2, m: Vec2, b: Vec2, segments = 16): Vec2[] {
+  const c = circleThrough(a, m, b);
+  if (!c) return [a];
+  const r = Math.hypot(a[0] - c[0], a[1] - c[1]);
+  const ang = (p: Vec2) => Math.atan2(p[1] - c[1], p[0] - c[0]);
+  const ccw = (x: number) => ((x % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  const a0 = ang(a);
+  const toB = ccw(ang(b) - a0);
+  const sweep = ccw(ang(m) - a0) < toB ? toB : toB - 2 * Math.PI;
+  const out: Vec2[] = [];
+  for (let k = 0; k < segments; k++) {
+    const t = a0 + (sweep * k) / segments;
+    out.push([c[0] + r * Math.cos(t), c[1] + r * Math.sin(t)]);
+  }
+  return out;
+}
+
+/** An outline or path whose "arc" points bend the segment around them. */
+export function polylinePath(pts: Vec2[], arcs: boolean[], closed: boolean, segments = 16): Vec2[] {
+  const n = pts.length;
+  const out: Vec2[] = [];
+  const end = closed ? n : n - 1;
+  for (let i = 0; i < end; ) {
+    const j = (i + 1) % n;
+    if (arcs[j] && (closed || j < n - 1)) {
+      out.push(...arcPoints(pts[i]!, pts[j]!, pts[(j + 1) % n]!, segments));
+      i += 2;
+    } else {
+      out.push(pts[i]!);
+      i += 1;
+    }
+  }
+  if (!closed) out.push(pts[n - 1]!);
+  return out;
+}
+
+/**
+ * Offset a polyline sideways by `d` (positive = left of the direction of travel),
+ * with mitred corners. For a counter-clockwise outline, left is inside.
+ */
+export function offsetPoints(pts: Vec2[], d: number, closed: boolean): Vec2[] {
+  const n = pts.length;
+  const left = (a: Vec2, b: Vec2): Vec2 => norm2([a[1] - b[1], b[0] - a[0]]);
+  return pts.map((p, i) => {
+    const prev = closed || i > 0 ? pts[(i - 1 + n) % n]! : null;
+    const next = closed || i < n - 1 ? pts[(i + 1) % n]! : null;
+    const n1 = prev ? left(prev, p) : null;
+    const n2 = next ? left(p, next) : null;
+    if (!n1 || !n2) {
+      const k = (n1 ?? n2)!;
+      return [p[0] + k[0] * d, p[1] + k[1] * d];
+    }
+    const m = norm2([n1[0] + n2[0], n1[1] + n2[1]]);
+    // ponytail: miter capped at 5x for very sharp corners; a true offset would round them.
+    const k = d / Math.max(m[0] * n1[0] + m[1] * n1[1], 0.2);
+    return [p[0] + m[0] * k, p[1] + m[1] * k];
+  });
+}
+
+/** A closed outline around an open path: a wall `t` thick, centered or to one side. */
+export function thickenPath(pts: Vec2[], t: number, side: "center" | "inside" | "outside" = "center"): Vec2[] {
+  const [l, r] = side === "center" ? [t / 2, -t / 2] : side === "inside" ? [t, 0] : [0, -t];
+  return [...offsetPoints(pts, l, false), ...offsetPoints(pts, r, false).reverse()];
 }
 
 /** Closed Catmull-Rom curve through the points. */
@@ -408,7 +492,8 @@ export function entitySnapPoints(r: ResolvedEntity): { p: Vec2; kind: "end" | "m
       break;
     case "polyline":
       r.points.forEach((p, i) => {
-        out.push({ p, kind: "end" });
+        out.push({ p, kind: r.arcs[i] ? "mid" : "end" });
+        if (r.arcs[i] || r.arcs[(i + 1) % r.points.length]) return;
         if (r.open && i === r.points.length - 1) return;
         const q = r.points[(i + 1) % r.points.length]!;
         out.push({ p: [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], kind: "mid" });

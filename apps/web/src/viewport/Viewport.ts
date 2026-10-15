@@ -12,7 +12,7 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import type { BodyMeta, Id, OriginPlane, Vec2, Vec3 } from "@whittle/core";
+import type { BodyMeta, Id, OriginPlane, SketchImage, Vec2, Vec3 } from "@whittle/core";
 import type { BodyResult, SketchFrame } from "@whittle/kernel";
 import type { Pick, ViewSettings } from "../state/store";
 import { lookById } from "./looks";
@@ -34,8 +34,13 @@ export interface SketchDrawable {
   active: boolean;
   /** Triangles of the solid regions (world space), drawn as a soft fill. */
   fill?: Float32Array;
-  shapes: { id: Id; pts: Vec2[]; closed: boolean; construction: boolean; selected: boolean; hovered: boolean }[];
+  shapes: { id: Id; pts: Vec2[]; closed: boolean; construction: boolean; selected: boolean; hovered: boolean; tone?: SketchTone }[];
+  /** Solver points of the sketch being edited. */
+  markers?: { p: Vec2; tone: SketchTone; selected: boolean; hovered: boolean }[];
 }
+
+/** How well constraint-driven geometry is defined: can still move, fully defined, or in a conflict. */
+export type SketchTone = "free" | "defined" | "bad";
 
 export interface SketchPointerEvent {
   type: "move" | "down" | "up" | "leave";
@@ -160,6 +165,8 @@ export class Viewport {
   private world = new THREE.Group();
   private overlay = new THREE.Group();
   private sketchGroup = new THREE.Group();
+  private imageGroup = new THREE.Group();
+  private textures = new Map<string, THREE.Texture>();
   private previewGroup = new THREE.Group();
   private highlightGroup = new THREE.Group();
   private grid = new THREE.Group();
@@ -211,7 +218,7 @@ export class Viewport {
     pmrem.dispose();
 
     this.persp.up.set(0, 0, 1);
-    this.scene.add(this.shadow, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.grid, this.planes, this.hemi, this.persp, this.orthoCam);
+    this.scene.add(this.shadow, this.imageGroup, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.grid, this.planes, this.hemi, this.persp, this.orthoCam);
     this.persp.add(this.headlight);
     this.headlight.position.set(0.3, 0.6, 1);
     const orthoLight = this.headlight.clone();
@@ -763,7 +770,8 @@ export class Viewport {
         const geo = new LineSegmentsGeometry();
         geo.setPositions(this.segments(pts, sh.closed));
         const t = this.theme;
-        const color = sh.selected ? t.select : sh.hovered ? t.hover : sh.construction ? t.construction : s.active ? t.sketchActive : t.sketch;
+        const toned = sh.tone === "bad" ? t.conflict : sh.tone === "defined" ? t.defined : undefined;
+        const color = sh.selected ? t.select : sh.hovered ? t.hover : sh.tone === "bad" ? t.conflict : sh.construction ? t.construction : toned ?? (s.active ? t.sketchActive : t.sketch);
         const line = new LineSegments2(geo, this.lineMat(color, s.active ? (sh.selected ? 2.6 : 1.9) : 1.3, { dashed: sh.construction, depthTest: !s.active }));
         if (sh.construction) line.computeLineDistances();
         line.renderOrder = s.active ? 8 : 2;
@@ -771,6 +779,61 @@ export class Viewport {
         this.sketchGroup.add(line);
       }
       if (!s.active) this.sketchHit.push({ id: s.id, pts: hit });
+      if (s.markers?.length) {
+        const t = this.theme;
+        const pos: number[] = [];
+        const col: number[] = [];
+        const c = new THREE.Color();
+        for (const m of s.markers) {
+          pos.push(...toWorld(m.p));
+          c.set(m.selected ? t.select : m.hovered ? t.hover : m.tone === "bad" ? t.conflict : m.tone === "defined" ? t.defined : t.sketchActive);
+          col.push(c.r, c.g, c.b);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, vertexColors: true, depthTest: false, toneMapped: false }));
+        pts.renderOrder = 9;
+        pts.raycast = () => {};
+        this.sketchGroup.add(pts);
+      }
+    }
+    this.invalidate();
+  }
+
+  /** Reference pictures lying on their sketch planes, behind the sketch lines. */
+  setReferenceImages(list: { frame: SketchFrame; image: SketchImage; active: boolean }[]) {
+    for (const m of this.imageGroup.children as THREE.Mesh[]) {
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+    this.imageGroup.clear();
+    const used = new Set<string>();
+    for (const { frame: f, image: im, active } of list) {
+      used.add(im.src);
+      let tex = this.textures.get(im.src);
+      if (!tex) {
+        tex = new THREE.TextureLoader().load(im.src, () => this.invalidate());
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 8;
+        this.textures.set(im.src, tex);
+      }
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(im.width, im.width * im.aspect),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: active ? im.opacity : im.opacity * 0.6, side: THREE.DoubleSide, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2 }),
+      );
+      const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(...f.xDir), new THREE.Vector3(...f.yDir), new THREE.Vector3(...f.normal)).setPosition(...f.origin);
+      const local = new THREE.Matrix4().makeRotationZ((im.rotation * Math.PI) / 180).setPosition(im.x, im.y, 0);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.multiplyMatrices(basis, local);
+      mesh.renderOrder = -1;
+      mesh.raycast = () => {};
+      this.imageGroup.add(mesh);
+    }
+    for (const [src, tex] of this.textures) {
+      if (used.has(src)) continue;
+      tex.dispose();
+      this.textures.delete(src);
     }
     this.invalidate();
   }

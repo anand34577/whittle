@@ -132,8 +132,9 @@ The toolbar turns orange-tinted and shows sketch tools:
 | Group | Tools |
 |---|---|
 | Draw | Line, Rectangle, Circle, Ellipse, Polygon, Slot |
-| Special | Text, Gear, Import SVG (menu adds: Export sketch as SVG, Export sketch as DXF) |
+| Special | Text, Gear, Picture to trace, Import SVG (menu adds: Calibrate picture, Flatten photo, Trace whole picture, Trace one area, Export sketch as SVG, Export sketch as DXF) |
 | Arrange | Select, Duplicate, Mirror, Rotate 90°, Construction (menu adds: Mirror up/down, Delete) |
+| Constrain | Constrained lines (engineer and designer profiles also show Arc, Circle, Trim, Extend; the menu has all of them plus every constraint) |
 | | **Finish sketch** button on the right |
 
 ### Browser (left panel)
@@ -223,7 +224,8 @@ Every tool works with **two clicks** or **press, drag, release**. While drawing,
 
 | Tool | Key | Input | Typed sizes | Editable fields |
 |---|---|---|---|---|
-| Line (outline) | L | Click each point; click the first point (or press Enter) to close; Backspace removes the last point | Length, then angle | Points; Smooth curve; Round corners |
+| Line (outline) | L | Click each point; click the first point (or press Enter) to close; **A** switches arcs on and off; Backspace removes the last point | Length, then angle | Points (each can be an **Arc** point); Smooth curve; Round corners |
+| Path (open line) | A | Like Line, but stays open; Enter finishes; **A** while drawing switches arcs on and off | Length, then angle | Points, Arc points, Smooth curve |
 | Rectangle | R | Two opposite corners | Width, Height | Width, Height, X, Y, Position from (Corner/Center), Rounded corners, Rotation |
 | Circle | C | Centre, then radius | Diameter | Diameter, Centre X, Y |
 | Ellipse | E | Centre, then a corner of its bounding box | X radius, Y radius | Radius X, Radius Y, Centre, Rotation |
@@ -238,6 +240,8 @@ Every tool works with **two clicks** or **press, drag, release**. While drawing,
 **Gears** are involute spur gears with a 20° pressure angle and standard proportions (addendum 1 × module, dedendum 1.25 × module). Two gears mesh when they share a module; their centre distance is module × (teeth A + teeth B) ÷ 2.
 
 **Outlines:** *Smooth curve* draws a closed spline through the points. *Round corners* rounds every corner with one radius.
+
+**Arcs:** while drawing an outline or path, press **A**. The next click sets where the arc ends and the click after that sets a point the arc passes through (a three-point arc). Press **A** again for straight lines. Clicking the first point as an arc's end closes the outline with an arc. In the panel, any point except the ends of a path can be switched to an **Arc** point: it becomes the middle of an arc between its neighbours.
 
 ### Snapping
 
@@ -262,12 +266,66 @@ If a hole touches its outline in two separate places (which would split the shap
 
 **X** toggles construction. Construction shapes are dashed guides for snapping only; they never become solid.
 
+### Constraint-driven sketching
+
+Beside the whole shapes above, a sketch can hold **solver geometry**: points, lines, arcs and circles that a
+constraint solver (FreeCAD's PlaneGCS, compiled to WebAssembly) positions from the relations you give it.
+Both kinds live in the same sketch, so the quick tools stay exactly as they were.
+
+| Tool | Use |
+|---|---|
+| Constrained line | Click points; click the first point to close the outline, or the last point again (or Enter) to stop. Clicking an existing point joins the lines there. Lines drawn level or upright get Horizontal / Vertical automatically. |
+| Constrained arc | Click the start, the end, then a point the arc passes through. |
+| Constrained circle | Click the center, then the radius (or type a diameter). |
+| Trim | Click the piece of a line, arc or circle to remove, between the nearest crossings. A circle crossed twice becomes an arc; a curve nothing crosses is deleted. Cut ends stay on the curve that cut them. |
+| Extend | Click near the end of a line or arc to stretch it to the next curve. |
+
+**Constraining.** With the Select tool, click geometry (Shift+click adds more; the origin and the X/Y axes can be
+picked too). The right panel lists every constraint that fits the selection:
+
+| Constraint | Applies to |
+|---|---|
+| Coincident | two points, or a point and a line / arc / circle |
+| Horizontal, Vertical | a line, or two points |
+| Parallel, Perpendicular | two lines |
+| Tangent | a line and an arc or circle, or two arcs / circles (where they share an end, the join is smooth) |
+| Equal | two lines (length), or two arcs / circles (radius) |
+| Fixed | anything: pins it where it is |
+| Symmetric | two points and a line (mirrored about it), or three points (the first two mirrored about the last one picked) |
+| Midpoint | a point and a line: the point sits at the line's middle (on an axis: anywhere along it) |
+| Collinear | two lines: both lie on one infinite line |
+| Distance | a line (its length), two points, a point and a line, or two parallel lines |
+| Radius | a circle or arc |
+| Angle | a line (from horizontal) or two lines |
+
+Dimensions (Distance, Radius, Angle) take a number or a **formula**, e.g. `width / 2`; changing the parameter
+re-solves the sketch and everything built from it. Edit or scrub a dimension in the panel's constraint list.
+
+**On the canvas.** Each dimension shows its value (or formula) beside what it measures; **double-click** it to edit.
+Relations show a small glyph next to each thing they relate: H, V, ∥ (parallel), ⊥ (perpendicular), = (equal),
+⌒ (tangent), ⌖ (fixed), ⇔ (symmetric), ½ (midpoint), ⋯ (collinear). Click a label or glyph to select that
+constraint (Shift+click adds to the selection), then Del removes it. Coincident constraints aren't labelled: shared
+points already show them.
+
+**How defined is it?** While you edit, geometry that can still move is drawn in the normal sketch colour and fully
+defined geometry turns **green**; the panel says how many degrees of freedom are left, or "Fully defined".
+Constraints that contradict each other turn the geometry and the constraints **red**, and the sketch shows a
+plain message naming them (for example "Over-constrained: Horizontal and Vertical can't all be true. Delete one of
+the red constraints."). Constraints that repeat what others already say are flagged the same way.
+
+**Dragging** a point or curve moves it; the solver keeps every constraint, so fully defined geometry stays put.
+
+**Solids.** Closed loops of solver lines and arcs become solid regions, with loops inside loops as holes, just like
+whole shapes; solver circles do too. Open chains are paths (for sweeps and thin walls), and construction lines can
+be revolve axes.
+
 ### Arrange tools (selected shape)
 
 | Action | Key | Result |
 |---|---|---|
 | Duplicate | Ctrl+D | Copy offset by +10, −10 and selected |
 | Rotate 90° | Shift+R | Rotates the shape about its own centre |
+| Offset | Shift+O | A copy grown outward (positive) or shrunk inward (negative). Sizes stay formulas of the original, so the offset follows later edits. Works on rectangles, circles, slots, ellipses, polygons and straight-sided outlines |
 | Mirror ↔ | | Mirrored copy across the sketch's vertical axis |
 | Mirror ↕ | | Mirrored copy across the sketch's horizontal axis |
 | Copies around origin | | *N* copies evenly spaced around the sketch origin (e.g. a bolt circle) |
@@ -275,6 +333,21 @@ If a hole touches its outline in two separate places (which would split the shap
 | Delete | Del | Removes the shape |
 
 These work on shapes whose positions are plain numbers. If a position comes from a formula, Whittle leaves it unchanged and explains why, so formulas are never overwritten. Dragging follows the same rule.
+
+### Pictures to trace over
+
+Put a photo, scan or drawing on the sketch plane and draw over it at true size. Use **Special ▸ Picture**, **paste** an image (Ctrl+V) while sketching, or **drop** an image file anywhere. Dropping one outside a sketch starts a new sketch on the ground (XY) plane with the picture on it. The picture sits behind the sketch lines and isn't geometry: moving or fading it never triggers a rebuild.
+
+| Step | How | Result |
+|---|---|---|
+| **Calibrate** | Click two points on the picture, type their real distance (quick picks: credit card, A4 short side, 100 mm ruler) | The picture is scaled about the first point, so that point stays put |
+| **Flatten photo** | Click the four corners of something rectangular of known size in the photo, in order around it, then choose its size (A4, US Letter, A3, credit card or your own `w x h`) | The photo is un-skewed (perspective correction) and scaled to true size in one step, centred on the origin. A phone photo of a part lying on a sheet of paper becomes a true-size plan |
+| **Trace all** | One click | Every dark shape on light paper (or light on dark: decided from the picture's border) becomes an outline. The threshold is chosen automatically (Otsu); edges are found to a fraction of a pixel (marching squares) and simplified. Round outlines become **exact circles**, ready for holes. Shapes inside shapes become holes, as usual |
+| **Trace one area** | Click inside one shape (or a gap) | Like a magic wand: only the clicked area and its holes are outlined, ignoring clutter around it |
+
+The panel also has the picture's **Width**, **X**, **Y**, **Rotate**, **Opacity**, **Show outside this sketch**, **Replace** and **Remove**. Pictures are stored inside the design (shrunk to at most 2400 px, JPEG).
+
+Tip for photos: shoot from above in even light, with the part on plain paper; flatten first, then trace one area.
 
 ### Finishing
 
@@ -303,8 +376,8 @@ A **Body** selector picks a specific target for Join, Cut or Keep overlap.
 
 | Feature | Key | How to start | Fields |
 |---|---|---|---|
-| **Extrude** | E | Uses the selected sketch, or the newest unused one. On a face sketch it defaults to Join | Profile, Distance, Direction (One side / Both sides), Flip, Result, Body |
-| **Revolve** | R | Same sketch rule | Axis (sketch vertical or horizontal), Angle (up to 360°), Result |
+| **Extrude** | E | Uses the selected sketch, or the newest unused one. On a face sketch it defaults to Join | Profile, Distance, Direction (One side / Symmetric / Two sides / **Through all**), Flip, **Thin wall** (wall thickness, Inside / Centered / Outside), Taper, Twist, Result, Body |
+| **Revolve** | R | Same sketch rule | Profile, Axis (sketch vertical, sketch horizontal, or **a line** drawn in the sketch), Angle (up to 360°), Result |
 | **Loft** | | Selected sketches (Shift-click several), or the two newest unused sketches. Click sketches to add or remove profiles | Profiles in order, Add, Straight sides (ruled), Result. Each profile must be a single closed shape |
 | **Hole** | D | Select a flat face (the click point becomes the first hole), or click a face after starting. Each click on the face adds a hole | Type (Simple / Counterbore / Countersink), Diameter, Through all or Depth, Head Ø, Head depth (counterbore), position of each hole (X, Y) |
 | **Fillet** | F | Select edges first, or click them after starting (click again to deselect) | Radius |
@@ -312,9 +385,15 @@ A **Body** selector picks a specific target for Join, Cut or Keep overlap.
 | **Shell** | | Click the face(s) to remove (the open side) | Wall thickness |
 | **Move / Copy** | M | Selected body or the newest one; click a body to change it | X, Y, Z move; Rotate around X/Y/Z by Angle (about the body's own centre); Keep the original (make a copy) |
 | **Combine** | J | Selected bodies (first = target, rest = tools). Click bodies to set the target, then toggle tools | Operation (Join / Cut / Keep overlap), Target, Tools, Keep tool bodies |
-| **Mirror** | | Selected body or the newest | Body, Mirror plane (YZ, XZ, XY), Merge with the original |
-| **Pattern** | | Selected body or the newest | Type (In a row / Around an axis), Direction or axis (X, Y, Z), Count (2–200), Spacing or Total angle, Merge copies |
+| **Mirror** | | Selected body or the newest | Body, Mirror plane (YZ, XZ, XY), Plane offset, Merge with the original |
+| **Pattern** | | Selected body or the newest | Type (In a row / Around an axis), Direction or axis (X, Y, Z), Count (2–200), Spacing or Total angle, **Second direction** (grid: direction, count, spacing; up to 400 copies), Merge copies |
 | **Import** | | Import STEP / STL, or drop a file | Scale (e.g. 25.4 converts a part modelled in inches) |
+
+**Thin wall** extrudes a band along every outline instead of filling it: enclosures, frames, rings and cups in one step. Open paths become **ribs and webs**: draw a path and give it a wall thickness. *Inside* grows the wall into the shape (left of a path), *Outside* away from it.
+
+**Through all** goes through every body in the chosen direction, so a hole or slot stays a through cut however thick the part becomes.
+
+**Revolve around a line:** draw a straight path (or a construction line) in the profile's sketch, choose *Axis: A line* and pick it. Rings, pulleys and grooves no longer need their profile placed on the sketch axis.
 
 **Hole details:**
 
@@ -550,7 +629,7 @@ A ZIP file containing:
 | `document.json` | The full design: parameters, features, body metadata, rollback position, timestamps |
 | `thumbnail.png` | 256 px preview image |
 
-The format is plain JSON, open and readable. Older files are migrated automatically; files from a newer version are refused with a clear message instead of being misread. Imported STEP/STL files are embedded in the design, so a `.whittle` file is self-contained.
+The format is plain JSON, open and readable. Format 2 (Whittle 0.4) adds optional `geometry` and `constraints` to sketches; positions there are millimetres (the solver's starting guesses), and dimension values are expressions. Older files are migrated automatically; files from a newer version are refused with a clear message instead of being misread. Imported STEP/STL files are embedded in the design, so a `.whittle` file is self-contained.
 
 ### Saving and opening
 
@@ -580,6 +659,7 @@ The format is plain JSON, open and readable. Older files are migrated automatica
 | STEP (`.step`, `.stp`) | Create ▸ Import, or drag and drop | Exact geometry, becomes a body |
 | STL | Same | Triangles are sewn into a solid and flat areas are merged into clean faces. Limit: 40,000 triangles |
 | SVG | In a sketch: Special ▸ Import SVG | Closed paths become editable sketch outlines; you choose the width |
+| Pictures (PNG, JPEG, WebP, GIF, BMP) | In a sketch: Special ▸ Picture, paste, or drop anywhere | A reference picture to calibrate, flatten and trace (see *Pictures to trace over*) |
 
 Files up to 40 MB. Each import has a **Scale** field.
 
@@ -648,6 +728,8 @@ Press **?** in the app for the full list.
 | G | Gear |
 | V | Select |
 | X | Toggle construction |
+| Shift+click | Add solver geometry to the selection (for constraints) |
+| Del | Delete the selected shape, geometry or constraint |
 | Ctrl+D | Duplicate shape |
 | Shift+R | Rotate shape 90° |
 | 0–9 | Type a size while drawing |
@@ -687,7 +769,7 @@ Press **?** in the app for the full list.
 ```
 packages/core      Document model, expressions, parameters, sketch geometry, history, file format (pure TypeScript)
 packages/kernel    Geometry: OpenCascade (WASM, via replicad) in a Web Worker; rebuild engine;
-                   stable references; exporters; STL importer
+                   stable references; exporters; STL importer; sketch constraint solving (PlaneGCS)
 apps/web           React 19 UI, Three.js viewport, sketch tools, commands, styling
 apps/desktop       Tauri 2 desktop shell (Rust)
 apps/server        Optional Rust/Axum server: serves the app and stores designs
@@ -698,6 +780,7 @@ docs/              Architecture notes and this reference
 | Layer | Technology |
 |---|---|
 | Geometry kernel | OpenCascade (OCCT) compiled to WebAssembly, used through replicad; runs in a Web Worker |
+| Sketch solver | PlaneGCS (FreeCAD's 2D constraint solver) compiled to WebAssembly (`@salusoft89/planegcs`); runs in the same worker as part of each rebuild |
 | UI | React 19, Zustand (state), Immer (immutable edits and undo patches) |
 | 3D view | Three.js with on-demand rendering, fat lines for edges, raycast and screen-space picking |
 | Language / build | TypeScript (strict), Vite, Vitest |
@@ -716,7 +799,7 @@ Newer rebuild requests replace older pending ones.
 
 **Server API** (optional): `GET /api/health`; `GET /api/designs`; `GET`, `PUT`, `DELETE /api/designs/{id}`. Uploads are checked to be ZIP files and written atomically. An optional bearer token protects the API.
 
-**Licensing:** Whittle is MPL-2.0. OpenCascade (LGPL) ships as a separate, replaceable WASM file. See `THIRD_PARTY_LICENSES.md`.
+**Licensing:** Whittle is MPL-2.0. OpenCascade and PlaneGCS (both LGPL) ship as separate, replaceable WASM files. See `THIRD_PARTY_LICENSES.md`.
 
 ---
 
@@ -724,9 +807,12 @@ Newer rebuild requests replace older pending ones.
 
 | Suite | Command | Covers |
 |---|---|---|
-| Unit and geometry | `npm test` | 42 tests: expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part |
+| Unit and geometry | `npm test` | 106 tests, including constraint solving (solved profiles extrude to exact volumes, a dimension or parameter change re-solves, named conflicts, tangent slots, revolve about a construction line) and trim / extend; also expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part |
 | Core browser flow | `node tests/e2e/smoke.mjs [url]` | Start screen, template, parameter change, sketch with typed size, extrude, fillet, 3MF export, theme |
 | Feature tour | `node tests/e2e/features.mjs [url]` | Parts library, vase and print check, section, X-ray, new sketch tools, text, arrange tools, extrude, counterbore hole, measure, radial menu, box + combine cut, move copy, image export |
+| Modelling depth | `node tests/e2e/modeling.mjs [url]` | Arcs drawn with the mouse, offset, thin extrude, through all, grid, offset mirror, revolve about a line, ribs |
+| Constraints | `node tests/e2e/constraints.mjs [url]` | Solver lines drawn with the mouse, automatic Horizontal/Vertical, a distance typed as a formula, degrees of freedom, fully defined (green), a named conflict (red), the `constrain_sketch` API, a parameter change re-solving the extrusion, trimming a circle |
+| Pictures | `node tests/e2e/pictures.mjs [url]` | Add a picture, trace all (exact circles), trace one area, calibrate, flatten a photo, extrude the traced shapes |
 
 Both browser suites pass against the dev server and the production build with no console errors.
 
@@ -734,7 +820,7 @@ Both browser suites pass against the dev server and the production build with no
 
 ## 19. Known limitations
 
-- **Sketches** have no constraints yet (coincident, tangent, equal). Arcs as separate entities and trim/offset aren't available.
+- **Sketch constraints** work on solver geometry (points, lines, arcs, circles), not on whole shapes such as rectangles or text; there are no symmetric, midpoint or collinear constraints yet (use two Coincident-on-line constraints for collinear). Outlines where three or more lines meet at one point are treated as open paths. Sketches with more than 80 points are coloured as a whole rather than piece by piece.
 - **Not yet available:** sweep, threads, draft, thicken and split.
 - **Construction geometry:** only origin planes, face planes and offsets; no angled planes or axes.
 - **Timeline:** steps can't be reordered.
@@ -754,7 +840,7 @@ Both browser suites pass against the dev server and the production build with no
 |---|---|---|
 | 0. Spike | OCCT in a worker; sketch → extrude → fillet → edit survives | Done |
 | 1. Foundations | Design system, document model, undo, rebuild cache, viewport, file format | Done |
-| 2. Sketcher | Tools, snapping, typed sizes, text, gears, splines, arrange ✅ · constraints (PlaneGCS), arcs, trim | In progress |
+| 2. Sketcher | Tools, snapping, typed sizes, text, gears, splines, arrange, arcs, constraints (PlaneGCS) with DOF colouring, trim / extend | Done |
 | 3. Part features | Extrude, revolve, loft, holes, fillet, chamfer, shell, move, combine, patterns ✅ · sweep, threads, draft | In progress |
 | 4. I/O & polish | Export, STEP/STL import, measure, section, print check, parts library | Done |
 | 5. Beta 0.9 | Signed installers, auto-update, docs site, installable web app | Next |

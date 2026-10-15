@@ -15,6 +15,9 @@ export interface ViewportTheme {
   sketch: string;
   sketchActive: string;
   construction: string;
+  /** Fully defined sketch geometry, and geometry in a constraint conflict. */
+  defined: string;
+  conflict: string;
   plane: string;
   envIntensity: number;
 }
@@ -35,6 +38,8 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     sketch: "#d9d2c3",
     sketchActive: "#f2ecdf",
     construction: "#8a857a",
+    defined: "#7ccf8a",
+    conflict: "#ff6b5e",
     plane: "#7fd0f0",
     envIntensity: 0.55,
   },
@@ -53,6 +58,8 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     sketch: "#3d3931",
     sketchActive: "#1b1916",
     construction: "#9a9488",
+    defined: "#2f8a4a",
+    conflict: "#c8332b",
     plane: "#2f7fb8",
     envIntensity: 0.75,
   },
@@ -71,6 +78,8 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     sketch: "#cfd8ea",
     sketchActive: "#f2f6ff",
     construction: "#7d879c",
+    defined: "#7ccf8a",
+    conflict: "#ff6b5e",
     plane: "#6fc8ff",
     envIntensity: 0.5,
   },
@@ -89,6 +98,8 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     sketch: "#ffffff",
     sketchActive: "#ffffff",
     construction: "#9fb8dc",
+    defined: "#7ccf8a",
+    conflict: "#ff6b5e",
     plane: "#7fe8ff",
     envIntensity: 0.6,
   },
@@ -107,6 +118,8 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     sketch: "#e2e2e5",
     sketchActive: "#ffffff",
     construction: "#8c8d93",
+    defined: "#7ccf8a",
+    conflict: "#ff6b5e",
     plane: "#5fb7ff",
     envIntensity: 0.6,
   },
@@ -125,6 +138,8 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     sketch: "#ffffff",
     sketchActive: "#ffffff",
     construction: "#a6a6a6",
+    defined: "#7ccf8a",
+    conflict: "#ff6b5e",
     plane: "#00e5ff",
     envIntensity: 0.7,
   },

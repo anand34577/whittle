@@ -91,6 +91,9 @@ jobs:
           node tests/e2e/smoke.mjs http://localhost:4173/ test-results/smoke
           node tests/e2e/features.mjs http://localhost:4173/ test-results/features
           node tests/e2e/advanced.mjs http://localhost:4173/ test-results/advanced
+          node tests/e2e/modeling.mjs http://localhost:4173/ test-results/modeling
+          node tests/e2e/constraints.mjs http://localhost:4173/ test-results/constraints
+          node tests/e2e/pictures.mjs http://localhost:4173/ test-results/pictures
       - name: Self-hosted server (accounts, storage, versions)
         run: |
           cargo build --locked --manifest-path apps/server/Cargo.toml

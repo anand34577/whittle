@@ -4,7 +4,7 @@
  *   - import an SVG (logos, lettering, traced outlines) as editable sketch shapes
  */
 import { promptDialog } from "./dialogs";
-import { type Evaluator, type ResolvedEntity, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, entityLoops, resolveEntity, trim, uid } from "@whittle/core";
+import { type Evaluator, type ResolvedEntity, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
 import { exportText } from "./files";
 import { findFeature, sketchMutate, toast, useApp } from "./store";
 
@@ -118,7 +118,9 @@ export async function exportSketch(sketchId: string, format: "svg" | "dxf") {
   const { doc } = useApp.getState();
   const sk = findFeature(doc, sketchId, "sketch");
   if (!sk) return;
-  const { shapes, skipped } = sketchShapes(sk.entities, documentEvaluator(doc));
+  // Constraint-driven geometry exports at its solved positions.
+  const sol = useApp.getState().regen?.sketches.find((x) => x.id === sk.id)?.solution;
+  const { shapes, skipped } = sketchShapes(expandSketch(sk, sol).entities, documentEvaluator(doc));
   if (shapes.length === 0) return toast("info", "This sketch has no closed shapes to export.");
   await exportText(format === "svg" ? shapesToSvg(shapes, `${doc.name} - ${sk.name}`) : shapesToDxf(shapes), `${doc.name} - ${sk.name}`, format);
   if (skipped) toast("info", `${skipped} shape${skipped > 1 ? "s" : ""} (text, or with errors) couldn't be exported as outlines.`);

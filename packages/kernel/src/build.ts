@@ -16,15 +16,19 @@ import {
   type Id,
   type ResolvedEntity,
   type SketchFeature,
+  type SketchSolution,
   type Vec3,
   type WhittleDocument,
   activeEnd,
   createEvaluator,
   entityOutline,
+  expandSketch,
   frameAxes,
   planeOrigin,
   polygonInside,
+  polylinePath,
   resolveEntity,
+  thickenPath,
 } from "@whittle/core";
 import {
   type Drawing,
@@ -58,12 +62,14 @@ import {
 import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
+import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
 
 interface SketchBuilt {
   frame: SketchFrame;
-  /** The sketch feature itself (sweeps read open paths from it). */
+  /** The sketch feature itself, with solved geometry as entities (sweeps read open paths from it). */
   source?: SketchFeature;
+  solution?: SketchSolution;
   drawing: Drawing | null;
   error?: string;
   /** Triangles of the closed profile regions (world coordinates), for display. */
@@ -143,6 +149,23 @@ function polyDrawing(pts: [number, number][]): Drawing {
   return pen.close();
 }
 
+/** Lines and three-point arcs through the points (closed or open). */
+function penPath(pts: [number, number][], arcs: boolean[], closed: boolean): Drawing {
+  const n = pts.length;
+  let pen = draw(pts[0]);
+  for (let i = 0; i < (closed ? n : n - 1); ) {
+    const j = (i + 1) % n;
+    if (arcs[j] && (closed || j < n - 1)) {
+      pen = pen.threePointsArcTo(pts[(j + 1) % n]!, pts[j]!);
+      i += 2;
+    } else {
+      if (j !== 0) pen = pen.lineTo(pts[j]!);
+      i += 1;
+    }
+  }
+  return closed ? pen.close() : pen.done();
+}
+
 function entityDrawing(r: ResolvedEntity): Drawing {
   switch (r.type) {
     case "rect": {
@@ -163,7 +186,7 @@ function entityDrawing(r: ResolvedEntity): Drawing {
       return polyDrawing(entityOutline(r));
     case "polyline": {
       if (r.smooth && r.points.length >= 3) return drawPointsInterpolation(r.points, {}, { closeShape: true });
-      const d = polyDrawing(r.points);
+      const d = r.arcs.some(Boolean) ? penPath(r.points, r.arcs, true) : polyDrawing(r.points);
       if (r.corner > 0) {
         try {
           return d.fillet(r.corner);
@@ -419,7 +442,7 @@ export class Builder {
       if (f.type !== "sketch") continue;
       const s = prev.sketches.get(f.id);
       // Copy the fill: the cached array must survive being transferred to the UI.
-      if (s) sketches.push({ ...s.frame, fill: s.fill ? s.fill.slice() : undefined });
+      if (s) sketches.push({ ...s.frame, fill: s.fill ? s.fill.slice() : undefined, solution: s.solution });
     }
     let pickBodies: BodyResult[] | undefined;
     if (pickBefore) {
@@ -460,7 +483,7 @@ export class Builder {
 
     for (let i = 0; i < end; i++) {
       const f = doc.features[i]!;
-      const key = prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f));
+      const key = prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)); // reference images aren't geometry
       const cached = this.cache[i];
       let snap: Snapshot;
       if (cached && cached.key === key) {
@@ -540,13 +563,18 @@ export class Builder {
         }
         let drawing: Drawing | null = null;
         let error: string | undefined;
+        let solution: SketchSolution | undefined;
+        let source = f;
         try {
-          drawing = sketchDrawing(f, ev);
+          solution = solveSketch(f, ev);
+          if (solution) source = expandSketch(f, solution);
+          if (solution?.message) warning ??= solution.message;
+          drawing = sketchDrawing(source, ev);
           warning ??= sketchWarning;
         } catch (e) {
           error = describeError(f, e);
         }
-        sketches.set(f.id, { frame, drawing, error, source: f, fill: drawing ? profileFill(drawing, frame) : undefined });
+        sketches.set(f.id, { frame, drawing, error, source, solution, fill: drawing ? profileFill(drawing, frame) : undefined });
         if (error) throw new FeatureError(error);
         return warning;
       }
@@ -556,10 +584,13 @@ export class Builder {
         const sk = sketches.get(f.sketch);
         if (!sk) throw new FeatureError("The sketch for this feature is missing or failed.");
         if (sk.error) throw new FeatureError("Its sketch has an error: " + sk.error);
-        if (!sk.drawing) throw new FeatureError("The sketch has no closed shapes yet. Draw a rectangle or circle first.");
+        const thin = f.type === "extrude" && f.thin ? ev.num(f.thin, "length", "Wall thickness") : 0;
+        if (thin < 0) throw new FeatureError("The wall thickness must be greater than zero.");
+        const profile = thin > 0 && f.type === "extrude" ? thinProfile(sk, thin, f.thinSide ?? "center", ev) : sk.drawing;
+        if (!profile) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : "The sketch has no closed shapes yet. Draw a rectangle or circle first.");
         let tool: Shape3D;
         if (f.type === "extrude") {
-          const d = ev.num(f.distance, "length", "Distance");
+          const d = f.extent === "through" ? throughDistance(bodies, sk.frame) : ev.num(f.distance, "length", "Distance");
           if (Math.abs(d) < 1e-6) throw new FeatureError("The distance can't be zero.");
           const sign = f.flip ? -1 : 1;
           let frame = sk.frame;
@@ -579,18 +610,18 @@ export class Builder {
           if (Math.abs(taper) > 1e-9 && Math.abs(twist) > 1e-9) throw new FeatureError("Use either a taper or a twist on one extrusion, not both.");
           if (Math.abs(taper) >= Math.PI / 2 - 1e-3) throw new FeatureError("The taper must be between -89 and 89 degrees.");
           if (Math.abs(taper) > 1e-9) {
-            tool = clean(taperedExtrude(sk.drawing, frame, dist, taper));
+            tool = clean(taperedExtrude(profile, frame, dist, taper));
           } else {
-            const sketch = sk.drawing.clone().sketchOnPlane(planeFromFrame(frame));
+            const sketch = profile.clone().sketchOnPlane(planeFromFrame(frame));
             tool = clean((Math.abs(twist) > 1e-9 ? sketch.extrude(dist, { twistAngle: deg(twist) }) : sketch.extrude(dist)) as Shape3D);
           }
         } else {
           const angle = ev.num(f.angle, "angle", "Angle");
           if (Math.abs(angle) < 1e-6) throw new FeatureError("The angle can't be zero.");
           const d = Math.min(Math.abs(deg(angle)), 360) * Math.sign(angle);
-          const axis = f.axis === "x" ? sk.frame.xDir : sk.frame.yDir;
-          const sketch = sk.drawing.clone().sketchOnPlane(planeFromFrame(sk.frame));
-          tool = clean(sketch.revolve(axis, { origin: sk.frame.origin, angle: d }) as Shape3D);
+          const { origin, dir } = revolveAxis(f.axis, f.axisLine, sk, ev);
+          const sketch = profile.clone().sketchOnPlane(planeFromFrame(sk.frame));
+          tool = clean(sketch.revolve(dir, { origin, angle: d }) as Shape3D);
         }
         return applyOp(bodies, f.id, f.op, f.target, tool);
       }
@@ -793,7 +824,8 @@ export class Builder {
         const id = f.bodyId ?? lastBody(bodies);
         if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to mirror.");
         const src = bodies.get(id)!;
-        const copy = src.clone().mirror(f.plane);
+        const off = f.offset ? ev.num(f.offset, "length", "Offset") : 0;
+        const copy = src.clone().mirror(f.plane, scale(MIRROR_NORMALS[f.plane], off));
         if (f.merge) {
           bodies.set(id, clean(src.fuse(copy)));
         } else bodies.set(f.id, copy);
@@ -810,7 +842,16 @@ export class Builder {
         const copies: Shape3D[] = [];
         if (f.pattern === "linear") {
           const spacing = ev.num(f.spacing, "length", "Spacing");
-          for (let i = 1; i < count; i++) copies.push(src.clone().translate(scale(axis, spacing * i)));
+          const count2 = f.count2 ? Math.round(ev.num(f.count2, "count", "Second count")) : 1;
+          if (count2 < 1 || count * count2 > 400) throw new FeatureError("A grid can have at most 400 copies.");
+          if (count2 > 1 && f.axis2 === f.axis) throw new FeatureError("Pick a different second direction.");
+          const axis2 = AXES[f.axis2 ?? (f.axis === "x" ? "y" : "x")];
+          const spacing2 = count2 > 1 ? ev.num(f.spacing2 ?? f.spacing, "length", "Second spacing") : 0;
+          for (let j = 0; j < count2; j++) {
+            for (let i = 0; i < count; i++) {
+              if (i || j) copies.push(src.clone().translate(add(scale(axis, spacing * i), scale(axis2, spacing2 * j))));
+            }
+          }
         } else {
           const total = deg(ev.num(f.angle, "angle", "Angle"));
           const full = Math.abs(Math.abs(total) - 360) < 1e-6;
@@ -918,6 +959,65 @@ export class Builder {
   }
 }
 
+/** Normals of the named planes as replicad mirrors them (offset moves the plane along these). */
+const MIRROR_NORMALS: Record<"XY" | "XZ" | "YZ", Vec3> = { XY: [0, 0, 1], XZ: [0, 1, 0], YZ: [1, 0, 0] };
+
+/** Long enough to pass through every body from the sketch plane. */
+function throughDistance(bodies: Map<Id, Shape3D>, frame: SketchFrame): number {
+  if (bodies.size === 0) throw new FeatureError("There's nothing to go through yet. Create a body first, or use a distance.");
+  let far = 0;
+  for (const b of bodies.values()) {
+    const [lo, hi] = b.boundingBox.bounds;
+    for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) {
+      far = Math.max(far, Math.hypot(x - frame.origin[0], y - frame.origin[1], z - frame.origin[2]));
+    }
+  }
+  return far + 1;
+}
+
+/** The axis a revolve spins around: a sketch axis, or a straight line drawn in the sketch. */
+function revolveAxis(axis: "x" | "y" | "line", lineId: Id | undefined, sk: SketchBuilt, ev: Evaluator): { origin: Vec3; dir: Vec3 } {
+  const f = sk.frame;
+  if (axis !== "line") return { origin: f.origin, dir: axis === "x" ? f.xDir : f.yDir };
+  // No line picked yet: use the sketch's first path or construction line.
+  const e = sk.source?.entities.find((x) => (lineId ? x.id === lineId : x.type === "polyline" && (x.open || x.construction)));
+  if (!e || e.type !== "polyline") throw new FeatureError("Pick a line in the sketch to revolve around (draw it with the Path tool).", undefined, true);
+  const r = resolveEntity(e, ev);
+  if (r.type !== "polyline" || r.points.length < 2) throw new FeatureError("The axis line needs two points.");
+  const at = (p: [number, number]): Vec3 => add(add(f.origin, scale(f.xDir, p[0])), scale(f.yDir, p[1]));
+  const pa = at(r.points[0]!);
+  const pb = at(r.points[r.points.length - 1]!);
+  const v: Vec3 = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+  if (Math.hypot(...v) < 1e-6) throw new FeatureError("The axis line has no length.");
+  return { origin: pa, dir: norm(v) };
+}
+
+/**
+ * A thin-wall profile: a band `t` wide along every outline of the sketch, plus a
+ * wall along every open path (ribs, webs, a box's walls drawn as one line).
+ */
+function thinProfile(sk: SketchBuilt, t: number, side: "center" | "inside" | "outside", ev: Evaluator): Drawing | null {
+  let out: Drawing | null = null;
+  if (sk.drawing) {
+    const [grow, shrink] = side === "center" ? [t / 2, -t / 2] : side === "inside" ? [0, -t] : [t, 0];
+    const at = (d: number) => (d === 0 ? sk.drawing!.clone() : sk.drawing!.clone().offset(d, { lineJoinType: "miter" }));
+    try {
+      out = at(grow).cut(at(shrink));
+    } catch {
+      throw new FeatureError("The wall is too thick for this outline. Use a thinner wall.");
+    }
+  }
+  for (const e of sk.source?.entities ?? []) {
+    if (e.type !== "polyline" || !e.open || e.construction) continue;
+    const r = resolveEntity(e, ev);
+    if (r.type !== "polyline" || r.points.length < 2) continue;
+    const line = r.smooth && r.points.length >= 3 ? entityOutline(r) : polylinePath(r.points, r.arcs, false);
+    const band = polyDrawing(thickenPath(line, t, side));
+    out = out ? out.fuse(band) : band;
+  }
+  return out;
+}
+
 /** Rotate `v` about the unit axis `k` by `a` radians (Rodrigues). */
 function rotateAbout(v: Vec3, k: Vec3, a: number): Vec3 {
   const c = Math.cos(a);
@@ -994,11 +1094,7 @@ function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire {
   if (r.type === "polyline" && r.open) {
     if (r.points.length < 2) throw new FeatureError("The path needs at least two points.");
     if (r.smooth && r.points.length >= 3) d = drawPointsInterpolation(r.points, {}, { closeShape: false });
-    else {
-      let pen = draw(r.points[0]);
-      for (const p of r.points.slice(1)) pen = pen.lineTo(p);
-      d = pen.done();
-    }
+    else d = penPath(r.points, r.arcs, false);
   } else d = entityDrawing(r);
   const placed = d.sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch;
   const w = placed.wire ?? placed.outerSketch?.wire ?? placed.sketches?.[0]?.wire;

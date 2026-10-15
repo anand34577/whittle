@@ -13,7 +13,7 @@ export type Expr = string;
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface Parameter {
   id: Id;
@@ -104,9 +104,15 @@ export interface SlotEntity extends EntityBase {
   angle: Expr;
 }
 
+/**
+ * An outline or path point. A third element "arc" makes the point the middle of
+ * a three-point arc from the previous point to the next one.
+ */
+export type PolyPoint = [Expr, Expr] | [Expr, Expr, "arc"];
+
 export interface PolylineEntity extends EntityBase {
   type: "polyline";
-  points: [Expr, Expr][];
+  points: PolyPoint[];
   /** Round every corner with this radius. */
   corner?: Expr;
   /** Draw a smooth curve through the points instead of straight lines. */
@@ -150,6 +156,50 @@ export interface GearEntity extends EntityBase {
 export type SketchEntity = RectEntity | CircleEntity | PolygonEntity | SlotEntity | PolylineEntity | EllipseEntity | TextEntity | GearEntity;
 export type EntityType = SketchEntity["type"];
 
+/* ─────────────────── Constraint-driven sketch geometry ─────────────────── */
+
+/**
+ * Primitive geometry that a constraint solver positions. Coordinates and radii
+ * are millimetres: the solver's starting guess, normally the last solved
+ * position. Lines and arcs share point ids where they meet.
+ */
+export type SketchGeom =
+  | { id: Id; type: "point"; x: number; y: number; construction?: boolean }
+  | { id: Id; type: "line"; a: Id; b: Id; construction?: boolean }
+  /** Counter-clockwise from `a` to `b` about the center `c`. */
+  | { id: Id; type: "arc"; c: Id; a: Id; b: Id; construction?: boolean }
+  | { id: Id; type: "circle"; c: Id; r: number; construction?: boolean };
+
+export type GeomType = SketchGeom["type"];
+
+export type ConstraintType =
+  | "coincident"
+  | "horizontal"
+  | "vertical"
+  | "parallel"
+  | "perpendicular"
+  | "tangent"
+  | "equal"
+  | "fixed"
+  | "symmetric"
+  | "midpoint"
+  | "collinear"
+  | "distance"
+  | "radius"
+  | "angle";
+
+/**
+ * A relation between geometry. `refs` are geometry ids, or the sketch's fixed
+ * references "origin", "xaxis" and "yaxis". Dimensions (distance, radius,
+ * angle) carry a `value` expression, so they can use parameters.
+ */
+export interface SketchConstraint {
+  id: Id;
+  type: ConstraintType;
+  refs: Id[];
+  value?: Expr;
+}
+
 /* ───────────────────────────── Features ───────────────────────────── */
 
 export type BodyOp = "new" | "join" | "cut" | "intersect";
@@ -164,6 +214,26 @@ export interface SketchFeature extends FeatureBase {
   type: "sketch";
   plane: PlaneRef;
   entities: SketchEntity[];
+  /** Constraint-driven geometry, alongside (not instead of) the whole-shape entities. */
+  geometry?: SketchGeom[];
+  constraints?: SketchConstraint[];
+  /** A picture to trace over (not geometry). */
+  image?: SketchImage;
+}
+
+/** A reference picture on a sketch plane. Centre, width and rotation (degrees) in mm; height = width × aspect. */
+export interface SketchImage {
+  /** Data URL (JPEG or PNG). */
+  src: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  aspect: number;
+  rotation: number;
+  opacity: number;
+  /** Hide it outside this sketch's editing. */
+  hidden?: boolean;
 }
 
 export interface ExtrudeFeature extends FeatureBase {
@@ -171,13 +241,21 @@ export interface ExtrudeFeature extends FeatureBase {
   sketch: Id;
   distance: Expr;
   /** "two" = `distance` one way and `distance2` the other. */
-  extent: "one" | "symmetric" | "two";
+  /** "through" = cut (or add) through everything in that direction; `distance` is ignored. */
+  extent: "one" | "symmetric" | "two" | "through";
   distance2?: Expr;
   flip: boolean;
   /** Draft angle: positive narrows the profile as it rises (mould and cast parts). */
   taper?: Expr;
   /** Twist the profile by this angle over the extrusion (vases, grips, springs). */
   twist?: Expr;
+  /**
+   * Thin feature: extrude a wall of this thickness along the profile's outlines
+   * instead of the filled region. Open paths become ribs and walls.
+   */
+  thin?: Expr;
+  /** Which side of the outline the wall grows to (outlines; "inside" is the material side). */
+  thinSide?: "center" | "inside" | "outside";
   op: BodyOp;
   /** Body to join/cut. Unset = most recent body (join) or every body (cut). */
   target?: Id;
@@ -186,7 +264,9 @@ export interface ExtrudeFeature extends FeatureBase {
 export interface RevolveFeature extends FeatureBase {
   type: "revolve";
   sketch: Id;
-  axis: "x" | "y";
+  /** "line" spins around `axisLine`, a straight path or construction line in the sketch. */
+  axis: "x" | "y" | "line";
+  axisLine?: Id;
   angle: Expr;
   op: BodyOp;
   target?: Id;
@@ -231,6 +311,8 @@ export interface MirrorFeature extends FeatureBase {
   type: "mirror";
   bodyId?: Id;
   plane: OriginPlane;
+  /** Move the mirror plane along its normal. */
+  offset?: Expr;
   merge: boolean;
 }
 
@@ -242,6 +324,10 @@ export interface PatternFeature extends FeatureBase {
   count: Expr;
   spacing: Expr;
   angle: Expr;
+  /** Linear only: a second direction makes a grid. */
+  axis2?: "x" | "y" | "z";
+  count2?: Expr;
+  spacing2?: Expr;
   merge: boolean;
 }
 

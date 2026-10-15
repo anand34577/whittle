@@ -28,7 +28,10 @@ import {
 } from "./actions";
 import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
 import { exportSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
-import { duplicateEntity, mirrorEntity, rotateEntity } from "./sketchOps";
+import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
+import { type ConstraintType, CONSTRAINT_LABELS, DIMENSIONS } from "@whittle/core";
+import { availableConstraints, constrainSelection, deleteSketchSelection, toggleGeometryConstruction } from "./constraintOps";
+import { importImage, startImagePick, traceImage } from "./refImage";
 import { THEMES } from "./prefs";
 import {
   type AppState,
@@ -37,6 +40,7 @@ import {
   commitSession,
   confirmDeleteFeature,
   deleteEntity,
+  findFeature,
   finishSketch,
   mutate,
   redo,
@@ -70,6 +74,7 @@ export interface Command {
 const inModel = (s: AppState) => s.mode.kind === "model" || s.mode.kind === "measure";
 const inSketch = (s: AppState) => s.mode.kind === "sketch";
 const hasEntity = (s: AppState) => inSketch(s) && !!s.selectedEntity;
+const hasImage = (s: AppState) => s.mode.kind === "sketch" && !!findFeature(s.doc, s.mode.sketchId, "sketch")?.image;
 const hasBodies = (s: AppState) => (s.regen?.bodies.length ?? 0) > 0;
 const get = useApp.getState;
 
@@ -88,6 +93,26 @@ const display = (d: DisplayMode, label: string, keywords: string): Command => ({
   on: (s) => s.view.display === d,
   run: () => setView({ display: d }),
 });
+
+const CONSTRAINT_HINTS: Record<ConstraintType, string> = {
+  coincident: "Join two points, or put a point on a curve",
+  horizontal: "Make a line (or two points) level",
+  vertical: "Make a line (or two points) upright",
+  parallel: "Make two lines run the same way",
+  perpendicular: "Make two lines meet at a right angle",
+  tangent: "Make a line and arc (or two arcs) touch smoothly",
+  equal: "Give two lines the same length, or two arcs the same radius",
+  fixed: "Pin geometry where it is",
+  symmetric: "Mirror two points about a line (or about a third point, picked last)",
+  midpoint: "Put a point at the middle of a line",
+  collinear: "Make two lines lie on one line",
+  distance: "A length, or the gap between points and lines",
+  radius: "The radius of a circle or arc",
+  angle: "The angle of a line, or between two lines",
+};
+
+/** Constraint commands, for the toolbar menu and the palette. */
+export const CONSTRAINT_COMMANDS = Object.keys(CONSTRAINT_HINTS).map((t) => `constrain-${t}`);
 
 export const COMMANDS: Command[] = [
   // Create
@@ -198,14 +223,37 @@ export const COMMANDS: Command[] = [
   { id: "tool-slot", label: "Slot", group: "Sketch", icon: "slot", keys: "O", keywords: "oblong obround", hint: "Two centers", when: inSketch, run: () => setSketchTool("slot") },
   { id: "tool-text", label: "Text", group: "Sketch", icon: "text", keys: "T", keywords: "label lettering engrave emboss name tag font", hint: "Click where the text starts", when: inSketch, run: () => setSketchTool("text") },
   { id: "tool-gear", label: "Gear", group: "Sketch", icon: "gear", keys: "G", keywords: "spur cog teeth involute", hint: "Center, then drag the size", when: inSketch, run: () => setSketchTool("gear") },
+  { id: "import-image", label: "Picture to trace", short: "Picture", group: "Sketch", icon: "image", keywords: "image photo reference canvas underlay background trace scan blueprint jpg png attach", hint: "Put a photo or drawing on the sketch to draw over. Also: paste or drop one", run: importImage },
+  { id: "calibrate-image", label: "Calibrate picture", group: "Sketch", icon: "calibrate", keywords: "scale image photo true size measure reference length", hint: "Click two points on the picture and type their real distance", when: hasImage, run: () => startImagePick("calibrate") },
+  { id: "flatten-image", label: "Flatten photo", group: "Sketch", icon: "flatten", keywords: "perspective straighten deskew rectify keystone a4 paper card photo image", hint: "Click the corners of a sheet of paper or a card in the photo to straighten and scale it", when: hasImage, run: () => startImagePick("flatten") },
+  { id: "trace-image", label: "Trace whole picture", group: "Sketch", icon: "trace", keywords: "auto trace vectorize outline silhouette image photo convert", hint: "Turn the picture's shapes into editable outlines; round holes become circles", when: hasImage, run: () => void traceImage() },
+  { id: "trace-area", label: "Trace one area of the picture", group: "Sketch", icon: "trace", keywords: "magic wand flood fill select region outline image photo", hint: "Click one shape in the picture to outline just that", when: hasImage, run: () => startImagePick("wand") },
   { id: "import-svg", label: "Import SVG into sketch", short: "SVG", group: "Sketch", icon: "vector", keywords: "logo trace vector illustrator inkscape figma outline artwork drawing image", hint: "Bring in a logo or outline as editable shapes", when: inSketch, run: importSvgIntoSketch },
   { id: "export-sketch-svg", label: "Export sketch as SVG", group: "File", icon: "drawing", keywords: "laser cut vinyl cricut plotter 2d drawing vector", hint: "True-size 2D drawing for laser cutters, vinyl cutters and plotters", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "svg") },
   { id: "export-sketch-dxf", label: "Export sketch as DXF", group: "File", icon: "drawing", keywords: "cnc router laser cam 2d drawing autocad", hint: "2D drawing for CNC, CAM and other CAD", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "dxf") },
   { id: "tool-select", label: "Select", group: "Sketch", icon: "select", keys: "V", keywords: "move pick edit", hint: "Select and drag shapes", when: inSketch, run: () => setSketchTool("select") },
+  { id: "tool-segment", label: "Constrained line", short: "Lines", group: "Sketch", icon: "line", keywords: "segment constraint parametric sketcher professional dimension", hint: "Lines the solver keeps to your constraints; click the first point to close", when: inSketch, run: () => setSketchTool("segment") },
+  { id: "tool-arc", label: "Constrained arc", short: "Arc", group: "Sketch", icon: "path", keywords: "arc three point curve constraint tangent", hint: "Start, end, then a point on the arc", when: inSketch, run: () => setSketchTool("arc") },
+  { id: "tool-pcircle", label: "Constrained circle", short: "Circle", group: "Sketch", icon: "circle", keywords: "circle constraint radius dimension", hint: "Center, then radius", when: inSketch, run: () => setSketchTool("pcircle") },
+  { id: "tool-trim", label: "Trim", group: "Sketch", icon: "split", keywords: "cut remove piece segment between intersections", hint: "Click the piece of a line, arc or circle to remove", when: inSketch, run: () => setSketchTool("trim") },
+  { id: "tool-extend", label: "Extend", group: "Sketch", icon: "arrowRight", keywords: "lengthen stretch to meet", hint: "Click near the end of a line or arc to stretch it to the next curve", when: inSketch, run: () => setSketchTool("extend") },
+  ...(Object.keys(CONSTRAINT_LABELS) as ConstraintType[]).map(
+    (t): Command => ({
+      id: `constrain-${t}`,
+      label: CONSTRAINT_LABELS[t],
+      group: "Constrain",
+      icon: DIMENSIONS.includes(t) ? "ruler" : t === "fixed" ? "key" : "link",
+      keywords: `constraint ${DIMENSIONS.includes(t) ? "dimension size" : "relation"} ${t}`,
+      hint: CONSTRAINT_HINTS[t],
+      when: (s) => inSketch(s) && s.sketchSel.length > 0 && availableConstraints().includes(t),
+      run: () => void constrainSelection(t),
+    }),
+  ),
   { id: "duplicate", label: "Duplicate shape", short: "Duplicate", group: "Sketch", icon: "duplicate", keys: "Ctrl+D", keywords: "copy clone", when: hasEntity, run: () => duplicateEntity() },
   { id: "mirror-shape-y", label: "Mirror shape left/right", short: "Mirror", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy", when: hasEntity, run: () => mirrorEntity("y") },
   { id: "mirror-shape-x", label: "Mirror shape up/down", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy", when: hasEntity, run: () => mirrorEntity("x") },
   { id: "rotate-shape", label: "Rotate shape 90°", short: "Rotate 90°", group: "Sketch", icon: "rotate", keys: "Shift+R", keywords: "turn spin", when: hasEntity, run: () => rotateEntity(90) },
+  { id: "offset-shape", label: "Offset shape", short: "Offset", group: "Sketch", icon: "offset", keys: "Shift+O", keywords: "inset outset grow shrink parallel wall lip clearance", hint: "A copy grown outward or shrunk inward", when: hasEntity, run: () => void offsetEntity() },
   {
     id: "construction",
     label: "Toggle construction",
@@ -215,8 +263,9 @@ export const COMMANDS: Command[] = [
     keys: "X",
     keywords: "reference helper guide",
     hint: "Construction shapes guide you but don't make solids",
-    when: hasEntity,
+    when: (s) => hasEntity(s) || (inSketch(s) && s.sketchSel.length > 0),
     run: () => {
+      if (!get().selectedEntity) return toggleGeometryConstruction();
       const id = get().selectedEntity;
       sketchMutate("Toggle construction", (sk) => {
         const e = sk.entities.find((x) => x.id === id);
@@ -237,10 +286,11 @@ export const COMMANDS: Command[] = [
     icon: "trash",
     keys: "Del",
     keywords: "remove erase",
-    when: (s) => (s.mode.kind === "sketch" ? !!s.selectedEntity : s.selection.some((p) => p.kind === "sketch" || p.kind === "body")),
+    when: (s) => (s.mode.kind === "sketch" ? !!s.selectedEntity || s.sketchSel.length > 0 : s.selection.some((p) => p.kind === "sketch" || p.kind === "body")),
     run: () => {
       const s = get();
       if (s.mode.kind === "sketch" && s.selectedEntity) return deleteEntity(s.selectedEntity);
+      if (s.mode.kind === "sketch") return deleteSketchSelection();
       const p = s.selection.find((x) => x.kind === "sketch" || x.kind === "body");
       const id = p?.kind === "sketch" ? p.sketchId : p?.kind === "body" ? p.bodyId : undefined;
       if (id) void confirmDeleteFeature(id);
@@ -333,6 +383,7 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
   if (e.key === "?") return "shortcuts";
   if (s.mode.kind === "sketch") {
     if (e.shiftKey && k === "r") return "rotate-shape";
+    if (e.shiftKey && k === "o") return "offset-shape";
     const map: Record<string, string> = { l: "tool-line", a: "tool-path", r: "tool-rect", c: "tool-circle", e: "tool-ellipse", p: "tool-polygon", o: "tool-slot", t: "tool-text", g: "tool-gear", v: "tool-select", x: "construction" };
     return map[k] ?? null;
   }

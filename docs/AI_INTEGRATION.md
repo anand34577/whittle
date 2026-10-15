@@ -12,8 +12,10 @@ with a JSON Schema, that read and change the open design:
 |---|---|
 | `get_design` | Units, parameters (formula and value), the timeline (every feature, its settings and build status) and bodies (size, bounding box, volume). |
 | `set_parameter` | Create or change a named parameter; any field can then use it in formulas. |
-| `add_sketch` | A sketch on an origin plane (offset, tilted) or a flat face of a body (`top`, `front`...), with shapes: rect, circle, polygon, slot, ellipse, polyline, open path, text, gear. |
-| `add_feature` | Extrude (one/two sides, taper, twist), revolve, loft, sweep, primitive, coil/thread, fillet/chamfer (edge selectors), shell, hole (standards-sized, counterbore/countersink), draft, mirror, pattern, move, combine, split, offset, scale. |
+| `add_sketch` | A sketch on an origin plane (offset, tilted) or a flat face of a body (`top`, `front`...), with shapes: rect, circle, polygon, slot, ellipse, polyline, open path, text, gear. Outline and path points can be `[x, y, "arc"]` (the middle of a three-point arc). |
+| `add_feature` | Extrude (one/two sides, through all, taper, twist, thin walls and ribs), revolve (about a sketch axis or a drawn line), loft, sweep, primitive, coil/thread, fillet/chamfer (edge selectors), shell, hole (standards-sized, counterbore/countersink), draft, mirror (offset plane), pattern (row, grid, circular), move,
+ combine, split, offset, scale. |
+| `constrain_sketch` | Professional sketching on an existing sketch: add points, lines, arcs and circles (rough positions in mm), then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric `[point, point, line or centre point]`, midpoint `[point, line]`, collinear `[line, line]`) and driving dimensions (distance, radius, angle) whose values may be formulas. Refer to points as `"L1.start"`, `"A1.center"`, `"origin"`; axes as `"xaxis"`, `"yaxis"`. Also `trim` / `extend` (`{curve, at: [x, y]}`) and `delete`. Answers with the ids of named items and the solver state (`full`, `under` with `dof`, `over` with a message naming the conflicting constraints, or `error`). `add_sketch` accepts an empty `shapes` list for this. |
 | `update_feature` | Change settings of any feature or replace a sketch's shapes. |
 | `delete_feature` | Remove a step. |
 | `set_body_appearance` | Rename, color, finish, visibility. |
@@ -38,6 +40,29 @@ const s = await whittle.api.run("add_sketch", { plane: "XY", shapes: [{ type: "r
 await whittle.api.run("add_feature", { type: "extrude", settings: { sketch: s.id, distance: 20 } });
 await whittle.api.run("add_feature", { type: "shell", settings: { body: "Body 1", face: "top", thickness: "wall" } });
 whittle.api.tools; // the JSON Schemas, ready to hand to any tool-calling model
+
+// A fully constrained L-bracket profile whose width follows the wall parameter:
+const l = await whittle.api.run("add_sketch", { plane: "XY", shapes: [] });
+await whittle.api.run("constrain_sketch", {
+  sketch: l.id,
+  geometry: [
+    { name: "a", type: "line", from: [0, 0], to: [40, 0] },
+    { name: "b", type: "line", from: "a.end", to: [40, 8] },
+    { name: "c", type: "line", from: "b.end", to: [8, 8] },
+    { name: "d", type: "line", from: "c.end", to: [8, 30] },
+    { name: "e", type: "line", from: "d.end", to: [0, 30] },
+    { name: "f", type: "line", from: "e.end", to: "a.start" },
+  ],
+  constraints: [
+    { type: "coincident", refs: ["a.start", "origin"] },
+    ...["a", "c", "e"].map((x) => ({ type: "horizontal", refs: [x] })),
+    ...["b", "d", "f"].map((x) => ({ type: "vertical", refs: [x] })),
+    { type: "distance", refs: ["a"], value: "wall * 20" },
+    { type: "distance", refs: ["f"], value: 30 },
+    { type: "distance", refs: ["b"], value: 8 },
+    { type: "distance", refs: ["e"], value: 8 },
+  ],
+}); // → { solver: { state: "full", dof: 0 } }
 ```
 
 ## Providers

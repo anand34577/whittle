@@ -3,7 +3,7 @@
  * evaluated result, and lets you drag its label to scrub the value, with
  * arrow keys nudging it (Shift x10, Alt x0.1).
  */
-import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type PointerEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type QuantityKind, documentEvaluator, formatQuantity, trim } from "@whittle/core";
 import { commitSession, useApp } from "../state/store";
 import { Switch } from "./controls";
@@ -20,6 +20,7 @@ interface Props {
 
 export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }: Props) {
   const doc = useApp((s) => s.doc);
+  const id = useId();
   const [text, setText] = useState(value);
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -84,13 +85,15 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }
 
   return (
     <div className={`field ${result.ok ? "" : "field--error"}`}>
-      <label className="field__label scrub" title="Drag to change" onPointerDown={onLabelDown} onPointerMove={onLabelMove} onPointerUp={onLabelUp}>
+      <label htmlFor={id} className="field__label scrub" title="Drag to change" onPointerDown={onLabelDown} onPointerMove={onLabelMove} onPointerUp={onLabelUp}>
         {label}
       </label>
       <div className="field__box">
         <input
+          id={id}
           ref={inputRef}
           className="field__input mono"
+
           value={text}
           spellCheck={false}
           onFocus={(e) => {

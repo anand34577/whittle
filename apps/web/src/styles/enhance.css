@@ -735,3 +735,6 @@ details.points summary {
 .viewport.is-picking .viewport-canvas {
   cursor: crosshair;
 }
+.copyrow--wide > span {
+  width: 56px;
+}
