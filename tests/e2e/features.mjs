@@ -35,7 +35,8 @@ const waitBuilt = async () => {
     () => {
       const s = window.whittle.useApp.getState();
       const ids = new Set(s.regen?.status.map((x) => x.id));
-      return s.kernelReady && !s.regenBusy && s.doc.features.every((f) => ids.has(f.id));
+      // The rebuild must be of the current document, not an earlier one still on screen.
+      return s.kernelReady && !s.regenBusy && s.builtDoc === s.doc && s.doc.features.every((f) => ids.has(f.id));
     },
     null,
     { timeout: 60000 },

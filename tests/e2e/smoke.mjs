@@ -25,7 +25,7 @@ const step = async (name, fn) => {
 };
 const status = () => page.locator(".statusbar__meta").innerText();
 const waitBuilt = async () => {
-  await page.waitForFunction(() => /Built in|Ready/.test(document.querySelector(".statusbar__meta")?.textContent ?? ""), null, { timeout: 60000 });
+  await page.waitForFunction(() => /Built in|Ready/.test(document.querySelector(".statusbar__meta")?.textContent ?? "") && window.whittle.useApp.getState().builtDoc === window.whittle.useApp.getState().doc, null, { timeout: 60000 });
   await page.waitForTimeout(400);
 };
 

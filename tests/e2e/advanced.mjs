@@ -28,7 +28,7 @@ const step = async (name, fn) => {
   console.log(`ok  ${name} (${Date.now() - t} ms)`);
 };
 const waitBuilt = async () => {
-  await page.waitForFunction(() => /Built in|Ready/.test(document.querySelector(".statusbar__meta")?.textContent ?? ""), null, { timeout: 60000 });
+  await page.waitForFunction(() => /Built in|Ready/.test(document.querySelector(".statusbar__meta")?.textContent ?? "") && window.whittle.useApp.getState().builtDoc === window.whittle.useApp.getState().doc, null, { timeout: 60000 });
   await page.waitForTimeout(300);
 };
 const api = (name, input) => page.evaluate(([n, i]) => window.whittle.api.run(n, i), [name, input]);
