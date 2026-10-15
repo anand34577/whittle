@@ -69,6 +69,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   draft: "Draft",
   offsetFace: "Press/Pull",
   cplane: "Plane",
+  joint: "Joint",
 };
 
 /** "Extrude 3" — next free numbered name for a feature type. */
@@ -230,6 +231,10 @@ export function makeOffsetFace(doc: WhittleDocument): Feature {
 
 export function makeConstructionPlane(doc: WhittleDocument, plane: PlaneRef): Feature {
   return { id: uid("cp"), type: "cplane", name: nextName(doc, "Plane"), plane };
+}
+
+export function makeJoint(doc: WhittleDocument, bodyId?: Id, fixedId?: Id): Feature {
+  return { id: uid("jt"), type: "joint", name: nextName(doc, "Joint"), bodyId, fixedId, joint: "revolute", origin: "center", point: ["0", "0", "0"], axis: "z", angle: "0", distance: "0", limited: false, min: "-90", max: "90" };
 }
 
 export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {

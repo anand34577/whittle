@@ -8,6 +8,7 @@ import {
   type DraftFeature,
   type ExtrudeFeature,
   type Feature,
+  type JointFeature,
   type OffsetFaceFeature,
   type OffsetFeature,
   type PrimitiveFeature,
@@ -22,6 +23,7 @@ import {
   makeExtrude,
   makeOffset,
   makeConstructionPlane,
+  makeJoint,
   makeOffsetFace,
   makePipe,
   makePrimitive,
@@ -169,6 +171,63 @@ describe("construction planes", () => {
     const doc = newDocument();
     const p = push(doc, makeConstructionPlane(doc, { kind: "construction", plane: "gone", offset: "0" }));
     expect(new Builder().regen(doc, "final").status.find((x) => x.id === p.id)?.state).toBe("error");
+  });
+});
+
+describe("joints", () => {
+  const two = (doc: WhittleDocument) => {
+    const a = box(doc, 10, 10, 10);
+    const s = sketch(doc, [square(4)], { kind: "origin", plane: "XY", offset: "30" });
+    const ex = push(doc, makeExtrude(doc, s.id) as ExtrudeFeature, true);
+    ex.distance = "4";
+    return [a, ex] as const;
+  };
+
+  it("turns the moving body about a point on the axis (revolute) and holds the other still", () => {
+    const doc = newDocument();
+    const [fixed, moving] = two(doc);
+    const j = push(doc, makeJoint(doc, moving.id, fixed.id) as JointFeature);
+    j.joint = "revolute";
+    j.origin = "point";
+    j.axis = "z";
+    j.angle = "90";
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    const m = r.bodies.find((b) => b.id === moving.id)!;
+    // The 4 mm block was centred on the origin in XY; the quarter turn about the origin keeps that.
+    expect((m.bbox[1][0] - m.bbox[0][0])).toBeCloseTo(4, 2);
+    j.origin = "point";
+    j.point = ["10", "0", "0"];
+    const r2 = new Builder().regen(doc, "final");
+    ok(r2);
+    const m2 = r2.bodies.find((b) => b.id === moving.id)!;
+    // Pivoting about (10,0): the block moves from near x = 0 to near y = -10.
+    expect(m2.bbox[0][1]).toBeLessThan(-7);
+    const f = r2.bodies.find((b) => b.id === fixed.id)!;
+    expect(f.bbox[0][0]).toBeCloseTo(-5, 3);
+  });
+
+  it("slides along an axis and stops at its limit with a warning", () => {
+    const doc = newDocument();
+    const [fixed, moving] = two(doc);
+    const j = push(doc, makeJoint(doc, moving.id, fixed.id) as JointFeature);
+    j.joint = "slider";
+    j.axis = "x";
+    j.distance = "80";
+    j.limited = true;
+    j.min = "0";
+    j.max = "25";
+    const r = new Builder().regen(doc, "final");
+    expect(r.status.find((x) => x.id === j.id)?.state).toBe("warning");
+    const m = r.bodies.find((b) => b.id === moving.id)!;
+    expect(m.bbox[0][0]).toBeCloseTo(-2 + 25, 2);
+  });
+
+  it("needs a moving body", () => {
+    const doc = newDocument();
+    const [fixed] = two(doc);
+    const j = push(doc, makeJoint(doc, undefined, fixed.id) as JointFeature);
+    expect(new Builder().regen(doc, "final").status.find((x) => x.id === j.id)?.state).toBe("incomplete");
   });
 });
 

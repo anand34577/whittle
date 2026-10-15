@@ -1,7 +1,7 @@
 /** Move/copy, scale, grid pattern and break of constraint geometry. */
 import { beforeAll, describe, expect, it } from "vitest";
-import { type SketchFeature, addEntityGeometry, breakLine, createEvaluator, makeEntity, makeSketch, moveGeometry, newDocument, rectPattern, resolveEntity, resolveGeometry, scaleGeometry } from "@whittle/core";
-import { initSolver } from "../src/solver";
+import { type SketchFeature, addArc, addConstraint, addEntityGeometry, addLine, breakLine, endTangent, tangentArcThrough, createEvaluator, makeEntity, makeSketch, moveGeometry, newDocument, rectPattern, resolveEntity, resolveGeometry, scaleGeometry } from "@whittle/core";
+import { initSolver, solveSketch } from "../src/solver";
 
 beforeAll(async () => {
   await initSolver();
@@ -50,5 +50,28 @@ describe("sketch edit", () => {
     const before = lineCount(sk);
     expect(breakLine(sk, bottom.id, cutter.id)).toBeUndefined();
     expect(lineCount(sk)).toBe(before + 1);
+  });
+});
+
+describe("tangent arc", () => {
+  it("leaves a line smoothly: centre on the normal, and the solver keeps it tangent", () => {
+    const sk = sketch();
+    const line = addLine(sk, [0, 0], [10, 0]);
+    const g = resolveGeometry(sk);
+    const t = endTangent(g, [10, 0])!;
+    expect(t.curve).toBe(line);
+    expect(t.dir[0]).toBeCloseTo(1);
+    const arc = tangentArcThrough([10, 0], t.dir, [20, 10])!;
+    expect(arc.center[0]).toBeCloseTo(10);
+    expect(arc.center[1]).toBeCloseTo(10);
+    const lineGeo = sk.geometry!.find((x) => x.id === line)!;
+    const id = addArc(sk, (lineGeo as { b: string }).b, [20, 10], arc.through);
+    expect(id).not.toBeNull();
+    expect("id" in addConstraint(sk, "tangent", [line, id!])).toBe(true);
+    expect(solveSketch(sk, ev)?.state).not.toBe("error");
+  });
+
+  it("refuses an end point straight ahead of the line", () => {
+    expect(tangentArcThrough([0, 0], [1, 0], [5, 0])).toBeNull();
   });
 });

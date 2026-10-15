@@ -446,6 +446,30 @@ export interface DraftFeature extends FeatureBase {
   flip: boolean;
 }
 
+/**
+ * A joint between two bodies: the moving body sits where the joint's value puts it.
+ * Edit `angle` / `distance` to drive the joint; limits stop it at its ends.
+ */
+export interface JointFeature extends FeatureBase {
+  type: "joint";
+  /** The body that moves. */
+  bodyId?: Id;
+  /** The body it is attached to (stays put; documents what the joint connects). */
+  fixedId?: Id;
+  joint: "rigid" | "revolute" | "slider" | "cylindrical";
+  /** Where the joint axis passes through: the moving body's center, or a point. */
+  origin: "center" | "point";
+  point: [Expr, Expr, Expr];
+  /** The joint axis (rotation axis / slide direction). */
+  axis: "x" | "y" | "z";
+  angle: Expr;
+  distance: Expr;
+  /** Stop the joint at its ends of travel (degrees for a turn, length for a slide). */
+  limited: boolean;
+  min: Expr;
+  max: Expr;
+}
+
 /** Press/Pull: push or pull flat faces along their normals (grows or cuts material). */
 export interface OffsetFaceFeature extends FeatureBase {
   type: "offsetFace";
@@ -481,6 +505,7 @@ export type Feature =
   | OffsetFeature
   | ScaleFeature
   | DraftFeature
+  | JointFeature
   | ConstructionPlaneFeature
   | OffsetFaceFeature
   | HoleFeature

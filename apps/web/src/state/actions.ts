@@ -17,6 +17,7 @@ import {
   makeCombine,
   makeConstructionPlane,
   makeDraft,
+  makeJoint,
   makeOffsetFace,
   makeOffset,
   makeScale,
@@ -356,6 +357,16 @@ export function startDraft() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+/** A joint: the selected body moves (first pick), attached to the second pick if there is one. */
+export function startJoint() {
+  const picked = [...new Set(get().selection.flatMap((p) => (p.kind === "body" || p.kind === "face" || p.kind === "edge" ? [p.bodyId] : [])))];
+  const bodies = get().regen?.bodies ?? [];
+  if (bodies.length < 2) return toast("info", "A joint connects two bodies. Make another body first.");
+  const moving = picked[0] ?? bodies.at(-1)!.id;
+  const fixed = picked[1] ?? bodies.find((b) => b.id !== moving)?.id;
+  beginNewFeature(makeJoint(get().doc, moving, fixed), "New Joint");
+}
+
 /** A new construction plane: 10 mm off the selected face, plane or construction plane (else the XY plane). */
 export function startConstructionPlane() {
   const { selection, doc } = get();
@@ -521,6 +532,16 @@ export function handlePick(p: Pick | null, additive: boolean) {
         if (i >= 0) x.tools.splice(i, 1);
         else x.tools.push(bodyOf);
       }
+    });
+    return;
+  }
+  if (f && f.type === "joint" && bodyOf) {
+    mutate("Pick body", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "joint") return;
+      // First click: the moving body. Second click: what it is attached to.
+      if (!x.bodyId || x.bodyId === bodyOf) x.bodyId = bodyOf;
+      else x.fixedId = bodyOf;
     });
     return;
   }

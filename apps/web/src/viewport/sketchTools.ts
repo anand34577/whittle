@@ -13,12 +13,14 @@ import {
   type SketchEntity,
   type Vec2,
   arcPoints,
+  endTangent,
   entityOutline,
   entitySnapPoints,
   geomOutline,
   makeEntity,
   polylinePath,
   resolveEntity,
+  tangentArcThrough,
 } from "@whittle/core";
 import type { SketchTool } from "../state/store";
 import type { SketchPointerEvent } from "./Viewport";
@@ -31,7 +33,7 @@ export interface SnapInfo {
 }
 
 /** Tools that draw constraint-driven geometry. */
-const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "carc", "conic", "pcircle", "spline"]);
+const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "tarc", "carc", "conic", "pcircle", "spline"]);
 /** Tools that take three clicks (the rest of the simple shapes take two). */
 /** Counter-clockwise arc about `c` from `s`, ending on the ray toward `e`. */
 function centerArc(c: Vec2, s: Vec2, e: Vec2): { start: Vec2; end: Vec2; through: Vec2 } | null {
@@ -94,6 +96,8 @@ export interface SketchEnv {
   geometry(): GeomResolved[];
   addLines(pts: (Vec2 | Id)[], closed: boolean): void;
   addArc(a: Vec2 | Id, b: Vec2 | Id, through: Vec2): void;
+  /** An arc leaving the end of a line or arc smoothly, ending at the point. */
+  addTangentArc(from: Id | undefined, to: Vec2): void;
   addCircle(c: Vec2 | Id, r: number): void;
   addSpline(pts: (Vec2 | Id)[], closed: boolean): void;
   addPoint(p: Vec2): void;
@@ -299,6 +303,12 @@ export class SketchController {
     if (this.tool === "pcircle") {
       const r = Math.hypot(this.secondPoint(a, c)[0] - a[0], this.secondPoint(a, c)[1] - a[1]);
       return r > 0 ? [{ pts: geomOutline({ id: "", type: "circle", c: a, r, construction: false }), closed: true }] : [];
+    }
+    if (this.tool === "tarc") {
+      const geo = this.env.geometry();
+      const t = endTangent(geo, a);
+      const arc = t ? tangentArcThrough(a, t.dir, c) : null;
+      return arc ? [{ pts: [...arcPoints(a, c, arc.through, 32), c], closed: false }] : [{ pts: [a, c], closed: false }];
     }
     if (this.tool === "conic") {
       if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
@@ -624,6 +634,9 @@ export class SketchController {
     const at = (i: number) => this.refs[i] ?? this.points[i]!;
     if (this.tool === "pcircle" && this.points.length === 2) {
       this.env.addCircle(at(0), Math.hypot(p[0] - this.points[0]![0], p[1] - this.points[0]![1]));
+      this.reset();
+    } else if (this.tool === "tarc" && this.points.length === 2) {
+      this.env.addTangentArc(this.refs[0], p);
       this.reset();
     } else if (this.tool === "conic" && this.points.length === 3) {
       // Start, end, apex; a typed value (0.01 to 0.99) sets rho.

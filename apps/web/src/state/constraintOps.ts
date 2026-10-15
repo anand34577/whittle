@@ -15,6 +15,9 @@ import {
   DIMENSIONS,
   LENGTH_TO_MM,
   addArc,
+  endTangent,
+  resolveGeometry,
+  tangentArcThrough,
   addCircle,
   addConstraint,
   addLine,
@@ -106,6 +109,22 @@ export function addArcGeometry(a: Vec2 | Id, b: Vec2 | Id, through: Vec2) {
     failed = addArc(sk, a, b, through) === null;
   });
   if (failed) toast("info", "Those three points are in a straight line. Pick a point off the line for the arc's bulge.");
+}
+
+/** An arc that leaves the end of a line or arc smoothly (tangent), ending at `to`. */
+export function addTangentArcGeometry(from: Id | undefined, to: Vec2) {
+  const o = openSketch();
+  if (!o) return;
+  if (!from) return void toast("info", "Start a tangent arc on the end of a line or arc.");
+  const geo = resolveGeometry(o.sk, o.sol);
+  const p = geo.find((g) => g.id === from);
+  const t = p?.type === "point" ? endTangent(geo, p.p) : null;
+  const arc = p?.type === "point" && t ? tangentArcThrough(p.p, t.dir, to) : null;
+  if (!t || !arc) return void toast("info", t ? "Pick an end point that isn't straight ahead of the line." : "Start a tangent arc on the end of a line or arc.");
+  geoMutate("Draw tangent arc", (sk) => {
+    const id = addArc(sk, from, to, arc.through);
+    if (id) addConstraint(sk, "tangent", [t.curve, id]);
+  });
 }
 
 export function addCircleGeometry(c: Vec2 | Id, r: number) {

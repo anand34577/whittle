@@ -778,6 +778,36 @@ export class Builder {
       case "offsetFace":
         return offsetFaces(f, bodies, ev);
 
+      case "joint": {
+        const id = f.bodyId;
+        if (!id || !bodies.has(id)) throw new FeatureError("Pick the body that moves.", undefined, true);
+        if (f.fixedId && !bodies.has(f.fixedId)) throw new FeatureError("The body this joint is attached to no longer exists. Re-pick it.");
+        if (f.fixedId === id) throw new FeatureError("Pick two different bodies.", undefined, true);
+        const src = bodies.get(id)!;
+        let warning: string | undefined;
+        const limit = (text: string, label: string, kind: "angle" | "length") => (f.limited ? ev.num(text, kind, label) : null);
+        const turns = f.joint === "revolute" || f.joint === "cylindrical";
+        const slides = f.joint === "slider" || f.joint === "cylindrical";
+        const clamp = (v: number, kind: "angle" | "length") => {
+          const lo = limit(f.min, "Minimum", kind);
+          const hi = limit(f.max, "Maximum", kind);
+          if (lo !== null && v < lo) return (warning = "The joint is at its lower limit."), lo;
+          if (hi !== null && v > hi) return (warning = "The joint is at its upper limit."), hi;
+          return v;
+        };
+        // Limits are written in the joint's own unit (degrees for a turn, length for a slide); a cylindrical joint limits its slide.
+        let angle = turns ? ev.num(f.angle, "angle", "Angle") : 0;
+        let dist = slides ? ev.num(f.distance, "length", "Distance") : 0;
+        if (f.joint === "revolute") angle = clamp(angle, "angle");
+        else if (slides) dist = clamp(dist, "length");
+        const [px, py, pz] = f.origin === "point" ? (f.point.map((v, i) => ev.num(v, "length", "XYZ"[i]!)) as Vec3) : boxCenter(src);
+        let out = src.clone();
+        if (Math.abs(angle) > 1e-12) out = out.rotate(deg(angle), [px, py, pz], AXES[f.axis]);
+        if (Math.abs(dist) > 1e-12) out = out.translate(AXES[f.axis].map((c) => c * dist) as Vec3);
+        bodies.set(id, out);
+        return warning;
+      }
+
       case "fillet":
       case "chamfer": {
         if (f.edges.length === 0) throw new FeatureError("Select one or more edges in the viewport.", undefined, true);

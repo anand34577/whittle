@@ -22,7 +22,7 @@ import {
   trim,
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace } from "../state/actions";
-import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure } from "../state/measure";
@@ -360,6 +360,7 @@ export function ViewportView() {
           addLines(pts, closed, (p) => (typeof p === "string" ? pointAt(o!.sk, p, o!.sol) : p));
         },
         addArc: addArcGeometry,
+        addTangentArc: addTangentArcGeometry,
         addCircle: addCircleGeometry,
         addSpline: addSplineGeometry,
         addPoint: addFreePoint,
@@ -478,7 +479,7 @@ export function ViewportView() {
     else if (mode.kind === "measure") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "fillet" || f?.type === "chamfer") filter = { faces: false, edges: true, planes: false, sketches: false };
     else if (f?.type === "shell" || f?.type === "hole") filter = bodiesOnly;
-    else if (f?.type === "combine" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
+    else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
     else if (f?.type === "loft") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     vp.setPickFilter(filter);

@@ -418,6 +418,47 @@ function circleCenter(a: Vec2, m: Vec2, b: Vec2): Vec2 | null {
   return [(sa * (m[1] - b[1]) + sm * (b[1] - a[1]) + sb * (a[1] - m[1])) / d, (sa * (b[0] - m[0]) + sm * (a[0] - b[0]) + sb * (m[0] - a[0])) / d];
 }
 
+/**
+ * The direction a line or arc continues in at its free end `at` (a unit vector), and that curve's id.
+ * Null when no line or arc ends there.
+ */
+export function endTangent(geo: GeomResolved[], at: Vec2): { curve: Id; dir: Vec2 } | null {
+  for (const g of geo) {
+    if (g.type === "line") {
+      const [near, far] = dist(g.a, at) < 1e-6 ? [g.a, g.b] : dist(g.b, at) < 1e-6 ? [g.b, g.a] : [null, null];
+      if (near && far) {
+        const l = dist(near, far) || 1;
+        return { curve: g.id, dir: [(near[0] - far[0]) / l, (near[1] - far[1]) / l] };
+      }
+    } else if (g.type === "arc") {
+      const atB = dist(g.b, at) < 1e-6;
+      if (atB || dist(g.a, at) < 1e-6) {
+        const r: Vec2 = [at[0] - g.c[0], at[1] - g.c[1]];
+        const l = Math.hypot(r[0], r[1]) || 1;
+        const s = atB ? 1 : -1;
+        return { curve: g.id, dir: [(-r[1] / l) * s, (r[0] / l) * s] };
+      }
+    }
+  }
+  return null;
+}
+
+/** The arc leaving `p` along `dir` and ending at `e`: its centre and a point on it. Null when `e` lies on the line. */
+export function tangentArcThrough(p: Vec2, dir: Vec2, e: Vec2): { center: Vec2; through: Vec2 } | null {
+  const n: Vec2 = [-dir[1], dir[0]];
+  const d: Vec2 = [e[0] - p[0], e[1] - p[1]];
+  const dn = d[0] * n[0] + d[1] * n[1];
+  if (Math.abs(dn) < 1e-9 * Math.max(1, dist(p, e))) return null;
+  const rc = (d[0] * d[0] + d[1] * d[1]) / (2 * dn);
+  const center: Vec2 = [p[0] + n[0] * rc, p[1] + n[1] * rc];
+  const m: Vec2 = [(p[0] + e[0]) / 2, (p[1] + e[1]) / 2];
+  const lm = dist(center, m) || 1;
+  // The short way round when the end is ahead of the start, the long way when it is behind.
+  const s = d[0] * dir[0] + d[1] * dir[1] >= 0 ? 1 : -1;
+  const r = Math.abs(rc);
+  return { center, through: [center[0] + ((m[0] - center[0]) / lm) * r * s, center[1] + ((m[1] - center[1]) / lm) * r * s] };
+}
+
 /** Add a constraint. Returns its id, or a message saying why it doesn't apply. */
 export function addConstraint(sk: Geo, type: ConstraintType, refs: Id[], value?: string): { id: Id } | { error: string } {
   const kinds = refs.map((r) => geomType(sk, r));

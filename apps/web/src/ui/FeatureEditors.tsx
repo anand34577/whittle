@@ -24,6 +24,7 @@ import type {
   OffsetFeature,
   ScaleFeature,
   ConstructionPlaneFeature,
+  JointFeature,
   PlaneRef,
   DraftFeature,
   OffsetFaceFeature,
@@ -734,6 +735,79 @@ function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
   );
 }
 
+function JointEditor({ f }: { f: JointFeature }) {
+  const turns = f.joint === "revolute" || f.joint === "cylindrical";
+  const slides = f.joint === "slider" || f.joint === "cylindrical";
+  const limitKind = f.joint === "revolute" ? "angle" : "length";
+  const set = (label: string, recipe: (d: JointFeature) => void) => upd(f, label, (d) => void (d.type === "joint" && recipe(d)));
+  return (
+    <>
+      <BodySelect label="Moving body" value={f.bodyId} allowAuto="Choose…" exclude={f.id} onChange={(v) => set("Body", (d) => void (d.bodyId = v))} />
+      <BodySelect label="Attached to" value={f.fixedId} allowAuto="Choose…" exclude={f.id} onChange={(v) => set("Attached to", (d) => void (d.fixedId = v))} />
+      <Segmented
+        label="Joint"
+        value={f.joint}
+        options={[
+          { value: "rigid", label: "Rigid", title: "No motion: holds the body where it is" },
+          { value: "revolute", label: "Revolute", title: "Turns about an axis (hinge, wheel)" },
+          { value: "slider", label: "Slider", title: "Slides along an axis (drawer, piston)" },
+          { value: "cylindrical", label: "Cylindrical", title: "Turns and slides along the same axis (screw)" },
+        ]}
+        onChange={(v) =>
+          set("Joint type", (d) => {
+            d.joint = v;
+            d.min = v === "revolute" ? "-90" : "-50";
+            d.max = v === "revolute" ? "90" : "50";
+          })
+        }
+      />
+      {f.joint !== "rigid" && (
+        <Segmented
+          label="Axis"
+          value={f.axis}
+          options={[
+            { value: "x", label: "X" },
+            { value: "y", label: "Y" },
+            { value: "z", label: "Z" },
+          ]}
+          onChange={(v) => set("Axis", (d) => void (d.axis = v))}
+        />
+      )}
+      {turns && (
+        <Segmented
+          label="Pivot at"
+          value={f.origin}
+          options={[
+            { value: "center", label: "Body center" },
+            { value: "point", label: "A point" },
+          ]}
+          onChange={(v) => set("Pivot", (d) => void (d.origin = v))}
+        />
+      )}
+      {turns && f.origin === "point" && (
+        <div className="field-row">
+          {(["X", "Y", "Z"] as const).map((axis, i) => (
+            <ExprInput key={axis} label={axis} kind="length" value={f.point[i]!} onChange={(v) => set("Pivot", (d) => void (d.point[i] = v))} />
+          ))}
+        </div>
+      )}
+      {turns && <ExprInput label="Angle" kind="angle" value={f.angle} autoFocus hint="Drive the joint: change this to turn the body" onChange={(v) => set("Angle", (d) => void (d.angle = v))} />}
+      {slides && <ExprInput label="Distance" kind="length" value={f.distance} autoFocus={!turns} hint="Drive the joint: change this to slide the body" onChange={(v) => set("Distance", (d) => void (d.distance = v))} />}
+      {f.joint !== "rigid" && (
+        <>
+          <Toggle label="Limit the travel" checked={f.limited} onChange={(v) => set("Limits", (d) => void (d.limited = v))} />
+          {f.limited && (
+            <div className="field-row">
+              <ExprInput label="Min" kind={limitKind} value={f.min} onChange={(v) => set("Minimum", (d) => void (d.min = v))} />
+              <ExprInput label="Max" kind={limitKind} value={f.max} onChange={(v) => set("Maximum", (d) => void (d.max = v))} />
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 function OffsetFaceEditor({ f }: { f: OffsetFaceFeature }) {
   const n = f.faces.length;
   return (
@@ -768,6 +842,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <OffsetFaceEditor f={f} />;
     case "cplane":
       return <ConstructionPlaneEditor f={f} />;
+    case "joint":
+      return <JointEditor f={f} />;
     case "draft":
       return <DraftEditor f={f} />;
     case "hole":

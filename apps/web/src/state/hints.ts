@@ -15,6 +15,7 @@ const TOOL_HINTS: Record<string, [string, string]> = {
   text: ["Click where the text should start", "Type the text on the right"],
   polyline: ["Click the first point", "Click the next point \u00b7 click the first point to close \u00b7 A turns arcs on/off (click the end, then a point on the arc) \u00b7 Backspace undoes a point"],
   segment: ["Click the first point (snap to points to join them)", "Click the next point · click the first point to close · click the last point again or Enter to stop · level lines get Horizontal/Vertical"],
+  tarc: ["Click the end of a line or arc", "Click where the arc ends: it leaves the line smoothly (tangent)"],
   conic: ["Click where the curve starts", "Click where it ends, then the apex where the tangents meet · type ρ (0.01–0.99; 0.5 = parabola)"],
   carc: ["Click the center", "Click where the arc starts, then where it ends (counter-clockwise)"],
   polygonC: ["Click the center", "Click the middle of an edge · sides are set in the panel"],
@@ -89,6 +90,8 @@ export function hintFor(s: AppState): string {
         return "Positive grows the body, negative shrinks it (clearances for fits and printing) · Enter to finish";
       case "scale":
         return "Type a factor (2 = twice the size) · Enter to finish";
+      case "joint":
+        return !f.bodyId ? "Click the body that moves" : !f.fixedId ? "Click the body it is attached to · choose the joint type · change Angle or Distance to drive it" : "Change Angle or Distance to drive the joint · Enter to finish";
       case "cplane":
         return "Set the offset and tilt · then pick this plane when starting a sketch · Enter to finish";
       case "offsetFace":

@@ -36,6 +36,8 @@ export function featureInputs(f: Feature): Id[] {
     case "offset":
     case "scale":
       return f.bodyId ? [f.bodyId] : [];
+    case "joint":
+      return [...(f.bodyId ? [f.bodyId] : []), ...(f.fixedId ? [f.fixedId] : [])];
     case "draft":
     case "offsetFace":
       return [...new Set(f.faces.map((x) => x.bodyId))];
