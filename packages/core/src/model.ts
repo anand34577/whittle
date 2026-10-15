@@ -221,6 +221,25 @@ export interface ConstructionPlaneFeature extends FeatureBase {
   plane: PlaneRef;
 }
 
+export type ConstructMode =
+  | "midplane" | "plane3" | "plane2e" | "planeEdge" | "planeTangent" | "planePath"
+  | "axisCyl" | "axis2p" | "axis2pl" | "axisEdge" | "axisPerp"
+  | "pointVertex" | "point2e" | "point3pl" | "pointCenter" | "pointEdgePlane";
+
+/**
+ * Construction geometry derived from model faces, edges and points: planes (sketchable),
+ * axes and points (references). `value` is an angle (planeEdge, planeTangent) or a 0-100 %
+ * position along the edge (planePath).
+ */
+export interface ConstructFeature extends FeatureBase {
+  type: "construct";
+  mode: ConstructMode;
+  faces: FaceRef[];
+  edges: EdgeRef[];
+  points: Vec3[];
+  value: Expr;
+}
+
 export interface SketchFeature extends FeatureBase {
   type: "sketch";
   plane: PlaneRef;
@@ -507,6 +526,7 @@ export type Feature =
   | DraftFeature
   | JointFeature
   | ConstructionPlaneFeature
+  | ConstructFeature
   | OffsetFaceFeature
   | HoleFeature
   | LoftFeature

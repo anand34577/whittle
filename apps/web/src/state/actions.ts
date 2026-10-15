@@ -1,5 +1,7 @@
 /** High-level commands used by the toolbar, shortcuts, palette and context bar. */
 import {
+  CONSTRUCT_MODES,
+  type ConstructMode,
   type EdgeRef,
   type FaceRef,
   type Feature,
@@ -15,6 +17,7 @@ import {
   makeChamfer,
   makeCoil,
   makeCombine,
+  makeConstruct,
   makeConstructionPlane,
   makeDraft,
   makeJoint,
@@ -382,6 +385,32 @@ export function startConstructionPlane() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+/** Construction plane / axis / point: picks are routed by handlePick. */
+export function startConstruct(mode: ConstructMode) {
+  const f = makeConstruct(get().doc, mode);
+  beginNewFeature(f, `New ${f.name}`);
+  toast("info", CONSTRUCT_MODES[mode].hint);
+}
+
+/** A clicked point, snapped to the nearest straight-edge corner of its body when close. */
+function snapPoint(p: Pick & { at?: Vec3 }): Vec3 | null {
+  if (!p.at) return null;
+  const at = p.at;
+  const body = p.kind === "face" || p.kind === "edge" || p.kind === "body" ? pickableBodies().find((b) => b.id === p.bodyId) : undefined;
+  let best: Vec3 = at;
+  let bestD = 3;
+  for (const e of body?.edges ?? []) {
+    for (const end of e.ends ?? []) {
+      const dd = d3(end, at);
+      if (dd < bestD) {
+        bestD = dd;
+        best = end;
+      }
+    }
+  }
+  return [Math.round(best[0] * 1e4) / 1e4, Math.round(best[1] * 1e4) / 1e4, Math.round(best[2] * 1e4) / 1e4];
+}
+
 /** Press/Pull: starts with any flat faces already selected. */
 export function startOffsetFace() {
   const faces = get()
@@ -466,6 +495,40 @@ export function handlePick(p: Pick | null, additive: boolean) {
       else if (x.path === p.sketchId) x.path = "";
       else if (!x.profile) x.profile = p.sketchId;
       else x.path = p.sketchId;
+    });
+    return;
+  }
+  if (f && f.type === "construct" && (p?.kind === "face" || p?.kind === "edge")) {
+    const need = CONSTRUCT_MODES[f.mode];
+    const round = f.mode === "axisCyl" || f.mode === "pointCenter";
+    const takesFace = (need.faces > 0 || f.mode === "pointCenter") && p.kind === "face";
+    const takesEdge = (need.edges > 0 || f.mode === "axisCyl") && p.kind === "edge";
+    const point = need.points > 0 && !round ? snapPoint(p) : null;
+    const fr = takesFace ? faceRefFromPick(p) : null;
+    const er = takesEdge ? edgeRefFromPick(p) : null;
+    if (!fr && !er && !point) return toast("info", CONSTRUCT_MODES[f.mode].hint);
+    mutate("Pick", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "construct") return;
+      const cap = (list: unknown[], n: number) => {
+        while (list.length > n) list.shift();
+      };
+      if (fr) {
+        const i = x.faces.findIndex((e) => sameFace(e, fr));
+        if (i >= 0) x.faces.splice(i, 1);
+        else x.faces.push(fr);
+        cap(x.faces, Math.max(1, need.faces));
+      }
+      if (er) {
+        const i = x.edges.findIndex((e) => d3(e.mid, er.mid) < 1e-6);
+        if (i >= 0) x.edges.splice(i, 1);
+        else x.edges.push(er);
+        cap(x.edges, Math.max(1, need.edges));
+      }
+      if (point && (!fr || x.mode === "axisPerp")) {
+        x.points.push(point);
+        cap(x.points, need.points);
+      }
     });
     return;
   }

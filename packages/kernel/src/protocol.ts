@@ -51,6 +51,8 @@ export interface SketchFrame {
   xDir: Vec3;
   yDir: Vec3;
   normal: Vec3;
+  /** Construction geometry kind (planes by default). */
+  kind?: "plane" | "axis" | "point";
   /** Triangles (xyz per vertex, world space) of the closed profile regions. */
   fill?: Float32Array;
   /** Solved constraint-driven geometry, when the sketch has any. */

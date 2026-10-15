@@ -8,6 +8,8 @@ export function featureInputs(f: Feature): Id[] {
       return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
     case "cplane":
       return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
+    case "construct":
+      return [...new Set([...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId)])];
     case "extrude":
     case "revolve":
       return [f.sketch, ...(f.target ? [f.target] : [])];

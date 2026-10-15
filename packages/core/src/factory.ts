@@ -1,5 +1,6 @@
 import type {
   BodyOp,
+  ConstructMode,
   CircleEntity,
   EllipseEntity,
   GearEntity,
@@ -69,6 +70,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   draft: "Draft",
   offsetFace: "Press/Pull",
   cplane: "Plane",
+  construct: "Construct",
   joint: "Joint",
 };
 
@@ -235,6 +237,31 @@ export function makeConstructionPlane(doc: WhittleDocument, plane: PlaneRef): Fe
 
 export function makeJoint(doc: WhittleDocument, bodyId?: Id, fixedId?: Id): Feature {
   return { id: uid("jt"), type: "joint", name: nextName(doc, "Joint"), bodyId, fixedId, joint: "revolute", origin: "center", point: ["0", "0", "0"], axis: "z", angle: "0", distance: "0", limited: false, min: "-90", max: "90" };
+}
+
+/** What each construct mode asks the user to pick, and how to say it. */
+export const CONSTRUCT_MODES: Record<ConstructMode, { label: string; faces: number; edges: number; points: number; value?: "angle" | "percent"; hint: string }> = {
+  midplane: { label: "Midplane", faces: 2, edges: 0, points: 0, hint: "Click two flat faces: the plane sits halfway between them" },
+  plane3: { label: "Plane through 3 points", faces: 0, edges: 0, points: 3, hint: "Click three points on the model (they snap to nearby corners)" },
+  plane2e: { label: "Plane through 2 edges", faces: 0, edges: 2, points: 0, hint: "Click two straight edges that lie in one plane" },
+  planeEdge: { label: "Plane at angle to edge", faces: 0, edges: 1, points: 0, value: "angle", hint: "Click a straight edge; optionally a face to measure the angle from" },
+  planeTangent: { label: "Tangent plane", faces: 1, edges: 0, points: 0, value: "angle", hint: "Click a round face; the angle moves the plane around it" },
+  planePath: { label: "Plane along path", faces: 0, edges: 1, points: 0, value: "percent", hint: "Click an edge; the plane stands across it at the chosen position" },
+  axisCyl: { label: "Axis through cylinder", faces: 1, edges: 0, points: 0, hint: "Click a round face or circular edge" },
+  axis2p: { label: "Axis through 2 points", faces: 0, edges: 0, points: 2, hint: "Click two points on the model" },
+  axis2pl: { label: "Axis through 2 planes", faces: 2, edges: 0, points: 0, hint: "Click two flat faces that meet at an angle" },
+  axisEdge: { label: "Axis through edge", faces: 0, edges: 1, points: 0, hint: "Click a straight edge" },
+  axisPerp: { label: "Axis perpendicular at point", faces: 1, edges: 0, points: 1, hint: "Click a face where the axis should stand out of it" },
+  pointVertex: { label: "Point", faces: 0, edges: 0, points: 1, hint: "Click a corner or any spot on the model" },
+  point2e: { label: "Point at 2 edges", faces: 0, edges: 2, points: 0, hint: "Click two straight edges that cross" },
+  point3pl: { label: "Point at 3 planes", faces: 3, edges: 0, points: 0, hint: "Click three flat faces that meet" },
+  pointCenter: { label: "Point at circle center", faces: 0, edges: 1, points: 0, hint: "Click a circular edge (or a round face)" },
+  pointEdgePlane: { label: "Point at edge and plane", faces: 1, edges: 1, points: 0, hint: "Click a straight edge and a flat face it pierces" },
+};
+
+export function makeConstruct(doc: WhittleDocument, mode: ConstructMode): Feature {
+  const label = mode.startsWith("plane") || mode === "midplane" ? "Plane" : mode.startsWith("axis") ? "Axis" : "Point";
+  return { id: uid("cg"), type: "construct", name: nextName(doc, label), mode, faces: [], edges: [], points: [], value: mode === "planePath" ? "50" : "0" };
 }
 
 export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {

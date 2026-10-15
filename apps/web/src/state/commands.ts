@@ -10,6 +10,7 @@ import {
   startCoil,
   startCombine,
   startDraft,
+  startConstruct,
   startConstructionPlane,
   startJoint,
   startOffsetFace,
@@ -33,7 +34,7 @@ import {
 import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
 import { exportSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
-import { type ConstraintType, CONSTRAINT_LABELS, DIMENSIONS } from "@whittle/core";
+import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS } from "@whittle/core";
 import { breakSelection, gridPatternSelection, moveSelection, scaleSelection, availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { THEMES } from "./prefs";
@@ -389,6 +390,19 @@ export const COMMANDS: Command[] = [
   { id: "coach", label: "Guided first part", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started", run: () => useApp.setState({ coach: true, panel: null }) },
   { id: "welcome", label: "Start screen & templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
 ];
+
+const CONSTRUCT_ICON = (m: ConstructMode): IconName => (m.startsWith("plane") || m === "midplane" ? "plane" : m.startsWith("axis") ? "axis" : "point");
+const CONSTRUCT_COMMANDS: Command[] = (Object.keys(CONSTRUCT_MODES) as ConstructMode[]).map((m) => ({
+  id: `construct-${m}`,
+  label: CONSTRUCT_MODES[m].label,
+  group: "Construct",
+  icon: CONSTRUCT_ICON(m),
+  keywords: "construct reference datum plane axis point midplane tangent",
+  hint: CONSTRUCT_MODES[m].hint,
+  when: (s: AppState) => inModel(s) && (s.regen?.bodies.length ?? 0) > 0,
+  run: model(() => startConstruct(m)),
+}));
+COMMANDS.push(...CONSTRUCT_COMMANDS);
 
 export const commandById = (id: string) => COMMANDS.find((c) => c.id === id)!;
 

@@ -189,8 +189,8 @@ function toolsFor(profile: Profile | null) {
   const pro = profile === "engineer" || profile === "designer";
   return {
     create: pro
-      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["plane", "pipe", "thread", "spring", "import"] }
-      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "plane", "loft", "thread", "spring", "import"] },
+      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["pipe", "thread", "spring", "import"] }
+      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "loft", "thread", "spring", "import"] },
     modify: pro
       ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["press-pull", "joint", "combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
       : { primary: ["fillet", "chamfer", "shell", "move"], more: ["press-pull", "joint", "combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
@@ -240,6 +240,7 @@ export function Toolbar() {
         <span className="toolgroup__label">Start</span>
       </div>
       <Group label="Create" ids={create.primary} more={create.more} />
+      <Group label="Construct" ids={["plane", "construct-midplane", "construct-axisCyl", "construct-pointVertex"]} more={["construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
       <Group label="Shapes" ids={["box", "cylinder", "sphere"]} more={["cone", "torus", "tube", "spring"]} />
       <Group label="Modify" ids={modify.primary} more={modify.more} />
       <Group label="Inspect" ids={["measure", "section"]} more={["overhang", "draft-analysis", "zebra", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />

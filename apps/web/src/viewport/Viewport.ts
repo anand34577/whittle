@@ -434,6 +434,23 @@ export class Viewport {
     this.clearGroup(this.cplanes);
     const s = Math.max(30, this.sceneRadius * 0.5);
     for (const f of frames) {
+      if (f.kind === "axis") {
+        const o = new THREE.Vector3(...f.origin);
+        const d = new THREE.Vector3(...f.normal).multiplyScalar(s * 0.8);
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([o.clone().sub(d), o.clone().add(d)]), new THREE.LineDashedMaterial({ color: this.theme.plane, dashSize: s * 0.03, gapSize: s * 0.02, transparent: true, opacity: 0.9, depthTest: false }));
+        line.computeLineDistances();
+        line.raycast = () => {};
+        line.renderOrder = 5;
+        this.cplanes.add(line);
+        continue;
+      }
+      if (f.kind === "point") {
+        const pts = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...f.origin)]), new THREE.PointsMaterial({ color: this.theme.plane, size: 9, sizeAttenuation: false, depthTest: false }));
+        pts.raycast = () => {};
+        pts.renderOrder = 5;
+        this.cplanes.add(pts);
+        continue;
+      }
       const geo = new THREE.PlaneGeometry(s, s);
       const mat = new THREE.MeshBasicMaterial({ color: this.theme.plane, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false });
       const mesh = new THREE.Mesh(geo, mat);

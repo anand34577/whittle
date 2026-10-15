@@ -29,7 +29,8 @@ export function Browser() {
   const ev = documentEvaluator(doc);
   const bodies = regen?.bodies ?? [];
   const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch");
-  const cplanes = doc.features.slice(0, end).filter((f) => f.type === "cplane");
+  const cplanes = doc.features.slice(0, end).filter((f) => f.type === "cplane" || (f.type === "construct" && (f.mode.startsWith("plane") || f.mode === "midplane")));
+  const refs = doc.features.slice(0, end).filter((f) => f.type === "construct" && !(f.mode.startsWith("plane") || f.mode === "midplane"));
   const isSel = (fn: (p: (typeof selection)[number]) => boolean) => selection.some(fn);
 
   return (
@@ -78,6 +79,17 @@ export function Browser() {
             </div>
           ))}
         </Section>
+
+        {refs.length > 0 && (
+          <Section title="Axes & points" count={refs.length} defaultOpen={false}>
+            {refs.map((c) => (
+              <button key={c.id} className="tree__row" onClick={() => editFeature(c.id)} title="Edit">
+                <Icon name={c.type === "construct" && c.mode.startsWith("axis") ? "axis" : "point"} size={16} />
+                <span className="tree__name">{c.name}</span>
+              </button>
+            ))}
+          </Section>
+        )}
 
         <Section title="Bodies" count={bodies.length}>
           {bodies.length === 0 && <p className="tree__empty">No bodies yet</p>}

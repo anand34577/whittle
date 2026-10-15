@@ -65,6 +65,7 @@ import {
 import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
+import { constructFrame } from "./construct";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
 
@@ -482,7 +483,7 @@ export class Builder {
     }
     const planes: SketchFrame[] = [];
     for (const f of doc.features.slice(0, end)) {
-      const s = f.type === "cplane" ? prev.sketches.get(f.id) : undefined;
+      const s = f.type === "cplane" || f.type === "construct" ? prev.sketches.get(f.id) : undefined;
       if (s) planes.push({ ...s.frame });
     }
     let pickBodies: BodyResult[] | undefined;
@@ -574,6 +575,17 @@ export class Builder {
   /** Mutates the body/sketch maps; returns a warning message, if any. */
   private apply(f: Feature, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchBuilt>, ev: Evaluator): string | undefined {
     switch (f.type) {
+      case "construct": {
+        const { frame, warning } = constructFrame(f, {
+          body: (id) => bodyForRefs(bodies, id),
+          angle: (e) => ev.num(e, "angle", "Angle"),
+          num: (e) => ev.num(e, "number", "Value"),
+          fail: (m) => new FeatureError(m, undefined, /^(Pick|Click)/.test(m)),
+        });
+        sketches.set(f.id, { frame, drawing: null });
+        return warning;
+      }
+
       case "cplane": {
         const { frame, warning } = planeFrame(f.id, f.plane, bodies, sketches, ev);
         sketches.set(f.id, { frame, drawing: null });

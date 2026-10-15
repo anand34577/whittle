@@ -1,5 +1,6 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
+import { CONSTRUCT_MODES } from "@whittle/core";
 import type {
   BodyOp,
   ChamferFeature,
@@ -24,6 +25,7 @@ import type {
   OffsetFeature,
   ScaleFeature,
   ConstructionPlaneFeature,
+  ConstructFeature,
   JointFeature,
   PlaneRef,
   DraftFeature,
@@ -735,6 +737,35 @@ function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
   );
 }
 
+function ConstructEditor({ f }: { f: ConstructFeature }) {
+  const need = CONSTRUCT_MODES[f.mode];
+  const has = f.faces.length + f.edges.length + f.points.length;
+  const parts = [f.faces.length && `${f.faces.length} face${f.faces.length > 1 ? "s" : ""}`, f.edges.length && `${f.edges.length} edge${f.edges.length > 1 ? "s" : ""}`, f.points.length && `${f.points.length} point${f.points.length > 1 ? "s" : ""}`].filter(Boolean);
+  return (
+    <>
+      <div className="picker">
+        <Icon name={f.mode.startsWith("axis") ? "axis" : f.mode.startsWith("point") ? "point" : "plane"} size={16} />
+        <span>{has === 0 ? need.hint : parts.join(" · ")}</span>
+        {has > 0 && (
+          <button className="link" onClick={() => upd(f, "Clear picks", (d) => void (d.type === "construct" && ((d.faces = []), (d.edges = []), (d.points = []))))}>
+            Clear
+          </button>
+        )}
+      </div>
+      {need.value && (
+        <ExprInput
+          label={need.value === "angle" ? "Angle" : "Position (%)"}
+          kind={need.value === "angle" ? "angle" : "number"}
+          value={f.value}
+          autoFocus
+          hint={need.value === "angle" ? "Rotation from the reference" : "0 = start of the edge, 100 = end"}
+          onChange={(v) => upd(f, "Value", (d) => void (d.type === "construct" && (d.value = v)))}
+        />
+      )}
+    </>
+  );
+}
+
 function JointEditor({ f }: { f: JointFeature }) {
   const turns = f.joint === "revolute" || f.joint === "cylindrical";
   const slides = f.joint === "slider" || f.joint === "cylindrical";
@@ -844,6 +875,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <ConstructionPlaneEditor f={f} />;
     case "joint":
       return <JointEditor f={f} />;
+    case "construct":
+      return <ConstructEditor f={f} />;
     case "draft":
       return <DraftEditor f={f} />;
     case "hole":

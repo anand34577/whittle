@@ -49,6 +49,7 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   draft: "draft",
   offsetFace: "move",
   cplane: "plane",
+  construct: "plane",
   joint: "move",
 };
 

@@ -478,7 +478,8 @@ export function ViewportView() {
     if (mode.kind === "pickPlane") filter = { faces: true, edges: false, planes: true, sketches: false };
     else if (mode.kind === "measure") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "fillet" || f?.type === "chamfer") filter = { faces: false, edges: true, planes: false, sketches: false };
-    else if (f?.type === "shell" || f?.type === "hole") filter = bodiesOnly;
+    else if (f?.type === "shell" || f?.type === "hole" || f?.type === "draft" || f?.type === "offsetFace") filter = bodiesOnly;
+    else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
     else if (f?.type === "loft") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
