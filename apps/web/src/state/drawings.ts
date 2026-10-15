@@ -241,7 +241,13 @@ function svgLoops(text: string): Vec2[][] {
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;left:-10000px;top:0;width:1000px;height:1000px;visibility:hidden;pointer-events:none";
   const svg = document.importNode(root, true) as unknown as SVGSVGElement;
-  for (const s of svg.querySelectorAll("script, foreignObject")) s.remove();
+  // Only the outlines are wanted: drop anything that could run code or fetch something once it is mounted.
+  for (const s of svg.querySelectorAll("script, foreignObject, image, iframe, object, embed, audio, video, animate, set, animateMotion, animateTransform")) s.remove();
+  for (const el of [svg, ...svg.querySelectorAll("*")]) {
+    for (const a of [...el.attributes]) {
+      if (/^on/i.test(a.name) || (/^(xlink:)?href$/i.test(a.name) && !a.value.trim().startsWith("#"))) el.removeAttribute(a.name);
+    }
+  }
   host.appendChild(svg);
   document.body.appendChild(host);
   try {

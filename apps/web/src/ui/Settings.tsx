@@ -130,7 +130,7 @@ function Workspace() {
 /** Choose a profile and take on its defaults. */
 export function applyProfile(id: Profile) {
   const p = PROFILES.find((x) => x.id === id)!;
-  setPrefs({ profile: id, units: p.units, material: p.material, hints: p.hints, toolLabels: id !== "engineer" });
+  setPrefs({ profile: id, units: p.units, material: p.material, hints: p.hints, toolLabels: true });
 }
 
 function Navigation() {

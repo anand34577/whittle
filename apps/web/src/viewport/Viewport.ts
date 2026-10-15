@@ -696,9 +696,49 @@ export class Viewport {
         this.world.add(v.cap);
       }
     }
+    this.applyExplode();
     if (this.sketchFrame) this.setSketchFrame(this.sketchFrame);
     this.updateSceneRadius();
     this.invalidate();
+  }
+
+  /**
+   * Exploded view: every component (bodies sharing a component move together) slides straight out
+   * from the middle of the assembly. Only the display moves; picking is paused meanwhile.
+   */
+  private applyExplode() {
+    const k = this.view.explode ?? 0;
+    const { list, meta } = this.lastBodies;
+    const groups = new Map<string, BodyResult[]>();
+    for (const b of list) {
+      const key = meta[b.id]?.component || b.id;
+      groups.set(key, [...(groups.get(key) ?? []), b]);
+    }
+    const box = new THREE.Box3();
+    const centers = new Map<string, THREE.Vector3>();
+    for (const [key, members] of groups) {
+      const gb = new THREE.Box3();
+      for (const b of members) gb.union(new THREE.Box3(new THREE.Vector3(...b.bbox[0]), new THREE.Vector3(...b.bbox[1])));
+      box.union(gb);
+      centers.set(key, gb.getCenter(new THREE.Vector3()));
+    }
+    const mid = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+    const span = box.isEmpty() ? 0 : box.getSize(new THREE.Vector3()).length();
+    let n = 0;
+    const offsets = new Map<string, THREE.Vector3>();
+    for (const [key, c] of centers) {
+      const dir = c.clone().sub(mid);
+      // Parts sitting at the centre (a shaft through a housing) lift straight up, one level each.
+      if (dir.length() < span * 0.02) dir.set(0, 0, span * 0.25 * (1 + n++));
+      offsets.set(key, dir.multiplyScalar(k * 1.2));
+    }
+    for (const v of this.bodies.values()) {
+      const key = meta[v.id]?.component || v.id;
+      const o = offsets.get(key) ?? new THREE.Vector3();
+      v.mesh.position.copy(o);
+      v.edges.position.copy(o);
+      v.cap?.position.copy(o);
+    }
   }
 
   /** Display settings: style, section, print check, grid, projection. */
@@ -716,6 +756,7 @@ export class Viewport {
     const rebuild =
       prev.display !== v.display || !!prev.section !== !!v.section || prev.analysis !== v.analysis;
     if (rebuild) this.setBodies(this.lastBodies.list, this.lastBodies.meta);
+    else if ((prev.explode ?? 0) !== (v.explode ?? 0)) this.applyExplode();
     this.grid.visible = v.grid;
     if (prev.ortho !== v.ortho) {
       this.applyOrbit();
@@ -1076,6 +1117,8 @@ export class Viewport {
   }
 
   pick(e: { clientX: number; clientY: number }): Pick | null {
+    // Bodies are drawn away from where they are while exploded, so a click wouldn't mean the right place.
+    if ((this.view.explode ?? 0) > 0.001) return null;
     const usePick = this.pickBodies.length > 0;
     const views = usePick ? this.pickBodies : [...this.bodies.values()].filter((v) => v.visible);
     this.raycaster.setFromCamera(this.ndc(e), this.camera);

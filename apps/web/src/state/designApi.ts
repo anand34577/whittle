@@ -195,7 +195,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
   {
     name: "add_feature",
     description: `Add a 3D feature at the end of the timeline. Types: ${[
-      "extrude {sketch, distance, extent: one|symmetric|two|through (through all bodies; for cuts), distance2, flip, taper, twist, thin (wall thickness: walls along outlines, open paths become ribs), thinSide: center|inside|outside, op}",
+      "extrude {sketch, distance, extent: one|symmetric|two|through|face (through = all bodies; face = stop exactly at to_face: {body, face: top|bottom|front|back|left|right}), distance2, flip, taper, twist, thin (wall thickness: walls along outlines, open paths become ribs), thinSide: center|inside|outside, op}",
       "revolve {sketch, axis: x|y|line (line = the sketch's first path or construction line), angle, op}",
       "loft {sketches: [ids], ruled, op}",
       "sweep {profile, path, orientation: fixed|frenet, op}",
@@ -206,8 +206,8 @@ export const DESIGN_TOOLS: ToolDef[] = [
       "shell {body, face: selector, thickness}",
       "hole {body, face: selector, points: [[x,y]...] in the face frame, diameter, through, depth, style: simple|counterbore|countersink, headDiameter, headDepth}",
       "draft {body, faces: 'sides', angle, pull: x|y|z}",
-      "mirror {body, plane: XY|XZ|YZ, offset (moves the plane along its normal), merge}",
-      "pattern {body, pattern: linear|circular, axis: x|y|z, count, spacing, angle, axis2, count2, spacing2 (a second linear direction makes a grid), merge}",
+      "mirror {body, plane: XY|XZ|YZ, offset (moves the plane along its normal), merge, features: [earlier feature names to mirror instead of the whole body]}",
+      "pattern {body, pattern: linear|circular, axis: x|y|z, count, spacing, angle, axis2, count2, spacing2 (a second linear direction makes a grid), merge, features: [earlier feature names to repeat instead of the whole body, e.g. one boss or cut]}",
       "move {body, translate: [x,y,z], axis, angle, copy}",
       "combine {target, tools: [bodies], op: join|cut|intersect, keepTools}",
       "split {body, plane, offset, keep: both|above|below}",
@@ -417,11 +417,21 @@ function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
       else if (f.type === "draft") {
         const b = bodyMesh(id);
         const axis = ({ x: 0, y: 1, z: 2 } as const)[String(s.pull ?? "z") as "x" | "y" | "z"] ?? 2;
-        rec.faces = b.faces.filter((x) => x.surface === "PLANE" && Math.abs(x.normal[axis]) < 1e-3).map((x) => ({ bodyId: id, ...x }));
+        rec.faces = b.faces.filter((x) => (x.surface === "PLANE" || x.surface === "CYLINDRE" || x.surface === "CONE") && Math.abs(x.normal[axis]) < 1e-3).map((x) => ({ bodyId: id, ...x }));
       } else if (f.type === "combine") rec.target = id;
       else rec.bodyId = id;
     } else if (k === "target") rec.target = bodyRef(v);
     else if (k === "tools") rec.tools = (v as unknown[]).map(bodyRef);
+    else if (k === "to_face") {
+      const o = v as { body?: unknown; face?: unknown };
+      if (!o || typeof o !== "object" || !o.body) throw new ApiInputError('to_face is {body, face}, e.g. {"body": "Body 1", "face": "bottom"}.');
+      rec.toFace = faceBySelector(bodyRef(o.body), String(o.face ?? "top"));
+    }
+    else if (k === "features") {
+      if (f.type !== "pattern" && f.type !== "mirror") throw new ApiInputError(`"features" is a setting of pattern and mirror.`);
+      if (!Array.isArray(v) || v.length === 0) throw new ApiInputError("features is a list of feature names or ids to repeat.");
+      rec.features = v.map((x) => findFeatureRef(x).id);
+    }
     else if (k === "points") {
       if (!Array.isArray(v)) throw new ApiInputError("points is a list of [x, y].");
       rec.points = v.map((p) => [ex((p as unknown[])[0]), ex((p as unknown[])[1])]);
@@ -610,7 +620,8 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
           const err = validateParamName(pname, doc().parameters);
           if (err) throw new ApiInputError(err);
         }
-        const kind = (input.kind as "length" | "angle" | "number" | "count") ?? existing?.kind ?? "length";
+        const kind = (input.kind as "length" | "angle" | "number" | "count" | undefined) ?? existing?.kind ?? "length";
+        if (!["length", "angle", "number", "count"].includes(kind)) throw new ApiInputError("kind is length, angle, number or count.");
         mutate(label(`set ${pname}`), (d) => {
           const p = d.parameters.find((x) => x.name === pname);
           if (p) {

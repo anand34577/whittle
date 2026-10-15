@@ -132,7 +132,7 @@ function radialFor(p: Pick | null): string[] {
   if (!p) return ["sketch", "box", "cylinder", "parts", "extrude", "import", "view-fit", "measure"];
   switch (p.kind) {
     case "face":
-      return ["sketch", "hole", "shell", "move", "measure", "hide", "isolate", "section"];
+      return ["sketch", "press-pull", "hole", "fillet", "shell", "measure", "hide", "isolate"];
     case "edge":
       return ["fillet", "chamfer", "measure", "move", "hide", "isolate"];
     case "body":
@@ -271,6 +271,24 @@ function SectionControl({ vp }: { vp: Viewport | null }) {
       <div className="mono small muted">
         {section.axis.toUpperCase()} = {trim(section.offset / f, 2)} {units}
       </div>
+    </div>
+  );
+}
+
+function ExplodeControl() {
+  const explode = useApp((s) => s.view.explode ?? 0);
+  if (explode <= 0) return null;
+  return (
+    <div className="floatcard section-card" role="group" aria-label="Exploded view">
+      <div className="floatcard__head">
+        <Icon name="combine" size={16} />
+        <b>Exploded view</b>
+        <button className="iconbtn iconbtn--small" onClick={() => setView({ explode: 0 })} aria-label="Close exploded view">
+          <Icon name="close" size={14} />
+        </button>
+      </div>
+      <Slider min={0.02} max={1.5} step={0.02} value={explode} onChange={(v) => setView({ explode: v })} ariaLabel="How far apart" format={(v) => `${Math.round(v * 100)}%`} />
+      <div className="small muted">Picking is paused while the parts are apart.</div>
     </div>
   );
 }
@@ -717,7 +735,7 @@ export function ViewportView() {
     const p = selection[0]!;
     const ids =
       p.kind === "face"
-        ? ["sketch", "hole", "shell", "measure"]
+        ? ["sketch", "press-pull", "hole", "fillet", "shell", "measure"]
         : p.kind === "edge"
           ? ["fillet", "chamfer", "measure"]
           : p.kind === "sketch"
@@ -783,7 +801,7 @@ export function ViewportView() {
           {contextActions.map((c) => (
             <button key={c.id} className="context-bar__btn" onClick={c.run}>
               <Icon name={c.icon ?? "more"} size={16} />
-              <span>{c.label}</span>
+              <span>{c.short ?? c.label}</span>
               {c.keys && c.keys.length === 1 && <kbd>{c.keys}</kbd>}
             </button>
           ))}
@@ -902,6 +920,7 @@ export function ViewportView() {
         })}
 
       <SectionControl vp={vp} />
+      <ExplodeControl />
       {mode.kind !== "sketch" && <ViewDock />}
       <ViewCube viewport={vp} tick={tick} />
       {radial && <RadialMenu x={radial.x} y={radial.y} ids={radialFor(radialPick.current)} />}

@@ -752,3 +752,40 @@ details.points summary {
   border-top: 1px solid var(--line);
   margin-top: 4px;
 }
+
+.variants {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.variants__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+.variant {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+}
+.variant.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft, var(--bg-2));
+}
+.variant__main {
+  padding: 4px 6px 4px 12px;
+  font-size: var(--fs-sm);
+}
+.variant__x {
+  display: grid;
+  place-items: center;
+  padding: 4px 8px 4px 2px;
+  color: var(--text-3);
+}
+.variant__x:hover {
+  color: var(--danger);
+}

@@ -1,6 +1,7 @@
 import type { Id, WhittleDocument } from "@whittle/core";
 import { strToU8, zipSync } from "fflate";
 import { type Shape3D, exportSTEP, makeCompound } from "replicad";
+import { buildDrawingSVG } from "./drawing";
 import type { ExportFormat } from "./protocol";
 
 export interface ExportedFile {
@@ -40,6 +41,9 @@ export async function exportShapes(
     return { data: await blobBytes(blob), mime: "model/stl", ext: "stl" };
   }
 
+  if (format === "drawing") {
+    return { data: strToU8(buildDrawingSVG(entries.map(([, s]) => s), { title: doc.name })), mime: "image/svg+xml", ext: "svg" };
+  }
   if (format === "obj") return { data: strToU8(buildOBJ(doc, entries)), mime: "model/obj", ext: "obj" };
   if (format === "ply") return { data: buildPLY(entries), mime: "application/x-ply", ext: "ply" };
   if (format === "glb") return { data: buildGLB(doc, entries), mime: "model/gltf-binary", ext: "glb" };
@@ -47,6 +51,13 @@ export async function exportShapes(
 }
 
 const MESH = { tolerance: 0.01, angularTolerance: 0.1 };
+
+/** A colour as six hex digits without the `#` (accepts #rgb and #rrggbb; anything else is a neutral grey). */
+export function hex6(color: string | undefined): string {
+  const h = (color ?? "").trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(h)) return h.replace(/./g, (c) => c + c);
+  return /^[0-9a-f]{6}$/i.test(h) ? h : "cccccc";
+}
 
 /** Wavefront OBJ: one named object per body, with a material per body color (inline .mtl names). */
 function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][]): string {
@@ -147,7 +158,7 @@ function buildGLB(doc: WhittleDocument, entries: [Id, Shape3D][]): Uint8Array {
     accessors.push({ bufferView: pv, componentType: 5126, count, type: "VEC3", min, max });
     accessors.push({ bufferView: nv, componentType: 5126, count, type: "VEC3" });
     accessors.push({ bufferView: iv, componentType: 5125, count: idx.length, type: "SCALAR" });
-    const hex = (doc.bodies[id]?.color ?? "#cccccc").replace("#", "");
+    const hex = hex6(doc.bodies[id]?.color);
     const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
     const rgb = [0, 2, 4].map((i) => lin(parseInt(hex.slice(i, i + 2), 16) || 0));
     const look = doc.bodies[id]?.look;
@@ -230,8 +241,8 @@ function build3MF(doc: WhittleDocument, entries: [Id, Shape3D][]): Uint8Array {
   const materials: string[] = [];
   entries.forEach(([id, shape], k) => {
     const m = weld(shape.mesh({ tolerance: 0.01, angularTolerance: 0.1 }));
-    const color = (doc.bodies[id]?.color ?? "#cccccc").toUpperCase();
-    materials.push(`<base name="${esc(doc.bodies[id]?.name ?? id)}" displaycolor="${color}FF" />`);
+    const color = hex6(doc.bodies[id]?.color).toUpperCase();
+    materials.push(`<base name="${esc(doc.bodies[id]?.name ?? id)}" displaycolor="#${color}FF" />`);
     const v: string[] = [];
     for (let i = 0; i < m.vertices.length; i += 3) {
       v.push(`<vertex x="${m.vertices[i]!.toFixed(5)}" y="${m.vertices[i + 1]!.toFixed(5)}" z="${m.vertices[i + 2]!.toFixed(5)}" />`);

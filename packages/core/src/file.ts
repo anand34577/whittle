@@ -40,21 +40,31 @@ export function serializeDocument(doc: WhittleDocument, thumbnail?: Uint8Array):
 
 export class FileFormatError extends Error {}
 
+/** The largest document.json read from a file: a guard against decompression bombs. */
+const MAX_DOCUMENT_BYTES = 256 * 1024 * 1024;
+
+function parseDocumentJson(bytes: Uint8Array): WhittleDocument {
+  let json: unknown;
+  try {
+    json = JSON.parse(strFromU8(bytes));
+  } catch {
+    throw new FileFormatError("This isn't a Whittle file (or it is damaged).");
+  }
+  return migrate(json);
+}
+
 export function deserializeDocument(bytes: Uint8Array): WhittleDocument {
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipSync(bytes);
+    // Only document.json is needed; skipping the rest (and refusing a huge one) keeps a hostile file cheap.
+    files = unzipSync(bytes, { filter: (f) => f.name === "document.json" && f.originalSize <= MAX_DOCUMENT_BYTES });
   } catch {
     // Also accept a bare document.json (handy for tests and hand-editing).
-    try {
-      return migrate(JSON.parse(strFromU8(bytes)));
-    } catch {
-      throw new FileFormatError("This isn't a Whittle file (or it is damaged).");
-    }
+    return parseDocumentJson(bytes);
   }
   const raw = files["document.json"];
-  if (!raw) throw new FileFormatError("The file is missing its document.json.");
-  return migrate(JSON.parse(strFromU8(raw)));
+  if (!raw) throw new FileFormatError("The file is missing its document.json (or it is too large).");
+  return parseDocumentJson(raw);
 }
 
 type Migration = (doc: Record<string, unknown>) => Record<string, unknown>;
@@ -69,7 +79,7 @@ const MIGRATIONS: Record<number, Migration> = {
 export function migrate(input: unknown): WhittleDocument {
   if (!input || typeof input !== "object") throw new FileFormatError("The document is empty.");
   let doc = input as Record<string, unknown>;
-  let schema = typeof doc.schema === "number" ? doc.schema : 1;
+  let schema = typeof doc.schema === "number" && Number.isFinite(doc.schema) ? Math.floor(doc.schema) : 1;
   if (schema > SCHEMA_VERSION) {
     throw new FileFormatError(
       `This file was made with a newer version of Whittle (format ${schema}). Please update the app.`,
@@ -81,6 +91,11 @@ export function migrate(input: unknown): WhittleDocument {
     doc = m(doc);
     schema++;
   }
+  if (doc.features !== undefined && !Array.isArray(doc.features)) throw new FileFormatError("The document's feature list is damaged.");
+  if (doc.parameters !== undefined && !Array.isArray(doc.parameters)) throw new FileFormatError("The document's parameter list is damaged.");
+  if (doc.bodies !== undefined && (doc.bodies === null || typeof doc.bodies !== "object" || Array.isArray(doc.bodies))) {
+    throw new FileFormatError("The document's body list is damaged.");
+  }
   const d = doc as unknown as WhittleDocument;
   d.schema = SCHEMA_VERSION;
   d.parameters ??= [];
@@ -89,5 +104,6 @@ export function migrate(input: unknown): WhittleDocument {
   d.rollback ??= null;
   d.units ??= "mm";
   d.id ??= uid("d");
+  if (typeof d.name !== "string" || !d.name.trim()) d.name = "Untitled";
   return d;
 }

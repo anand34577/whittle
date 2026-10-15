@@ -40,7 +40,7 @@ import type {
   DraftFeature,
   OffsetFaceFeature,
 } from "@whittle/core";
-import { setBodyOp, updateFeature, useApp } from "../state/store";
+import { setBodyOp, setPrefs, updateFeature, useApp } from "../state/store";
 import { ExprInput, Segmented, Toggle } from "./ExprInput";
 import { Checkbox, Disclosure, Select } from "./controls";
 import { HoleStandard } from "./HoleStandards";
@@ -158,7 +158,7 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
   return (
     <>
       <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void (d.sketch = v))} />
-      {f.extent !== "through" && (
+      {f.extent !== "through" && f.extent !== "face" && (
         <ExprInput label="Distance" kind="length" value={f.distance} autoFocus onChange={(v) => upd(f, "Distance", (d) => void (d.distance = v))} />
       )}
       <Segmented
@@ -169,13 +169,22 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
           { value: "symmetric", label: "Symmetric", title: "Half the distance each way" },
           { value: "two", label: "Two sides", title: "A different distance each way" },
           { value: "through", label: "Through all", title: "Through every body in that direction (holes and slots that always go all the way)" },
+          { value: "face", label: "Up to a face", title: "Stop exactly at a flat face you click, wherever it is" },
         ]}
         onChange={(v) => upd(f, "Direction", (d) => void (d.extent = v))}
       />
+      {f.extent === "face" && (
+        <PickLine
+          icon="plane"
+          text={f.toFace ? "Stops at the face you chose. Click another face to change it" : "Click the face to extrude up to"}
+          clearable={!!f.toFace}
+          onClear={() => upd(f, "Clear face", (d) => void (d.type === "extrude" && (d.toFace = undefined)))}
+        />
+      )}
       {f.extent === "two" && (
         <ExprInput label="Other side" kind="length" value={f.distance2 ?? "0"} min={0} onChange={(v) => upd(f, "Second distance", (d) => void (d.distance2 = v))} />
       )}
-      {f.extent !== "symmetric" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
+      {f.extent !== "symmetric" && f.extent !== "face" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
       <Disclosure summary="Thin wall" defaultOpen={!!f.thin}>
         <ExprInput
           label="Wall"
@@ -252,6 +261,7 @@ function RevolveEditor({ f }: { f: RevolveFeature }) {
 
 function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
   const n = f.edges.length;
+  const prefs = useApp((s) => s.prefs);
   return (
     <>
       <div className="picker">
@@ -263,6 +273,7 @@ function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
           </button>
         )}
       </div>
+      <Toggle label="Select tangent edges together" hint="Clicking an edge also takes the edges that continue smoothly from it, such as a whole rounded outline" checked={prefs.tangentChain} onChange={(v) => setPrefs({ tangentChain: v })} />
       {f.type === "fillet" ? (
         <>
           <ExprInput label={f.radius2 ? "Start radius" : "Radius"} kind="length" value={f.radius} autoFocus min={0} onChange={(v) => upd(f, "Radius", (d) => void ((d as FilletFeature).radius = v))} />
@@ -343,10 +354,53 @@ function PrimitiveEditor({ f }: { f: PrimitiveFeature }) {
   );
 }
 
+/** The earlier features that add to or cut a body, which a pattern or mirror can repeat. */
+const REPEATABLE = new Set(["extrude", "revolve", "loft", "sweep", "hole", "rib", "coil", "thread", "primitive", "fillet", "chamfer", "draft", "offsetFace", "combine"]);
+
+/** Choose what a pattern or mirror repeats: a whole body, or particular features (a boss, a rib, a cut). */
+function RepeatWhat({ f }: { f: MirrorFeature | PatternFeature }) {
+  const features = useApp((s) => s.doc.features);
+  const mode = f.features ? "features" : "body";
+  const sources = features.slice(0, Math.max(0, features.findIndex((x) => x.id === f.id))).filter((x) => REPEATABLE.has(x.type) && !x.suppressed);
+  const set = (label: string, recipe: (d: Draft<MirrorFeature | PatternFeature>) => void) => upd(f, label, (d) => void ((d.type === "mirror" || d.type === "pattern") && recipe(d)));
+  return (
+    <>
+      <Segmented
+        label="Repeat"
+        value={mode}
+        options={[
+          { value: "body", label: "A whole body" },
+          { value: "features", label: "Features" },
+        ]}
+        onChange={(v) => set("Repeat what", (d) => void (d.features = v === "features" ? [] : undefined))}
+      />
+      {mode === "body" ? (
+        <BodySelect value={f.bodyId} allowAuto="Latest body" exclude={f.id} onChange={(v) => set("Body", (d) => void (d.bodyId = v))} />
+      ) : (
+        <div className="field">
+          <span className="field__label">Features</span>
+          <div className="checklist">
+            {sources.map((s) => (
+              <Checkbox
+                key={s.id}
+                className="checkrow"
+                checked={!!f.features?.includes(s.id)}
+                onChange={(on) => set("Features", (d) => void (d.features = on ? [...(d.features ?? []), s.id] : (d.features ?? []).filter((x) => x !== s.id)))}
+                label={s.name}
+              />
+            ))}
+            {sources.length === 0 && <p className="field__note">There are no earlier features to repeat yet.</p>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function MirrorEditor({ f }: { f: MirrorFeature }) {
   return (
     <>
-      <BodySelect value={f.bodyId} allowAuto="Latest body" exclude={f.id} onChange={(v) => upd(f, "Body", (d) => void (d.bodyId = v))} />
+      <RepeatWhat f={f} />
       <Select
         label="Mirror plane"
         value={f.planeRef ?? f.plane}
@@ -360,7 +414,7 @@ function MirrorEditor({ f }: { f: MirrorFeature }) {
         hint="Move the mirror plane along its normal"
         onChange={(v) => upd(f, "Offset", (d) => void (d.offset = v === "0" ? undefined : v))}
       />
-      <Toggle label="Merge with the original" checked={f.merge} onChange={(v) => upd(f, "Merge", (d) => void (d.merge = v))} />
+      {!f.features && <Toggle label="Merge with the original" checked={f.merge} onChange={(v) => upd(f, "Merge", (d) => void (d.merge = v))} />}
     </>
   );
 }
@@ -368,7 +422,7 @@ function MirrorEditor({ f }: { f: MirrorFeature }) {
 function PatternEditor({ f }: { f: PatternFeature }) {
   return (
     <>
-      <BodySelect value={f.bodyId} allowAuto="Latest body" exclude={f.id} onChange={(v) => upd(f, "Body", (d) => void (d.bodyId = v))} />
+      <RepeatWhat f={f} />
       <Segmented
         label="Type"
         value={f.pattern}
@@ -419,7 +473,7 @@ function PatternEditor({ f }: { f: PatternFeature }) {
       ) : (
         <ExprInput label="Total angle" kind="angle" value={f.angle} onChange={(v) => upd(f, "Angle", (d) => void (d.angle = v))} />
       )}
-      <Toggle label="Merge copies into one body" checked={f.merge} onChange={(v) => upd(f, "Merge", (d) => void (d.merge = v))} />
+      {!f.features && <Toggle label="Merge copies into one body" checked={f.merge} onChange={(v) => upd(f, "Merge", (d) => void (d.merge = v))} />}
     </>
   );
 }
@@ -582,7 +636,7 @@ function ImportEditor({ f }: { f: ImportFeature }) {
           {f.fileName} · {f.format.toUpperCase()} · {Math.round((f.data.length * 0.75) / 1024)} KB
         </span>
       </div>
-      <ExprInput label="Scale" kind="count" value={f.scale} autoFocus min={0} hint="25.4 converts a part modelled in inches" onChange={(v) => upd(f, "Scale", (d) => void (d.scale = v))} />
+      <ExprInput label="Scale" kind="number" value={f.scale} autoFocus min={0} hint="25.4 converts a part modelled in inches" onChange={(v) => upd(f, "Scale", (d) => void (d.scale = v))} />
     </>
   );
 }
@@ -841,11 +895,13 @@ function PickLine({ icon, text, onClear, clearable }: { icon: "move" | "thread" 
 }
 
 function RibEditor({ f }: { f: RibFeature }) {
-  const sketches = useApp((s) => s.doc.features.filter((x) => x.type === "sketch"));
+  // Select the stable array, then filter: a selector that builds a new array every call loops forever.
+  const features = useApp((s) => s.doc.features);
+  const sketches = features.filter((x) => x.type === "sketch");
   const set = (label: string, recipe: (d: RibFeature) => void) => upd(f, label, (d) => void (d.type === "rib" && recipe(d)));
   return (
     <>
-      <Select label="Rib line" value={f.sketch} placeholder="Click a sketch with an open lineâ€¦" options={sketches.map((s) => ({ value: s.id, label: s.name, icon: "path" as const }))} onChange={(v) => set("Sketch", (d) => void (d.sketch = v))} />
+      <Select label="Rib line" value={f.sketch} placeholder="Click a sketch with an open line…" options={sketches.map((s) => ({ value: s.id, label: s.name, icon: "path" as const }))} onChange={(v) => set("Sketch", (d) => void (d.sketch = v))} />
       <ExprInput label="Thickness" kind="length" value={f.thickness} autoFocus hint="Wall thickness, centered on the sketch plane" onChange={(v) => set("Thickness", (d) => void (d.thickness = v))} />
       <ExprInput label="Depth" kind="length" value={f.depth} hint="How far the rib reaches from the line, sideways in the sketch plane" onChange={(v) => set("Depth", (d) => void (d.depth = v))} />
       <Toggle label="Flip side" checked={f.flip} onChange={(v) => set("Flip", (d) => void (d.flip = v))} />
@@ -954,7 +1010,7 @@ function BoundaryFillEditor({ f }: { f: BoundaryFillFeature }) {
         <span className="field__label">Cells to keep</span>
         <div className="checklist">
           {(cells ?? []).map((c, i) => (
-            <Checkbox key={i} className="checkrow" checked={f.cells.includes(i)} onChange={(on) => set("Cells", (d) => void (d.cells = on ? [...d.cells, i] : d.cells.filter((x) => x !== i)))} label={`Cell ${i + 1} Â· ${Math.round(c.volume)} mmÂ³`} />
+            <Checkbox key={i} className="checkrow" checked={f.cells.includes(i)} onChange={(on) => set("Cells", (d) => void (d.cells = on ? [...d.cells, i] : d.cells.filter((x) => x !== i)))} label={`Cell ${i + 1} · ${Math.round(c.volume)} mm³`} />
           ))}
           {!cells?.length && <p className="field__note">Choose two or more overlapping bodies.</p>}
         </div>

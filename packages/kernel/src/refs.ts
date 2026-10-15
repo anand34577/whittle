@@ -62,6 +62,11 @@ export function edgeInfo(edge: Edge): EdgeInfo {
     const a = edge.startPoint.toTuple();
     const b = edge.endPoint.toTuple();
     info.ends = [a, b];
+    try {
+      info.endTangents = [norm(edge.tangentAt(0).toTuple()), norm(edge.tangentAt(1).toTuple())];
+    } catch {
+      /* some curves can't report an end tangent: they just aren't chained */
+    }
     if (info.curve === "CIRCLE") {
       const p = edge.pointAt(0.25).toTuple();
       const q = edge.pointAt(0.75).toTuple();

@@ -21,6 +21,8 @@ export interface EdgeInfo {
   radius?: number;
   /** Start and end points (equal for closed edges). */
   ends?: [Vec3, Vec3];
+  /** Unit tangents at the start and end, for chaining edges that continue smoothly into each other. */
+  endTangents?: [Vec3, Vec3];
 }
 
 export interface BodyResult {
@@ -114,7 +116,7 @@ export interface RadiusItem {
 export type InspectKind = "interference" | "radii";
 export type InspectResult = { kind: "interference"; items: InterferenceItem[] } | { kind: "radii"; items: RadiusItem[] };
 
-export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply";
+export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply" | "drawing";
 
 export type KernelRequest =
   | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id }

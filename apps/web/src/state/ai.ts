@@ -243,13 +243,22 @@ async function runOpenAI(p: ProviderConfig, text: string, signal: AbortSignal) {
     for (const c of msg.tool_calls) {
       let input: Record<string, unknown> = {};
       let result: Record<string, unknown>;
+      let parsed = true;
       try {
-        input = c.function.arguments ? (JSON.parse(c.function.arguments) as Record<string, unknown>) : {};
-        push({ kind: "tool", name: c.function.name, input });
-        result = await runDesignTool(c.function.name, input);
+        const raw = c.function.arguments ? JSON.parse(c.function.arguments) : {};
+        if (raw && typeof raw === "object" && !Array.isArray(raw)) input = raw as Record<string, unknown>;
+        else parsed = false;
       } catch {
-        push({ kind: "tool", name: c.function.name, input });
-        result = { error: "The tool arguments weren't valid JSON. Send them again." };
+        parsed = false;
+      }
+      push({ kind: "tool", name: c.function.name, input });
+      if (!parsed) result = { error: "The tool arguments weren't a valid JSON object. Send them again." };
+      else {
+        try {
+          result = await runDesignTool(c.function.name, input);
+        } catch (e) {
+          result = { error: e instanceof Error ? e.message : "The tool failed." };
+        }
       }
       patchLastTool(result);
       oaiHistory.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify(result) });

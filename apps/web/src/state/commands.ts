@@ -199,6 +199,18 @@ export const COMMANDS: Command[] = [
     run: () => setView({ section: get().view.section ? null : { axis: "y", offset: 0, flip: false } }),
   },
   {
+    id: "explode",
+    label: "Exploded view",
+    short: "Explode",
+    group: "Inspect",
+    icon: "combine",
+    keywords: "assembly apart separate parts pull out expand presentation components",
+    hint: "Spread the parts of an assembly apart to see how it fits together (display only)",
+    when: (s) => (s.regen?.bodies.length ?? 0) > 1,
+    on: (s) => (s.view.explode ?? 0) > 0,
+    run: () => setView({ explode: (get().view.explode ?? 0) > 0 ? 0 : 0.6 }),
+  },
+  {
     id: "overhang",
     label: "Overhang check",
     short: "Overhangs",
@@ -522,10 +534,11 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
   if (s.mode.kind === "sketch") {
     if (e.shiftKey && k === "r") return "rotate-shape";
     if (e.shiftKey && k === "o") return "offset-shape";
-    const map: Record<string, string> = { l: "tool-line", a: "tool-path", r: "tool-rect", c: "tool-circle", e: "tool-ellipse", p: "tool-polygon", o: "tool-slot", t: "tool-text", g: "tool-gear", v: "tool-select", x: "construction" };
+    if (e.shiftKey && k === "s") return "tool-spline";
+    const map: Record<string, string> = { l: "tool-line", a: "tool-path", r: "tool-rect", c: "tool-circle", e: "tool-ellipse", p: "tool-polygon", o: "tool-slot", t: "tool-text", g: "tool-gear", v: "tool-select", x: "construction", d: "tool-dimension" };
     return map[k] ?? null;
   }
   if (e.shiftKey && k === "h") return "view-fit";
-  const map: Record<string, string> = { s: "sketch", e: "extrude", r: "revolve", f: "fillet", h: "view-home", d: "hole", m: "move", j: "combine", i: "measure", p: "parts" };
+  const map: Record<string, string> = { s: "sketch", e: "extrude", r: "revolve", f: "fillet", h: "view-home", d: "hole", m: "move", j: "combine", i: "measure", p: "parts", q: "press-pull" };
   return map[k] ?? null;
 }

@@ -376,22 +376,28 @@ A **Body** selector picks a specific target for Join, Cut or Keep overlap.
 
 | Feature | Key | How to start | Fields |
 |---|---|---|---|
-| **Extrude** | E | Uses the selected sketch, or the newest unused one. On a face sketch it defaults to Join | Profile, Distance, Direction (One side / Symmetric / Two sides / **Through all**), Flip, **Thin wall** (wall thickness, Inside / Centered / Outside), Taper, Twist, Result, Body |
+| **Extrude** | E | Uses the selected sketch, or the newest unused one. On a face sketch it defaults to Join | Profile, Distance, Direction (One side / Symmetric / Two sides / **Through all** / **Up to a face**), Flip, **Thin wall** (wall thickness, Inside / Centered / Outside), Taper, Twist, Result, Body |
 | **Revolve** | R | Same sketch rule | Profile, Axis (sketch vertical, sketch horizontal, or **a line** drawn in the sketch), Angle (up to 360°), Result |
 | **Loft** | | Selected sketches (Shift-click several), or the two newest unused sketches. Click sketches to add or remove profiles | Profiles in order, Add, Straight sides (ruled), Result. Each profile must be a single closed shape |
 | **Hole** | D | Select a flat face (the click point becomes the first hole), or click a face after starting. Each click on the face adds a hole | Type (Simple / Counterbore / Countersink), Diameter, Through all or Depth, Head Ø, Head depth (counterbore), position of each hole (X, Y) |
-| **Fillet** | F | Select edges first, or click them after starting (click again to deselect) | Radius |
+| **Fillet** | F | Select edges or faces first, or click them after starting (click again to deselect). Clicking an edge also takes the edges that continue smoothly from it (a whole rounded outline); switch that off in the panel | Radius |
 | **Chamfer** | | Same as fillet | Distance |
 | **Shell** | | Click the face(s) to remove (the open side) | Wall thickness |
 | **Move / Copy** | M | Selected body or the newest one; click a body to change it | X, Y, Z move; Rotate around X/Y/Z by Angle (about the body's own centre); Keep the original (make a copy) |
 | **Combine** | J | Selected bodies (first = target, rest = tools). Click bodies to set the target, then toggle tools | Operation (Join / Cut / Keep overlap), Target, Tools, Keep tool bodies |
-| **Mirror** | | Selected body or the newest | Body, Mirror plane (YZ, XZ, XY), Plane offset, Merge with the original |
-| **Pattern** | | Selected body or the newest | Type (In a row / Around an axis), Direction or axis (X, Y, Z), Count (2–200), Spacing or Total angle, **Second direction** (grid: direction, count, spacing; up to 400 copies), Merge copies |
+| **Mirror** | | Selected body or the newest | Repeat (A whole body / **Features**), Mirror plane (YZ, XZ, XY), Plane offset, Merge with the original |
+| **Pattern** | | Selected body or the newest | Repeat (A whole body / **Features**), Type (In a row / Around an axis / Along a path), Direction or axis (X, Y, Z), Count (2–200), Spacing or Total angle, **Second direction** (grid: direction, count, spacing; up to 400 copies), Merge copies |
 | **Import** | | Import STEP / STL, or drop a file | Scale (e.g. 25.4 converts a part modelled in inches) |
 
 **Thin wall** extrudes a band along every outline instead of filling it: enclosures, frames, rings and cups in one step. Open paths become **ribs and webs**: draw a path and give it a wall thickness. *Inside* grows the wall into the shape (left of a path), *Outside* away from it.
 
 **Through all** goes through every body in the chosen direction, so a hole or slot stays a through cut however thick the part becomes.
+
+**Up to a face** stops an extrusion exactly at a flat face you click, wherever it is (a boss that always reaches the lid, a pocket that stops at the far wall). It follows the face if you change the model upstream.
+
+**Pattern and mirror features, not just bodies:** choose *Repeat: Features* and tick the earlier features to repeat, for example one boss, one rib or one cut. Whittle repeats exactly what each feature added to or removed from the body, in timeline order, so a boss with a hole repeats as a boss with a hole. Features that make a new body can't be repeated this way: pattern the body instead.
+
+**Cuts on a face** go into the body by default: picking *Cut* on a face sketch flips the direction so material is actually removed. A cut that removes nothing is reported as a warning instead of passing silently.
 
 **Revolve around a line:** draw a straight path (or a construction line) in the profile's sketch, choose *Axis: A line* and pick it. Rings, pulleys and grooves no longer need their profile placed on the sketch axis.
 
@@ -496,6 +502,8 @@ hole / 2
 | Safety | Names are validated, and circular references are detected and reported |
 
 Changing a parameter rebuilds everything that uses it.
+
+**Variants.** In the Parameters panel, *Save current as variant* stores every parameter's value under a name ("Small", "Large", "With lid"). Click a variant to switch the whole design to it; the active one is highlighted. Variants are saved in the file.
 
 ---
 
@@ -667,6 +675,7 @@ The format is plain JSON, open and readable. Format 2 (Whittle 0.4) adds optiona
 | **SVG** | One sketch, for laser and vinyl cutters, plotters, Inkscape, Illustrator | True size, in millimetres |
 | **DXF** | One sketch, for laser cutters, CNC and CAM, AutoCAD | Units set to millimetres |
 | **PNG** | Pictures | Save image |
+| **2D drawing (SVG)** | Drawings and documentation | Export dialog. Front, top and right views in third-angle projection plus an isometric view on an A3 sheet, hidden lines dashed, overall dimensions, standard scale (1:50 to 10:1) and a title block. Opens in any browser or vector editor; print to PDF |
 
 ### Import
 
@@ -724,6 +733,7 @@ Press **?** in the app for the full list.
 | J | Combine |
 | I | Measure |
 | P | Parts library |
+| Q | Press / Pull |
 | H | Home view |
 | Shift+H | Fit to view |
 | Enter | Apply (OK) |
@@ -823,11 +833,12 @@ Newer rebuild requests replace older pending ones.
 
 | Suite | Command | Covers |
 |---|---|---|
-| Unit and geometry | `npm test` | 106 tests, including constraint solving (solved profiles extrude to exact volumes, a dimension or parameter change re-solves, named conflicts, tangent slots, revolve about a construction line) and trim / extend; also expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part |
+| Unit and geometry | `npm test` | 214 tests, including constraint solving (solved profiles extrude to exact volumes, a dimension or parameter change re-solves, named conflicts, tangent slots, revolve about a construction line) and trim / extend; also expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part |
 | Core browser flow | `node tests/e2e/smoke.mjs [url]` | Start screen, template, parameter change, sketch with typed size, extrude, fillet, 3MF export, theme |
 | Feature tour | `node tests/e2e/features.mjs [url]` | Parts library, vase and print check, section, X-ray, new sketch tools, text, arrange tools, extrude, counterbore hole, measure, radial menu, box + combine cut, move copy, image export |
 | Modelling depth | `node tests/e2e/modeling.mjs [url]` | Arcs drawn with the mouse, offset, thin extrude, through all, grid, offset mirror, revolve about a line, ribs |
 | Constraints | `node tests/e2e/constraints.mjs [url]` | Solver lines drawn with the mouse, automatic Horizontal/Vertical, a distance typed as a formula, degrees of freedom, fully defined (green), a named conflict (red), the `constrain_sketch` API, a parameter change re-solving the extrusion, trimming a circle |
+| Audit regressions | `node tests/e2e/audit.mjs [url]` | Rib tool opens, a cut on a face removes material, Q shortcut, selected face brings its edges into Fillet, tangent chains, feature patterns, exploded view, variants, 2D drawing export |
 | Pictures | `node tests/e2e/pictures.mjs [url]` | Add a picture, trace all (exact circles), trace one area, calibrate, flatten a photo, extrude the traced shapes |
 
 Both browser suites pass against the dev server and the production build with no console errors.
@@ -837,9 +848,8 @@ Both browser suites pass against the dev server and the production build with no
 ## 19. Known limitations
 
 - **Sketch constraints** work on solver geometry (points, lines, arcs, circles), not on whole shapes such as rectangles or text; there are no symmetric, midpoint or collinear constraints yet (use two Coincident-on-line constraints for collinear). Outlines where three or more lines meet at one point are treated as open paths. Sketches with more than 80 points are coloured as a whole rather than piece by piece.
-- **Not yet available:** Form (T-spline) sculpting, sheet metal, plastic features (boss, snap fit, lip), mesh repair and conversion, surface fillets, and Delete Face on an opening that isn't flat.
-- **Timeline:** steps can't be reordered.
-- **Assemblies:** components, ground and joints exist, but there is no contact-driven motion study (collisions only warn) and no exploded views.
+- **Not yet available:** Form (T-spline) sculpting, sheet metal (bent parts can be modelled with a thin extrude of a filleted path, but there is no flat pattern yet), plastic features (snap fit, lip), mesh repair and conversion, surface fillets, drawings with section views and per-feature dimensions (the drawing export has overall dimensions only), and Delete Face on an opening that isn't flat.
+- **Assemblies:** components, ground, joints and an **Exploded view** (Inspect menu; display only, picking is paused while parts are apart) exist, but there is no contact-driven motion study (collisions only warn).
 - **STL import:** limited to 40,000 triangles; very dense meshes should be simplified first.
 - **Gears:** only involute spur gears (no helical or internal).
 - **Fonts:** one family (IBM Plex Sans, regular and bold), Latin characters.

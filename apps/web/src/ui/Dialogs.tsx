@@ -30,6 +30,7 @@ import {
 import { apiJson, ask } from "../state/platform";
 import { exportParametersCsv } from "../state/files";
 import { mutate, selectedBodyId, useApp } from "../state/store";
+import { promptDialog } from "../state/dialogs";
 import { TEMPLATES } from "../state/templates";
 import { Icon } from "./icons";
 import { Checkbox, Select } from "./controls";
@@ -184,6 +185,63 @@ export function ParamsDialog() {
         </form>
       </div>
       {doc.parameters.length > 0 && (
+        <div className="variants" role="group" aria-label="Variants">
+          <div className="field__label">Variants</div>
+          <p className="muted small">Save the current sizes under a name, then switch the whole design between them with one click.</p>
+          <div className="variants__list">
+            {(doc.variants ?? []).map((v) => {
+              const active = doc.parameters.every((p) => v.values[p.name] === undefined || v.values[p.name] === p.expr);
+              return (
+                <span key={v.id} className={`variant ${active ? "is-on" : ""}`}>
+                  <button
+                    className="variant__main"
+                    aria-pressed={active}
+                    title={Object.entries(v.values).map(([k, x]) => `${k} = ${x}`).join("\n")}
+                    onClick={() =>
+                      mutate(`Use variant ${v.name}`, (d) => {
+                        for (const p of d.parameters) if (v.values[p.name] !== undefined) p.expr = v.values[p.name]!;
+                      })
+                    }
+                  >
+                    {v.name}
+                  </button>
+                  <button
+                    className="variant__x"
+                    aria-label={`Delete variant ${v.name}`}
+                    onClick={() =>
+                      mutate("Delete variant", (d) => {
+                        d.variants = (d.variants ?? []).filter((x) => x.id !== v.id);
+                      })
+                    }
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
+                </span>
+              );
+            })}
+            <button
+              className="btn btn--small"
+              onClick={async () => {
+                const name = await promptDialog({
+                  title: "Save variant",
+                  label: "Name",
+                  message: "Remembers the current value of every parameter.",
+                  placeholder: "e.g. Large",
+                  confirmLabel: "Save",
+                  validate: (v) => (!v.trim() ? "Give it a name" : (doc.variants ?? []).some((x) => x.name.toLowerCase() === v.trim().toLowerCase()) ? "That name is taken" : null),
+                });
+                if (!name) return;
+                mutate("Save variant", (d) => {
+                  d.variants = [...(d.variants ?? []), { id: uid("va"), name: name.trim(), values: Object.fromEntries(d.parameters.map((p) => [p.name, p.expr])) }];
+                });
+              }}
+            >
+              <Icon name="plus" size={14} /> Save current as variant
+            </button>
+          </div>
+        </div>
+      )}
+      {doc.parameters.length > 0 && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
           <button
             className="btn btn--small"
@@ -219,6 +277,7 @@ export function ExportDialog() {
     { f: "obj", title: "OBJ", sub: "Rendering & visualisation", body: "Opens in virtually every 3D and rendering tool: Blender, KeyShot, Cinema 4D, Rhino." },
     { f: "3mf", title: "3MF", sub: "3D printing", body: "Best for slicers (Bambu Studio, PrusaSlicer, OrcaSlicer, Cura). Keeps units, names and colors." },
     { f: "stl", title: "STL", sub: "3D printing & meshes", body: "The universal mesh format. Works with every slicer, printing service and mesh tool." },
+    { f: "drawing", title: "2D drawing (SVG)", sub: "Drawings & documentation", body: "Front, top, right and isometric views on an A3 sheet with hidden lines, overall dimensions and a title block. Opens in any browser or vector editor; print to PDF." },
     { f: "ply", title: "PLY", sub: "Scanning & mesh analysis", body: "For MeshLab, CloudCompare and scan-comparison workflows." },
   ];
   return (

@@ -52,6 +52,7 @@ import {
   makeSketch,
   trim,
 } from "@whittle/core";
+import { tangentChain } from "./edgeChain";
 import type { BodyResult, EdgeInfo, FaceInfo } from "@whittle/kernel";
 import {
   type Pick,
@@ -207,9 +208,18 @@ export function startRevolve() {
 }
 
 export function startEdgeFeature(kind: "fillet" | "chamfer") {
-  const edges = get()
-    .selection.map((p) => edgeRefFromPick(p))
-    .filter((x): x is EdgeRef => !!x);
+  // Edges already selected carry over; so do all the edges of any selected face (as clicking a face in the tool does).
+  const edges: EdgeRef[] = [];
+  const add = (r: EdgeRef | null) => {
+    if (r && !edges.some((e) => d3(e.mid, r.mid) < 1e-6)) edges.push(r);
+  };
+  for (const p of get().selection) {
+    if (p.kind === "edge") add(edgeRefFromPick(p));
+    else if (p.kind === "face") {
+      const body = pickableBodies().find((b) => b.id === p.bodyId);
+      for (const i of body?.faceEdges?.[p.index] ?? []) add(edgeRefFromPick({ kind: "edge", bodyId: p.bodyId, index: i }, body ? [body] : undefined));
+    }
+  }
   const f = kind === "fillet" ? makeFillet(get().doc) : makeChamfer(get().doc);
   if (f.type === "fillet" || f.type === "chamfer") f.edges = edges;
   beginNewFeature(f, `New ${f.name}`);
@@ -733,6 +743,16 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f && f.type === "extrude" && f.extent === "face" && p?.kind === "face") {
+    const ref = faceRefFromPick(p);
+    if (!ref) return;
+    if (ref.surface !== "PLANE") return toast("warn", "Pick a flat face to extrude up to.");
+    mutate("Pick face", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (x && x.type === "extrude") x.toFace = ref;
+    });
+    return;
+  }
   if (f && f.type === "thread" && p?.kind === "face") {
     const ref = faceRefFromPick(p);
     if (!ref) return;
@@ -882,12 +902,19 @@ export function handlePick(p: Pick | null, additive: boolean) {
   if (f && (f.type === "fillet" || f.type === "chamfer") && p?.kind === "edge") {
     const ref = edgeRefFromPick(p);
     if (!ref) return;
+    // Edges that continue smoothly from this one come along (a rounded outline is one click), unless switched off.
+    const body = pickableBodies().find((b) => b.id === p.bodyId);
+    const refs: EdgeRef[] =
+      body && get().prefs.tangentChain
+        ? tangentChain(body.edges, p.index).map((i) => edgeRefFromPick({ kind: "edge", bodyId: p.bodyId, index: i }, [body])).filter((x): x is EdgeRef => !!x)
+        : [ref];
     mutate("Pick edge", (d) => {
       const x = d.features.find((y) => y.id === f.id);
       if (!x || (x.type !== "fillet" && x.type !== "chamfer")) return;
-      const i = x.edges.findIndex((e) => d3(e.mid, ref.mid) < 1e-6);
-      if (i >= 0) x.edges.splice(i, 1);
-      else x.edges.push(ref);
+      const has = (r: EdgeRef) => x.edges.findIndex((e) => d3(e.mid, r.mid) < 1e-6);
+      // Clicking a chain that is already fully chosen takes it back out.
+      if (refs.every((r) => has(r) >= 0)) x.edges = x.edges.filter((e) => !refs.some((r) => d3(e.mid, r.mid) < 1e-6));
+      else for (const r of refs) if (has(r) < 0) x.edges.push(r);
     });
     return;
   }

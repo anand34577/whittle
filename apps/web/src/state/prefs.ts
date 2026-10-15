@@ -27,6 +27,8 @@ export interface Prefs {
   hints: boolean;
   /** Labels under toolbar icons. */
   toolLabels: boolean;
+  /** Clicking an edge to round or bevel it also takes the edges that continue smoothly from it. */
+  tangentChain: boolean;
   /** Default material for mass estimates. */
   material: string;
   reduceMotion: boolean;
@@ -102,6 +104,7 @@ export const DEFAULT_PREFS: Prefs = {
   invertZoom: false,
   hints: true,
   toolLabels: true,
+  tangentChain: true,
   material: "pla",
   reduceMotion: false,
   smartSketch: null,

@@ -15,6 +15,13 @@ export type Vec3 = [number, number, number];
 
 export const SCHEMA_VERSION = 2;
 
+/** A named set of values for some parameters, by parameter name. */
+export interface Variant {
+  id: Id;
+  name: string;
+  values: Record<string, Expr>;
+}
+
 export interface Parameter {
   id: Id;
   name: string;
@@ -376,7 +383,9 @@ export interface ExtrudeFeature extends FeatureBase {
   distance: Expr;
   /** "two" = `distance` one way and `distance2` the other. */
   /** "through" = cut (or add) through everything in that direction; `distance` is ignored. */
-  extent: "one" | "symmetric" | "two" | "through";
+  /** "face" = run exactly up to the flat face `toFace` (wherever it is), the way "to object" does in other CAD. */
+  extent: "one" | "symmetric" | "two" | "through" | "face";
+  toFace?: FaceRef;
   distance2?: Expr;
   flip: boolean;
   /** Draft angle: positive narrows the profile as it rises (mould and cast parts). */
@@ -454,6 +463,8 @@ export interface MirrorFeature extends FeatureBase {
   /** Mirror across a construction plane instead of an origin plane. */
   planeRef?: Id;
   merge: boolean;
+  /** Mirror these earlier features (what they added or cut) instead of whole bodies. */
+  features?: Id[];
 }
 
 export interface PatternFeature extends FeatureBase {
@@ -474,6 +485,8 @@ export interface PatternFeature extends FeatureBase {
   count2?: Expr;
   spacing2?: Expr;
   merge: boolean;
+  /** Repeat these earlier features (what they added or cut) instead of whole bodies. */
+  features?: Id[];
 }
 
 /** Drilled holes on a flat face, positioned in the face's sketch frame. */
@@ -711,6 +724,8 @@ export interface WhittleDocument {
   name: string;
   units: LengthUnit;
   parameters: Parameter[];
+  /** Named sets of parameter values (sizes, options) to switch between: "Small", "Large", "With lid". */
+  variants?: Variant[];
   features: Feature[];
   bodies: Record<Id, BodyMeta>;
   /** Timeline rollback marker: only features before this index are built. */
