@@ -56,6 +56,8 @@ import {
   drawRoundedRectangle,
   drawText,
   importSTEP,
+  iterTopo,
+  loft,
   makeBox,
   makeCompound,
   makeCylinder,
@@ -67,6 +69,7 @@ import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } 
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { constructFrame } from "./construct";
+import { surfaceTool, prismSurface, revolveSurface } from "./surface";
 import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
@@ -593,6 +596,9 @@ export class Builder {
   /** Mutates the body/sketch maps; returns a warning message, if any. */
   private apply(f: Feature, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchBuilt>, ev: Evaluator): string | undefined {
     switch (f.type) {
+      case "surface":
+        return surfaceTool(f, bodies, (id) => sketches.get(id)?.frame, ev);
+
       case "curve": {
         const built = curveTool(f, bodies, sketches, ev);
         const flat: number[] = [];
@@ -665,8 +671,9 @@ export class Builder {
         if (sk.error) throw new FeatureError("Its sketch has an error: " + sk.error);
         const thin = f.type === "extrude" && f.thin ? ev.num(f.thin, "length", "Wall thickness") : 0;
         if (thin < 0) throw new FeatureError("The wall thickness must be greater than zero.");
-        const profile = thin > 0 && f.type === "extrude" ? thinProfile(sk, thin, f.thinSide ?? "center", ev) : sk.drawing;
-        if (!profile) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : "The sketch has no closed shapes yet. Draw a rectangle or circle first.");
+        const surf = !!f.surface;
+        const profile = !surf && thin > 0 && f.type === "extrude" ? thinProfile(sk, thin, f.thinSide ?? "center", ev) : sk.drawing;
+        if (!profile && !surf) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : "The sketch has no closed shapes yet. Draw a rectangle or circle first.");
         let tool: Shape3D;
         if (f.type === "extrude") {
           const d = f.extent === "through" ? throughDistance(bodies, sk.frame) : ev.num(f.distance, "length", "Distance");
@@ -688,10 +695,13 @@ export class Builder {
           const twist = f.twist ? ev.num(f.twist, "angle", "Twist") : 0;
           if (Math.abs(taper) > 1e-9 && Math.abs(twist) > 1e-9) throw new FeatureError("Use either a taper or a twist on one extrusion, not both.");
           if (Math.abs(taper) >= Math.PI / 2 - 1e-3) throw new FeatureError("The taper must be between -89 and 89 degrees.");
-          if (Math.abs(taper) > 1e-9) {
-            tool = clean(taperedExtrude(profile, frame, dist, taper));
+          if (surf) {
+            if (Math.abs(taper) > 1e-9 || Math.abs(twist) > 1e-9) throw new FeatureError("Surfaces can't have a taper or a twist. Turn Surface off, or set them to zero.");
+            tool = prismSurface(surfaceWires(sk, frame, ev), scale(frame.normal, dist));
+          } else if (Math.abs(taper) > 1e-9) {
+            tool = clean(taperedExtrude(profile!, frame, dist, taper));
           } else {
-            const sketch = profile.clone().sketchOnPlane(planeFromFrame(frame));
+            const sketch = profile!.clone().sketchOnPlane(planeFromFrame(frame));
             tool = clean((Math.abs(twist) > 1e-9 ? sketch.extrude(dist, { twistAngle: deg(twist) }) : sketch.extrude(dist)) as Shape3D);
           }
         } else {
@@ -699,10 +709,15 @@ export class Builder {
           if (Math.abs(angle) < 1e-6) throw new FeatureError("The angle can't be zero.");
           const d = Math.min(Math.abs(deg(angle)), 360) * Math.sign(angle);
           const { origin, dir } = revolveAxis(f.axis, f.axisLine, sk, ev);
-          const sketch = profile.clone().sketchOnPlane(planeFromFrame(sk.frame));
-          tool = clean(sketch.revolve(dir, { origin, angle: d }) as Shape3D);
+          if (surf) {
+            const axisEntity = f.axis === "line" ? (f.axisLine ?? sk.source?.entities.find((x) => x.type === "polyline" && (x.open || x.construction))?.id) : undefined;
+            tool = revolveSurface(surfaceWires(sk, sk.frame, ev, axisEntity), origin, dir, (d * Math.PI) / 180);
+          } else {
+            const sketch = profile!.clone().sketchOnPlane(planeFromFrame(sk.frame));
+            tool = clean(sketch.revolve(dir, { origin, angle: d }) as Shape3D);
+          }
         }
-        return applyOp(bodies, f.id, f.op, f.target, tool);
+        return applyOp(bodies, f.id, surf ? "new" : f.op, f.target, tool);
       }
 
       case "loft": {
@@ -715,6 +730,10 @@ export class Builder {
           if (!("loftWith" in s) || "sketches" in s) throw new FeatureError(`Profile ${i + 1} must be a single closed shape (no holes or separate pieces).`);
           return s as unknown as { loftWith(o: unknown[], c: { ruled: boolean }): Shape3D };
         });
+        if (f.surface) {
+          bodies.set(f.id, loft(profiles.map((p) => (p as unknown as { wire: Wire }).wire), { ruled: f.ruled }, true));
+          return;
+        }
         const tool = clean(profiles[0]!.loftWith(profiles.slice(1), { ruled: f.ruled }));
         return applyOp(bodies, f.id, f.op, f.target, tool);
       }
@@ -780,7 +799,7 @@ export class Builder {
         return this.hole(f, bodies, ev);
 
       case "sweep":
-        return applyOp(bodies, f.id, f.op, f.target, sweepTool(f, sketches, ev));
+        return applyOp(bodies, f.id, f.surface && !f.pipe ? "new" : f.op, f.target, sweepTool(f, sketches, ev));
 
       case "coil":
         return applyOp(bodies, f.id, f.op, f.target, coilTool(f, ev));
@@ -1129,10 +1148,10 @@ function rotateAbout(v: Vec3, k: Vec3, a: number): Vec3 {
   return norm([v[0] * c + kv[0] * s + k[0] * d, v[1] * c + kv[1] * s + k[1] * d, v[2] * c + kv[2] * s + k[2] * d]);
 }
 
-type AnySketch = { wire?: Wire; outerSketch?: { wire: Wire }; innerSketches?: { wire: Wire }[]; sketches?: AnySketch[] };
+export type AnySketch = { wire?: Wire; outerSketch?: { wire: Wire }; innerSketches?: { wire: Wire }[]; sketches?: AnySketch[] };
 
 /** Outer and inner wires of every region of a placed sketch. */
-function regions(s: AnySketch): { outer: Wire; inner: Wire[] }[] {
+export function regions(s: AnySketch): { outer: Wire; inner: Wire[] }[] {
   // A compound sketch also lists its loops in `sketches`: check it first so holes stay holes.
   if (s.outerSketch) return [{ outer: s.outerSketch.wire, inner: (s.innerSketches ?? []).map((x) => x.wire) }];
   if (s.sketches) return s.sketches.flatMap(regions);
@@ -1247,6 +1266,18 @@ function pipeTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator
   }
 }
 
+/** The outlines (outer and inner wires) and open lines of a sketch, placed on a frame: what a surface is built from. */
+function surfaceWires(sk: SketchBuilt, frame: SketchFrame, ev: Evaluator, skipEntity?: Id): Wire[] {
+  const out: Wire[] = [];
+  if (sk.drawing) for (const r of regions(sk.drawing.clone().sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch)) out.push(r.outer, ...r.inner);
+  for (const e of sk.source?.entities ?? []) {
+    if (e.type !== "polyline" || !e.open || e.construction || e.id === skipEntity) continue;
+    out.push(sketchPath({ ...sk.source!, entities: [e] } as SketchFeature, frame, ev));
+  }
+  if (!out.length) throw new FeatureError("The sketch has no shapes or lines to turn into a surface.");
+  return out;
+}
+
 function sweepTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator): Shape3D {
   if (f.pipe) return pipeTool(f, sketches, ev);
   if (!f.profile || !f.path) throw new FeatureError("Pick a profile sketch and a path sketch.", undefined, true);
@@ -1254,11 +1285,21 @@ function sweepTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluato
   const prof = sketches.get(f.profile);
   const path = sketches.get(f.path);
   if (!prof || !(path?.source || path?.wire)) throw new FeatureError("The profile or path sketch is missing. Re-pick them.");
-  if (prof.error || !prof.drawing) throw new FeatureError("The profile needs a closed shape.");
+  if (prof.error || (!prof.drawing && !f.surface)) throw new FeatureError("The profile needs a closed shape.");
   const config = { frenet: f.orientation === "frenet", transitionMode: "round" as const };
+  if (f.surface) {
+    try {
+      const route = () => path.wire ?? sketchPath(path.source!, path.frame, ev);
+      const parts = surfaceWires(prof, prof.frame, ev).map((w) => genericSweep(w, route(), config, true)[0] as Shape3D);
+      return parts.length === 1 ? parts[0]! : (makeCompound(parts) as unknown as Shape3D);
+    } catch (e) {
+      if (e instanceof FeatureError) throw e;
+      throw new FeatureError(FRIENDLY.sweep!);
+    }
+  }
   try {
     let out: Shape3D | null = null;
-    for (const r of regions(prof.drawing.clone().sketchOnPlane(planeFromFrame(prof.frame)) as unknown as AnySketch)) {
+    for (const r of regions(prof.drawing!.clone().sketchOnPlane(planeFromFrame(prof.frame)) as unknown as AnySketch)) {
       const route = () => path.wire ?? sketchPath(path.source!, path.frame, ev);
       let solid = genericSweep(r.outer, route(), config) as Shape3D;
       for (const w of r.inner) solid = solid.cut(genericSweep(w, route(), config) as Shape3D);
@@ -1424,6 +1465,12 @@ function largestWorking(start: number, attempt: (v: number) => unknown): number 
   return v > 0 ? v : null;
 }
 
+/** Does this shape contain a closed solid (rather than being only surfaces)? */
+export function hasSolid(shape: Shape3D): boolean {
+  for (const _ of iterTopo((shape as unknown as { wrapped: never }).wrapped, "solid")) return true;
+  return false;
+}
+
 function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyResult {
   const [min, max] = shape.boundingBox.bounds;
   const diag = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) || 1;
@@ -1450,8 +1497,11 @@ function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyRes
   let centerOfMass: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
   try {
     const props = measureShapeVolumeProperties(shape);
-    volume = props.volume;
-    centerOfMass = props.centerOfMass;
+    // Surfaces (shells, loose faces) have no volume, whatever the integral says about their open shape.
+    if (hasSolid(shape)) {
+      volume = props.volume;
+      centerOfMass = props.centerOfMass;
+    }
     area = measureArea(shape);
   } catch {
     /* shells or compounds without volume */

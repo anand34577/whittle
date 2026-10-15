@@ -241,6 +241,7 @@ export function Toolbar() {
       </div>
       <Group label="Create" ids={create.primary} more={create.more} />
       <Group label="Construct" ids={["plane", "construct-midplane", "construct-axisCyl", "construct-pointVertex"]} more={["construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
+      <Group label="Surface" ids={["surface-patch", "surface-stitch", "surface-thicken", "surface-trim"]} more={["surface-ruled", "surface-offset", "surface-untrim", "surface-extend", "surface-unstitch", "surface-merge", "surface-reverse"]} />
       <Group label="Shapes" ids={["box", "cylinder", "sphere"]} more={["cone", "torus", "tube", "spring"]} />
       <Group label="Modify" ids={modify.primary} more={modify.more} />
       <Group label="Inspect" ids={["measure", "section"]} more={["interference", "clear-interference", "min-radius", "curvature", "accessibility", "component-colors", "overhang", "draft-analysis", "zebra", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />

@@ -1,7 +1,7 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
 import { useEffect, useRef, useState } from "react";
-import { CONSTRUCT_MODES, CURVE_SOURCES } from "@whittle/core";
+import { CONSTRUCT_MODES, CURVE_SOURCES, SURFACE_OPS } from "@whittle/core";
 import type {
   BodyOp,
   ChamferFeature,
@@ -28,6 +28,7 @@ import type {
   ConstructionPlaneFeature,
   ConstructFeature,
   CurveFeature,
+  SurfaceFeature,
   RibFeature,
   ThreadFeature,
   ReplaceFaceFeature,
@@ -124,10 +125,23 @@ function useSketchesBefore(id: Id): SketchFeature[] {
 }
 
 function OpField({ f }: { f: ExtrudeFeature | RevolveFeature | PrimitiveFeature | LoftFeature | SweepFeature | CoilFeature }) {
+  const canSurface = f.type === "extrude" || f.type === "revolve" || f.type === "loft" || (f.type === "sweep" && !f.pipe);
+  const surface = canSurface && !!(f as { surface?: boolean }).surface;
   return (
     <>
-      <Segmented label="Result" value={f.op} options={OPS} onChange={(op) => setBodyOp(f.id, op)} />
-      {f.op !== "new" && (
+      {canSurface && (
+        <Segmented
+          label="Output"
+          value={surface ? "surface" : "solid"}
+          options={[
+            { value: "solid", label: "Solid" },
+            { value: "surface", label: "Surface", title: "A skin with no volume: the sides only (no caps), and open lines work too" },
+          ]}
+          onChange={(v) => upd(f as ExtrudeFeature, "Output", (d) => void ((d as { surface?: boolean }).surface = v === "surface" ? true : undefined))}
+        />
+      )}
+      {!surface && <Segmented label="Result" value={f.op} options={OPS} onChange={(op) => setBodyOp(f.id, op)} />}
+      {!surface && f.op !== "new" && (
         <BodySelect
           value={f.target}
           exclude={f.id}
@@ -1038,6 +1052,91 @@ function CurveEditor({ f }: { f: CurveFeature }) {
   );
 }
 
+function SurfaceEditor({ f }: { f: SurfaceFeature }) {
+  const features = useApp((s) => s.doc.features);
+  const bodies = useApp((s) => s.regen?.pickBodies ?? s.regen?.bodies ?? []);
+  const meta = useApp((s) => s.doc.bodies);
+  const set = (label: string, recipe: (d: SurfaceFeature) => void) => upd(f, label, (d) => void (d.type === "surface" && recipe(d)));
+  const op = f.op;
+  const byEdges = op === "patch" || op === "ruled";
+  const byFaces = op === "offset" || op === "untrim" || op === "extend";
+  const byBody = op === "trim" || op === "unstitch" || op === "merge" || op === "reverse" || op === "thicken";
+  const picked = byEdges ? f.edges.length : byFaces ? f.faces.length : op === "stitch" ? f.bodies.length : f.bodyId ? 1 : 0;
+  const noun = byEdges ? "edge" : byFaces ? "face" : "body";
+  const needsDistance = op === "ruled" || op === "offset" || op === "extend" || op === "thicken";
+  const planes = constructsBefore(features, f.id, "plane");
+  return (
+    <>
+      <PickLine
+        icon="plane"
+        text={picked ? (op === "stitch" || byEdges || byFaces ? `${picked} ${noun}${picked > 1 ? (noun === "body" ? "ies" : "s") : ""}`.replace("bodys", "bodies") : "Body chosen") : SURFACE_OPS[op].hint}
+        clearable={picked > 0}
+        onClear={() => set("Clear", (d) => ((d.edges = []), (d.faces = []), (d.bodies = []), (d.bodyId = undefined)))}
+      />
+      {op === "stitch" && (
+        <div className="field">
+          <span className="field__label">Surface bodies</span>
+          <div className="checklist">
+            {bodies
+              .filter((b) => b.id !== f.id)
+              .map((b) => (
+                <Checkbox key={b.id} className="checkrow" checked={f.bodies.includes(b.id)} onChange={(on) => set("Bodies", (d) => void (d.bodies = on ? [...d.bodies, b.id] : d.bodies.filter((x) => x !== b.id)))} label={meta[b.id]?.name ?? "Body"} />
+              ))}
+          </div>
+        </div>
+      )}
+      {needsDistance && <ExprInput label={op === "thicken" ? "Thickness" : "Distance"} kind="length" value={f.distance} autoFocus hint={op === "offset" ? "0 copies the faces without moving them" : op === "extend" ? "Positive grows the face all around, negative shrinks it" : undefined} onChange={(v) => set("Distance", (d) => void (d.distance = v))} />}
+      {op === "thicken" && <Toggle label="Grow both ways" checked={!!f.both} onChange={(v) => set("Both", (d) => void (d.both = v))} />}
+      {op === "thicken" && <Toggle label="Keep the surface" checked={!!f.keep2} onChange={(v) => set("Keep", (d) => void (d.keep2 = v))} />}
+      {op === "ruled" && (
+        <Segmented
+          label="Direction"
+          value={f.direction}
+          options={[
+            { value: "normal", label: "Out of the face", title: "Along the normal of the face the edge belongs to" },
+            { value: "tangent", label: "Along the face", title: "Continues the face past the edge" },
+            { value: "axis", label: "Along an axis" },
+          ]}
+          onChange={(v) => set("Direction", (d) => void (d.direction = v))}
+        />
+      )}
+      {op === "ruled" && f.direction === "axis" && (
+        <Segmented
+          label="Axis"
+          value={f.axis}
+          options={[
+            { value: "x", label: "X" },
+            { value: "y", label: "Y" },
+            { value: "z", label: "Z" },
+          ]}
+          onChange={(v) => set("Axis", (d) => void (d.axis = v))}
+        />
+      )}
+      {op === "trim" && (
+        <>
+          <Select
+            label="Plane"
+            value={f.planeRef ?? f.plane}
+            options={[...ORIGIN_PLANES, ...planes.map((c) => ({ value: c.id, label: c.name, icon: "plane" as const }))]}
+            onChange={(v) => set("Plane", (d) => (v === "YZ" || v === "XZ" || v === "XY" ? ((d.plane = v), (d.planeRef = undefined)) : (d.planeRef = v)))}
+          />
+          <ExprInput label="Offset" kind="length" value={f.offset} onChange={(v) => set("Offset", (d) => void (d.offset = v))} />
+          <Segmented
+            label="Keep"
+            value={f.keep}
+            options={[
+              { value: "below", label: "Below the plane" },
+              { value: "above", label: "Above the plane" },
+            ]}
+            onChange={(v) => set("Keep", (d) => void (d.keep = v))}
+          />
+        </>
+      )}
+      {byBody && op !== "trim" && op !== "thicken" && <p className="field__note">{SURFACE_OPS[op].hint}</p>}
+    </>
+  );
+}
+
 function JointEditor({ f }: { f: JointFeature }) {
   const features = useApp((s) => s.doc.features);
   const t = f.joint;
@@ -1186,6 +1285,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <ConstructEditor f={f} />;
     case "curve":
       return <CurveEditor f={f} />;
+    case "surface":
+      return <SurfaceEditor f={f} />;
     case "rib":
       return <RibEditor f={f} />;
     case "thread":

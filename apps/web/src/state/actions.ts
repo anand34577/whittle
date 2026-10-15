@@ -2,6 +2,8 @@
 import {
   CONSTRUCT_MODES,
   CURVE_SOURCES,
+  SURFACE_OPS,
+  type SurfaceOp,
   type ConstructMode,
   type EdgeRef,
   type FaceRef,
@@ -22,6 +24,7 @@ import {
   makeBoundaryFill,
   makeConstruct,
   makeCurve,
+  makeSurface,
   makeDeleteFace,
   makeReplaceFace,
   makeRib,
@@ -393,6 +396,20 @@ export function startConstructionPlane() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+/** Surface tools: start with whatever fits the tool already selected. */
+export function startSurface(op: SurfaceOp) {
+  const f = makeSurface(get().doc, op);
+  if (f.type === "surface") {
+    const sel = get().selection;
+    if (op === "patch" || op === "ruled") f.edges = sel.map((p) => edgeRefFromPick(p)).filter((x): x is EdgeRef => !!x);
+    else if (op === "offset" || op === "untrim" || op === "extend") f.faces = sel.map((p) => faceRefFromPick(p)).filter((x): x is FaceRef => !!x);
+    else if (op === "stitch") f.bodies = [...new Set(sel.flatMap((p) => (p.kind === "body" || p.kind === "face" || p.kind === "edge" ? [p.bodyId] : [])))];
+    else f.bodyId = selectedBodyId();
+  }
+  beginNewFeature(f, `New ${f.name}`);
+  toast("info", SURFACE_OPS[op].hint);
+}
+
 /** 3D curve: through points, from edges, where faces meet, or a sketch projected onto a face. */
 export function startCurve(source: "points" | "edges" | "faces" | "project") {
   const f = makeCurve(get().doc, source);
@@ -653,6 +670,35 @@ export function handlePick(p: Pick | null, additive: boolean) {
       if (point && (!fr || x.mode === "axisPerp")) {
         x.points.push(point);
         cap(x.points, need.points);
+      }
+    });
+    return;
+  }
+  if (f && f.type === "surface" && p) {
+    const sp = p;
+    mutate("Pick", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "surface") return;
+      const byEdges = x.op === "patch" || x.op === "ruled";
+      const byFaces = x.op === "offset" || x.op === "untrim" || x.op === "extend";
+      if (byEdges) {
+        const er = sp.kind === "edge" ? edgeRefFromPick(sp) : null;
+        if (!er) return;
+        const i = x.edges.findIndex((e) => d3(e.mid, er.mid) < 1e-6);
+        if (i >= 0) x.edges.splice(i, 1);
+        else x.edges.push(er);
+      } else if (byFaces) {
+        const fr = sp.kind === "face" ? faceRefFromPick(sp) : null;
+        if (!fr) return;
+        const i = x.faces.findIndex((e) => sameFace(e, fr));
+        if (i >= 0) x.faces.splice(i, 1);
+        else x.faces.push(fr);
+      } else if (sp.kind === "body" || sp.kind === "face" || sp.kind === "edge") {
+        if (x.op === "stitch") {
+          const i = x.bodies.indexOf(sp.bodyId);
+          if (i >= 0) x.bodies.splice(i, 1);
+          else x.bodies.push(sp.bodyId);
+        } else x.bodyId = sp.bodyId;
       }
     });
     return;

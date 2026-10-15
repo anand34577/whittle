@@ -51,6 +51,7 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   cplane: "plane",
   construct: "plane",
   curve: "path",
+  surface: "shell",
   rib: "extrude",
   thread: "thread",
   replaceFace: "move",

@@ -260,6 +260,39 @@ function edgeLoops(edges: Edge[]): Edge[][] {
   return loops;
 }
 
+/**
+ * Remove a fillet or chamfer: extend the two flat faces beside it until they meet and fill (a rounded
+ * convex edge) or cut (a rounded inside corner) the sliver between the rounding and the sharp corner.
+ */
+function deleteBlend(body: Shape3D, face: Face, faces: Face[]): Shape3D | null {
+  const long = (face.edges as Edge[]).filter((e) => e.geomType === "LINE").sort((a, b) => b.length - a.length).slice(0, 2);
+  if (long.length < 2) return null;
+  const sides = long.map((e) => faces.find((fc) => !fc.isSame(face) && (fc.edges as Edge[]).some((x) => x.isSame(e))));
+  if (!sides[0] || !sides[1] || sides[0].geomType !== "PLANE" || sides[1].geomType !== "PLANE") return null;
+  const planes = sides.map((s) => ({ n: norm(s!.normalAt().toTuple()), p: s!.center.toTuple() }));
+  if (Math.abs(dot(planes[0]!.n, planes[1]!.n)) > 0.999) return null;
+  const [lo, hi] = face.boundingBox.bounds;
+  const pad = Math.max(...[0, 1, 2].map((k) => hi[k]! - lo[k]!)) * 0.02 + 1e-3;
+  // Pad across the blend but never along it, or the filler would stick out past the ends.
+  const along = norm(sub(long[0]!.endPoint.toTuple(), long[0]!.startPoint.toTuple()));
+  const pd = [0, 1, 2].map((k) => pad * (1 - Math.abs(along[k]!)));
+  const region = makeBox([lo[0] - pd[0]!, lo[1] - pd[1]!, lo[2] - pd[2]!], [hi[0] + pd[0]!, hi[1] + pd[1]!, hi[2] + pd[2]!]);
+  const span = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 4 + 100;
+  const slab = (pl: { n: Vec3; p: Vec3 }, inside: boolean) => orient(makeBox([-span, -span, 0], [span, span, span]), inside ? scale(pl.n, -1) : pl.n, pl.p);
+  const v0 = volume(body);
+  for (const inside of [true, false]) {
+    try {
+      const wedge = slab(planes[0]!, inside).intersect(slab(planes[1]!, inside)).intersect(region) as Shape3D;
+      if (!(volume(wedge) > 1e-9)) continue;
+      const out = inside ? body.fuse(wedge) : body.cut(wedge);
+      if (inside ? volume(out) > v0 + 1e-6 : volume(out) < v0 - 1e-6) return clean(out);
+    } catch {
+      /* try the other kind of corner */
+    }
+  }
+  return null;
+}
+
 /** Delete the faces of a hole, pocket or boss: cap the opening, then fill (or cut) the capped volume. */
 export function deleteFaces(f: DeleteFaceFeature, bodies: Map<Id, Shape3D>): string | undefined {
   if (!f.faces.length) throw new FeatureError("Click the faces to delete (all the walls of a hole, pocket or boss).", undefined, true);
@@ -273,6 +306,19 @@ export function deleteFaces(f: DeleteFaceFeature, bodies: Map<Id, Shape3D>): str
     if (!res) throw new FeatureError("A face to delete is gone. Pick it again.");
     if (res.uncertain) warning = "A face moved after an upstream change. Please check the selection.";
     faces.push(res.item);
+  }
+  // A single fillet or chamfer between two flat faces: extend the neighbours instead of capping an opening.
+  if (faces.length === 1 && (faces[0]!.geomType === "CYLINDRE" || faces[0]!.geomType === "PLANE")) {
+    let healed: Shape3D | null = null;
+    try {
+      healed = deleteBlend(body, faces[0]!, body.faces as Face[]);
+    } catch {
+      /* fall back to capping an opening */
+    }
+    if (healed) {
+      bodies.set(bodyId, healed);
+      return warning;
+    }
   }
   // The opening is where the deleted faces meet faces that stay (seams stay inside a single face).
   const others = (body.faces as Face[]).filter((fc) => !faces.some((x) => x.isSame(fc)));

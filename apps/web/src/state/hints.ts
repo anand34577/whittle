@@ -1,5 +1,5 @@
 /** "Always show the next step": the hint line is derived from state, never hand-placed. */
-import { CONSTRUCT_MODES, CURVE_SOURCES } from "@whittle/core";
+import { CONSTRUCT_MODES, CURVE_SOURCES, SURFACE_OPS } from "@whittle/core";
 import { type AppState, findFeature } from "./store";
 
 const TOOL_HINTS: Record<string, [string, string]> = {
@@ -97,6 +97,10 @@ export function hintFor(s: AppState): string {
         return "Type a factor (2 = twice the size) · Enter to finish";
       case "joint":
         return !f.bodyId ? "Click the body that moves" : !f.fixedId ? "Click the body it is attached to · choose the joint type · change Angle or Distance to drive it" : "Change Angle or Distance to drive the joint · Enter to finish";
+      case "surface": {
+        const n = f.op === "patch" || f.op === "ruled" ? f.edges.length : f.op === "offset" || f.op === "untrim" || f.op === "extend" ? f.faces.length : f.op === "stitch" ? f.bodies.length : f.bodyId ? 1 : 0;
+        return (n ? "Set the values · " : "") + SURFACE_OPS[f.op].hint + " · Enter to finish";
+      }
       case "curve":
         return CURVE_SOURCES[f.source].hint + " · Enter to finish";
       case "rib":

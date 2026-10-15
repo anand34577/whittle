@@ -13,6 +13,7 @@ import {
   startAlign,
   startBoundaryFill,
   startConstruct,
+  startSurface,
   startCurve,
   startDeleteFace,
   startEmboss,
@@ -44,7 +45,7 @@ import {
 import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
 import { exportSketch, importDxfIntoSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
-import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS } from "@whittle/core";
+import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS, SURFACE_OPS, type SurfaceOp } from "@whittle/core";
 import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { intersectIntoSketch } from "./sectionCurves";
@@ -452,6 +453,32 @@ COMMANDS.push(
   { id: "delete-face", label: "Delete Face", group: "Modify", icon: "trash", keywords: "remove heal hole pocket boss defeature simplify fill", hint: "Remove a hole, pocket or boss and heal the gap", when: NEEDS_BODY, run: model(startDeleteFace) },
   { id: "align", label: "Align", group: "Modify", icon: "move", keywords: "mate face to face snap place flush position body", hint: "Move a body so a flat face meets a face of another body", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startAlign) },
   { id: "split-faces", label: "Split Faces", group: "Modify", icon: "split", keywords: "divide face line plane region", hint: "Cut the faces along a plane without separating the body", when: NEEDS_BODY, run: model(startSplitFaces) },
+);
+
+const SURFACE_KEYWORDS: Record<SurfaceOp, string> = {
+  patch: "fill cap close opening hole boundary skin",
+  ruled: "edge extend flange skirt wall surface",
+  offset: "copy face surface float parallel",
+  trim: "cut away remove part of surface plane",
+  untrim: "restore fill holes boundary surface",
+  extend: "grow lengthen edge surface",
+  stitch: "sew join weld faces solid close",
+  unstitch: "separate faces explode shell",
+  merge: "unify same surface faces join seams",
+  reverse: "flip normal inside out orientation",
+  thicken: "solid wall shell surface to solid",
+};
+COMMANDS.push(
+  ...(Object.keys(SURFACE_OPS) as SurfaceOp[]).map((op) => ({
+    id: `surface-${op}`,
+    label: SURFACE_OPS[op].label,
+    group: "Surface",
+    icon: (op === "stitch" || op === "thicken" ? "shell" : "layers") as IconName,
+    keywords: `surface ${SURFACE_KEYWORDS[op]}`,
+    hint: SURFACE_OPS[op].hint,
+    when: op === "patch" || op === "ruled" || op === "offset" || op === "untrim" || op === "extend" ? NEEDS_BODY : (s: AppState) => inModel(s) && hasBodies(s),
+    run: model(() => startSurface(op)),
+  })),
 );
 
 const CONSTRUCT_ICON = (m: ConstructMode): IconName => (m.startsWith("plane") || m === "midplane" ? "plane" : m.startsWith("axis") ? "axis" : "point");

@@ -1,6 +1,7 @@
 import type {
   BodyOp,
   ConstructMode,
+  SurfaceOp,
   CurveFeature,
   CircleEntity,
   EllipseEntity,
@@ -73,6 +74,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   cplane: "Plane",
   construct: "Construct",
   curve: "Curve",
+  surface: "Surface",
   rib: "Rib",
   thread: "Thread",
   replaceFace: "Replace Face",
@@ -305,6 +307,38 @@ export const CURVE_SOURCES: Record<CurveFeature["source"], { label: string; name
 
 export function makeCurve(doc: WhittleDocument, source: CurveFeature["source"]): Feature {
   return { id: uid("cv"), type: "curve", name: nextName(doc, CURVE_SOURCES[source].name), source, points: [], edges: [], faces: [], smooth: source === "points" };
+}
+
+export const SURFACE_OPS: Record<SurfaceOp, { label: string; name: string; hint: string }> = {
+  patch: { label: "Patch", name: "Patch", hint: "Click the edges around an opening: a surface fills it" },
+  ruled: { label: "Ruled surface", name: "Ruled", hint: "Click edges, then set how far the surface runs out from them" },
+  offset: { label: "Offset surface", name: "Offset Surface", hint: "Click faces: copies of them float at the distance (0 copies them as they are)" },
+  trim: { label: "Trim surface", name: "Trim", hint: "Click a surface body, pick the plane, and choose which side to keep" },
+  untrim: { label: "Untrim", name: "Untrim", hint: "Click flat faces with holes: the holes are filled in" },
+  extend: { label: "Extend surface", name: "Extend", hint: "Click flat faces to grow (or shrink) all around by a distance" },
+  stitch: { label: "Stitch", name: "Stitch", hint: "Click surface bodies to join; a closed set becomes a solid" },
+  unstitch: { label: "Unstitch", name: "Unstitch", hint: "Click a body to break into separate faces" },
+  merge: { label: "Merge faces", name: "Merge", hint: "Click a body: neighbouring faces on the same surface join into one" },
+  reverse: { label: "Reverse normal", name: "Reverse", hint: "Click a body to flip which side of its surface counts as outside" },
+  thicken: { label: "Thicken", name: "Thicken", hint: "Click a surface body and set a thickness to make it a solid" },
+};
+
+export function makeSurface(doc: WhittleDocument, op: SurfaceOp): Feature {
+  return {
+    id: uid("sf"),
+    type: "surface",
+    name: nextName(doc, SURFACE_OPS[op].name),
+    op,
+    bodies: [],
+    faces: [],
+    edges: [],
+    distance: op === "thicken" ? "2" : op === "extend" ? "5" : op === "offset" ? "2" : "10",
+    direction: "normal",
+    axis: "z",
+    plane: "XY",
+    offset: "0",
+    keep: "below",
+  };
 }
 
 export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {

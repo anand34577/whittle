@@ -305,3 +305,56 @@ describe("silhouette split, branching pipes and derived designs", () => {
     expect(r.bodies[0]!.volume).toBeCloseTo(1000, 0);
   });
 });
+
+describe("delete a fillet or chamfer", () => {
+  it("restores a sharp convex edge and an inside corner", async () => {
+    const { makeFillet, makeChamfer } = await import("@whittle/core");
+    const sharp = (kind: "fillet" | "chamfer") => {
+      const doc = newDocument();
+      const b = prim(doc, "box", { width: "20", depth: "20", height: "20" });
+      const body = regen(doc).bodies[0]!;
+      const e = body.edges.find((x) => Math.abs(x.tangent[2]) > 0.99)!;
+      const f = push(doc, (kind === "fillet" ? makeFillet(doc) : makeChamfer(doc)) as import("@whittle/core").FilletFeature);
+      f.edges = [{ bodyId: b.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length }];
+      if (kind === "fillet") f.radius = "3";
+      else (f as unknown as { distance: string }).distance = "3";
+      const r1 = regen(doc);
+      expect(vol(r1)).toBeLessThan(8000);
+      const rounded = r1.bodies[0]!.faces.find((x) => x.surface === (kind === "fillet" ? "CYLINDRE" : "PLANE") && Math.abs(x.normal[2]) < 0.1 && Math.abs(x.normal[0]) > 0.3 && Math.abs(x.normal[1]) > 0.3)!;
+      const df = push(doc, makeDeleteFace(doc) as DeleteFaceFeature);
+      df.faces = [{ bodyId: b.id, ...rounded }];
+      const r2 = regen(doc);
+      expect(status(r2, df.id).state, status(r2, df.id).message).toBe("ok");
+      return vol(r2);
+    };
+    expect(sharp("fillet")).toBeCloseTo(8000, 0);
+    expect(sharp("chamfer")).toBeCloseTo(8000, 0);
+  });
+});
+
+describe("delete a concave fillet", () => {
+  it("restores the sharp inside corner of an L-shaped body", async () => {
+    const { makeFillet, makeCombine } = await import("@whittle/core");
+    const doc = newDocument();
+    const a = prim(doc, "box", { width: "20", depth: "20", height: "20" });
+    const b = prim(doc, "box", { width: "20", depth: "20", height: "10", position: ["20", "0", "0"] });
+    const c = push(doc, makeCombine(doc, a.id, [b.id]) as import("@whittle/core").CombineFeature);
+    c.op = "join";
+    c.keepTools = false;
+    const base = vol(regen(doc));
+    const body = regen(doc).bodies[0]!;
+    const e = body.edges.find((x) => Math.abs(x.tangent[1]) > 0.99 && Math.abs(x.mid[0] - 10) < 1e-6 && Math.abs(x.mid[2] - 10) < 1e-6)!;
+    const f = push(doc, makeFillet(doc) as import("@whittle/core").FilletFeature);
+    f.edges = [{ bodyId: a.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length }];
+    f.radius = "3";
+    const r1 = regen(doc);
+    expect(status(r1, f.id).state, status(r1, f.id).message).toBe("ok");
+    expect(vol(r1)).toBeGreaterThan(base);
+    const round = r1.bodies[0]!.faces.find((x) => x.surface === "CYLINDRE")!;
+    const df = push(doc, makeDeleteFace(doc) as DeleteFaceFeature);
+    df.faces = [{ bodyId: a.id, ...round }];
+    const r2 = regen(doc);
+    expect(status(r2, df.id).state, status(r2, df.id).message).toBe("ok");
+    expect(vol(r2)).toBeCloseTo(base, 0);
+  });
+});

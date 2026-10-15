@@ -315,6 +315,33 @@ export interface CurveFeature extends FeatureBase {
   smooth: boolean;
 }
 
+export type SurfaceOp = "patch" | "ruled" | "offset" | "trim" | "untrim" | "extend" | "stitch" | "unstitch" | "merge" | "reverse" | "thicken";
+
+/** Surface tools: make surfaces (patch, ruled, offset) or edit and finish them (trim, stitch, thicken...). */
+export interface SurfaceFeature extends FeatureBase {
+  type: "surface";
+  op: SurfaceOp;
+  /** The body to work on (trim, unstitch, merge, reverse, thicken). */
+  bodyId?: Id;
+  /** Bodies to join (stitch). */
+  bodies: Id[];
+  faces: FaceRef[];
+  edges: EdgeRef[];
+  /** Offset / extend / ruled distance, or thickness. */
+  distance: Expr;
+  /** Ruled: out of the face's normal, along its surface, or along an axis. */
+  direction: "normal" | "tangent" | "axis";
+  axis: "x" | "y" | "z";
+  /** Trim: the plane and the side to keep. */
+  plane: OriginPlane;
+  planeRef?: Id;
+  offset: Expr;
+  keep: "above" | "below";
+  /** Thicken: grow both ways from the surface; keep the surface body afterwards. */
+  both?: boolean;
+  keep2?: boolean;
+}
+
 export interface SketchFeature extends FeatureBase {
   type: "sketch";
   plane: PlaneRef;
@@ -343,6 +370,8 @@ export interface SketchImage {
 
 export interface ExtrudeFeature extends FeatureBase {
   type: "extrude";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   sketch: Id;
   distance: Expr;
   /** "two" = `distance` one way and `distance2` the other. */
@@ -368,6 +397,8 @@ export interface ExtrudeFeature extends FeatureBase {
 
 export interface RevolveFeature extends FeatureBase {
   type: "revolve";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   sketch: Id;
   /** "line" spins around `axisLine`, a straight path or construction line in the sketch. */
   axis: "x" | "y" | "line";
@@ -461,6 +492,8 @@ export interface HoleFeature extends FeatureBase {
 /** A smooth solid through two or more sketch profiles. */
 export interface LoftFeature extends FeatureBase {
   type: "loft";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   sketches: Id[];
   ruled: boolean;
   op: BodyOp;
@@ -480,6 +513,8 @@ export interface MoveFeature extends FeatureBase {
 /** Sweep a closed profile along a path (pipes, handles, rails, gaskets). */
 export interface SweepFeature extends FeatureBase {
   type: "sweep";
+  /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
+  surface?: boolean;
   /** Sketch holding the closed cross-section. */
   profile: Id;
   /** Sketch whose first path (an open line, or any outline) is followed. */
@@ -630,6 +665,7 @@ export type Feature =
   | ConstructionPlaneFeature
   | ConstructFeature
   | CurveFeature
+  | SurfaceFeature
   | RibFeature
   | ThreadFeature
   | ReplaceFaceFeature

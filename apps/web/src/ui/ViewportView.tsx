@@ -483,6 +483,7 @@ export function ViewportView() {
     else if (f?.type === "thread" || f?.type === "replaceFace" || f?.type === "deleteFace" || f?.type === "align") filter = bodiesOnly;
     else if (f?.type === "boundaryFill") filter = bodiesOnly;
     else if (f?.type === "rib") filter = { faces: false, edges: false, planes: false, sketches: true };
+    else if (f?.type === "surface") filter = f.op === "patch" || f.op === "ruled" ? { faces: false, edges: true, planes: false, sketches: false } : bodiesOnly;
     else if (f?.type === "curve") filter = { faces: true, edges: true, planes: false, sketches: f.source === "project" };
     else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
