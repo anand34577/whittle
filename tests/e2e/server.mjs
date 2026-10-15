@@ -18,7 +18,11 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];
 page.on("console", (m) => m.type() === "error" && !/401|Unauthorized/.test(m.text()) && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
-page.on("dialog", (d) => d.accept());
+// Native browser dialogs must never appear: Whittle uses its own.
+page.on("dialog", (d) => {
+  errors.push(`native ${d.type()} dialog: ${d.message()}`);
+  void d.dismiss();
+});
 
 const step = async (name, fn) => {
   const t = Date.now();
@@ -27,7 +31,7 @@ const step = async (name, fn) => {
   console.log(`ok  ${name} (${Date.now() - t} ms)`);
 };
 const waitBuilt = () =>
-  page.waitForFunction(() => /Built in|Ready/.test(document.querySelector(".statusbar__meta")?.textContent ?? ""), null, { timeout: 60000 });
+  page.waitForFunction(() => /Built in|Ready/.test(document.querySelector(".statusbar__meta")?.textContent ?? "") && window.whittle.useApp.getState().builtDoc === window.whittle.useApp.getState().doc, null, { timeout: 60000 });
 const state = (fn) => page.evaluate(fn);
 
 await step("01-first-run-setup", async () => {
@@ -35,11 +39,14 @@ await step("01-first-run-setup", async () => {
   await page.getByRole("dialog", { name: "Sign in to Whittle" }).waitFor();
   await page.getByText("Create the administrator account").waitFor();
   await page.getByLabel("Username").fill("ada");
+  await page.getByLabel("Email").fill("ada@example.com");
   await page.getByLabel("Your name").fill("Ada Lovelace");
-  await page.getByLabel("Password").fill("analytical engine");
+  await page.getByLabel("Password", { exact: true }).fill("analytical engine");
   await page.getByRole("button", { name: "Create account" }).click();
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
-  await page.getByText("Your designs").waitFor();
+  // First run asks how Whittle will be used; any answer leads to the start screen.
+  await page.getByRole("button", { name: /Maker & hobbyist/ }).click();
+  await page.locator(".library .eyebrow", { hasText: "Your designs" }).waitFor();
 });
 
 await step("02-save-to-server", async () => {
@@ -88,13 +95,48 @@ await step("06-sign-out-in", async () => {
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByRole("dialog", { name: "Sign in to Whittle" }).waitFor();
-  await page.getByLabel("Username").fill("ada");
-  await page.getByLabel("Password").fill("wrong password");
+  await page.getByLabel("Username or email").fill("ada@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("wrong password");
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByText("Wrong username or password").waitFor();
-  await page.getByLabel("Password").fill("analytical engine");
+  await page.getByLabel("Password", { exact: true }).fill("analytical engine");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByText("Your designs").waitFor();
+  await page.locator(".library .eyebrow", { hasText: "Your designs" }).waitFor();
+});
+
+await step("07-administration", async () => {
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("button", { name: "Administration" }).click();
+  const admin = page.getByRole("dialog", { name: "Administration" });
+  await admin.waitFor();
+  // Add a person.
+  await admin.getByRole("button", { name: "Add person" }).click();
+  await admin.getByLabel("Username", { exact: true }).fill("bob");
+  await admin.getByLabel("Email").fill("bob@example.com");
+  await admin.getByLabel("Password", { exact: true }).fill("difference engine");
+  await admin.getByRole("button", { name: "Add person" }).click();
+  await admin.getByText("bob@example.com").waitFor();
+  // Edit him.
+  await admin.getByRole("button", { name: /^bob/ }).click();
+  await admin.getByLabel("Name", { exact: true }).fill("Bob Babbage");
+  await admin.getByRole("button", { name: "Save" }).click();
+  await admin.getByText("Bob Babbage").waitFor();
+  // Email over plain (unencrypted) SMTP.
+  await admin.getByRole("tab", { name: "Sign-in & email" }).click();
+  await admin.getByLabel("Server").fill("127.0.0.1");
+  await admin.getByRole("button", { name: "Security" }).click();
+  await page.getByRole("option", { name: /None \(unencrypted\)/ }).click();
+  await admin.getByText("travel unencrypted").waitFor();
+  await admin.getByLabel("From address").fill("cad@example.com");
+  await admin.getByRole("button", { name: "Save email settings" }).click();
+  await page.getByText("Email settings saved").waitFor();
+  const cfg = await state(() => fetch("./api/config").then((r) => r.json()));
+  if (!cfg.passwordReset) throw new Error("password reset should be available once email is set up");
+  // Everything shows in the activity log.
+  await admin.getByRole("tab", { name: "Activity" }).click();
+  await admin.getByText("changed server settings").waitFor();
+  await admin.getByText("added").first().waitFor();
 });
 
 console.log(errors.length ? "console errors:\n" + errors.join("\n") : "no console errors");

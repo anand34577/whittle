@@ -33,6 +33,10 @@ pub struct Config {
     /// Versions kept per design (oldest are pruned).
     pub max_versions: i64,
     pub session_days: i64,
+    /// Email defaults (WHITTLE_SMTP_*); administrators can change them in the app.
+    pub smtp: crate::settings::SmtpSettings,
+    /// Allow the in-app AI assistant (browsers may then connect to AI providers).
+    pub ai: bool,
 }
 
 /// `sqlite:<path>` is the one URL form that works for relative, Unix and Windows paths (spaces included).
@@ -123,6 +127,8 @@ impl Config {
             max_upload_bytes: env_num::<usize>("WHITTLE_MAX_UPLOAD_MB", 64)? * 1024 * 1024,
             max_versions: env_num("WHITTLE_MAX_VERSIONS", 50)?.max(1),
             session_days: env_num("WHITTLE_SESSION_DAYS", 30)?.max(1),
+            smtp: crate::settings::SmtpSettings::from_env()?,
+            ai: env_bool("WHITTLE_AI", true)?,
         })
     }
 
@@ -143,6 +149,8 @@ impl Config {
             max_upload_bytes: 64 * 1024 * 1024,
             max_versions: 50,
             session_days: 30,
+            smtp: crate::settings::SmtpSettings::default(),
+            ai: true,
         }
     }
 }

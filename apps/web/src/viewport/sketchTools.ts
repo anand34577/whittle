@@ -5,6 +5,7 @@
  * accepts typed dimensions (just start typing a number).
  */
 import {
+  type EntityType,
   type Evaluator,
   type Id,
   type ResolvedEntity,
@@ -169,6 +170,7 @@ export class SketchController {
         return [a[0] + r * Math.cos(ang), a[1] + r * Math.sin(ang)];
       }
       case "slot":
+      case "path":
       case "polyline": {
         if (t.a === undefined && t.b === undefined) return b;
         const len = t.a ?? Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -184,12 +186,12 @@ export class SketchController {
     const c = this.cursor;
     if (!c || this.points.length === 0 || this.tool === "select" || this.tool === "text") return [];
     const a = this.points[0]!;
-    if (this.tool === "polyline") {
+    if (this.multi) {
       const last = this.points[this.points.length - 1]!;
       return [{ pts: [...this.points, this.secondPoint(last, c)], closed: false }];
     }
     const b = this.secondPoint(a, c);
-    const e = makeEntity(this.tool, a, b);
+    const e = makeEntity(this.tool as EntityType, a, b);
     try {
       return [{ pts: entityOutline(resolveEntity(e, this.env.evaluator())), closed: true }];
     } catch {
@@ -200,7 +202,7 @@ export class SketchController {
   private dims(): DimField[] {
     const c = this.cursor;
     if (!c || this.points.length === 0) return [];
-    const a = this.tool === "polyline" ? this.points[this.points.length - 1]! : this.points[0]!;
+    const a = this.multi ? this.points[this.points.length - 1]! : this.points[0]!;
     const b = this.secondPoint(a, c);
     switch (this.tool) {
       case "rect":
@@ -220,6 +222,7 @@ export class SketchController {
       case "polygon":
         return [{ key: "a", label: "R", value: Math.hypot(b[0] - a[0], b[1] - a[1]), at: b }];
       case "slot":
+      case "path":
       case "polyline": {
         const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
         const ang = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
@@ -250,16 +253,25 @@ export class SketchController {
     const end = this.secondPoint(a, b);
     if (Math.hypot(end[0] - a[0], end[1] - a[1]) < 1e-6) return;
     if ((this.tool === "rect" || this.tool === "ellipse") && (Math.abs(end[0] - a[0]) < 1e-6 || Math.abs(end[1] - a[1]) < 1e-6)) return;
-    if (this.tool === "select" || this.tool === "polyline" || this.tool === "text") return;
-    this.env.add(makeEntity(this.tool, a, end));
+    if (this.tool === "select" || this.multi || this.tool === "text") return;
+    this.env.add(makeEntity(this.tool as EntityType, a, end));
     this.points = [];
     this.typed = {};
   }
 
+  /** Tools that place many points (outlines and open paths). */
+  private get multi() {
+    return this.tool === "polyline" || this.tool === "path";
+  }
+
   private commitPolyline() {
-    if (this.points.length >= 3) {
+    const open = this.tool === "path";
+    if (this.points.length >= (open ? 2 : 3)) {
       const e = makeEntity("polyline", this.points[0]!, this.points[1]!);
-      if (e.type === "polyline") e.points = this.points.map(([x, y]) => [fmt(x), fmt(y)]);
+      if (e.type === "polyline") {
+        e.points = this.points.map(([x, y]) => [fmt(x), fmt(y)]);
+        if (open) e.open = true;
+      }
       this.env.add(e);
     }
     this.points = [];
@@ -273,7 +285,8 @@ export class SketchController {
     let best: { d: number; id: Id } | null = null;
     for (const r of this.resolvedCache.length ? this.resolvedCache : this.resolved()) {
       const pts = entityOutline(r, 48);
-      for (let i = 0; i < pts.length; i++) {
+      const segs = r.type === "polyline" && r.open ? pts.length - 1 : pts.length;
+      for (let i = 0; i < segs; i++) {
         const a = pts[i]!;
         const b = pts[(i + 1) % pts.length]!;
         const dx = b[0] - a[0];
@@ -307,10 +320,13 @@ export class SketchController {
         this.publish();
         return;
       }
-      if (this.tool === "polyline") {
+      if (this.multi) {
         const first = this.points[0];
+        const last = this.points[this.points.length - 1];
         const tol = 10 * this.env.pixelSize();
-        if (first && this.points.length >= 3 && Math.hypot(first[0] - this.cursor[0], first[1] - this.cursor[1]) < tol) {
+        const near = (p: Vec2 | undefined) => !!p && Math.hypot(p[0] - this.cursor![0], p[1] - this.cursor![1]) < tol;
+        // Outlines close on their first point; paths finish when the last point is clicked again.
+        if ((this.tool === "polyline" && this.points.length >= 3 && near(first)) || (this.tool === "path" && this.points.length >= 2 && near(last))) {
           this.commitPolyline();
         } else {
           const last = this.points[this.points.length - 1];
@@ -326,7 +342,7 @@ export class SketchController {
     } else if (e.type === "up") {
       // Press-drag-release also works for two-point tools.
       const d = this.downAt;
-      if (d && this.tool !== "polyline" && this.points.length === 1) {
+      if (d && !this.multi && this.points.length === 1) {
         const moved = Math.hypot(d[0] - this.cursor[0], d[1] - this.cursor[1]) > 4 * this.env.pixelSize();
         if (moved) this.commitTwoPoint(this.cursor);
       }
@@ -370,24 +386,24 @@ export class SketchController {
   key(e: KeyboardEvent): boolean {
     if (e.key === "Escape") {
       if (this.points.length) {
-        if (this.tool === "polyline" && this.points.length >= 3) this.commitPolyline();
+        if (this.multi && this.points.length >= (this.tool === "path" ? 2 : 3)) this.commitPolyline();
         else this.reset();
         this.publish();
         return true;
       }
       return false;
     }
-    if (e.key === "Enter" && this.tool === "polyline" && this.points.length >= 3) {
+    if (e.key === "Enter" && this.multi && this.points.length >= (this.tool === "path" ? 2 : 3)) {
       this.commitPolyline();
       this.publish();
       return true;
     }
-    if (e.key === "Enter" && this.points.length === 1 && this.cursor && this.tool !== "polyline") {
+    if (e.key === "Enter" && this.points.length === 1 && this.cursor && !this.multi) {
       this.commitTwoPoint(this.cursor);
       this.publish();
       return true;
     }
-    if (e.key === "Backspace" && this.tool === "polyline" && this.points.length) {
+    if (e.key === "Backspace" && this.multi && this.points.length) {
       this.points.pop();
       this.publish();
       return true;

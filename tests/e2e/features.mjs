@@ -35,7 +35,8 @@ const waitBuilt = async () => {
     () => {
       const s = window.whittle.useApp.getState();
       const ids = new Set(s.regen?.status.map((x) => x.id));
-      return s.kernelReady && !s.regenBusy && s.doc.features.every((f) => ids.has(f.id));
+      // The rebuild must be of the current document, not an earlier one still on screen.
+      return s.kernelReady && !s.regenBusy && s.builtDoc === s.doc && s.doc.features.every((f) => ids.has(f.id));
     },
     null,
     { timeout: 60000 },
@@ -56,6 +57,8 @@ const vp = async () => {
 await step("01-parts-library", async () => {
   await page.goto(url);
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
+  // First run asks how Whittle will be used; any answer leads to the start screen.
+  await page.getByRole("button", { name: /Maker & hobbyist/ }).click();
   await waitBuilt();
   await page.locator(".start-card--primary").click();
   await page.keyboard.press("p");
@@ -76,12 +79,12 @@ await step("03-vase-print-check", async () => {
   await page.locator(".part", { hasText: "Vase" }).click();
   await waitBuilt();
   await expectOk("vase");
-  await page.locator(".dock__btn", { hasText: "Print check" }).click();
+  await page.locator(".dock__btn", { hasText: "Overhangs" }).click();
   await page.waitForTimeout(400);
 });
 
 await step("04-section", async () => {
-  await page.locator(".dock__btn", { hasText: "Print check" }).click();
+  await page.locator(".dock__btn", { hasText: "Overhangs" }).click();
   await page.locator(".dock__btn", { hasText: "Section" }).click();
   await page.locator(".section-card").waitFor();
   await page.waitForTimeout(400);
@@ -95,10 +98,11 @@ await step("05-xray", async () => {
 
 await step("06-sketch-new-tools", async () => {
   await page.getByTitle(/^Shaded with edges/).click();
-  page.once("dialog", (d) => d.accept());
   await page.keyboard.press("Control+k");
   await page.keyboard.type("new design");
   await page.keyboard.press("Enter");
+  // Unsaved work: Whittle asks in its own dialog (never the browser's).
+  await page.getByRole("alertdialog").getByRole("button", { name: "Discard changes" }).click();
   await page.waitForTimeout(300);
   await page.keyboard.press("s");
   await page.locator(".tree__row", { hasText: "XY plane" }).click();
@@ -214,7 +218,7 @@ await step("13-box-and-combine", async () => {
   await page.keyboard.press("j");
   await waitBuilt();
   await page.getByRole("radio", { name: "Cut" }).click();
-  await page.locator(".checklist input").first().check();
+  await page.locator(".checklist").getByRole("checkbox").first().click();
   await waitBuilt();
   await expectOk("combine");
   await page.keyboard.press("Enter");
@@ -237,7 +241,7 @@ await step("14-move-copy", async () => {
 });
 
 await step("15-paper-and-screenshot", async () => {
-  await page.getByTitle("Paper theme").click();
+  await page.getByTitle("Light theme").click();
   const dl = page.waitForEvent("download");
   await page.getByTitle(/^Save image/).click();
   const d = await dl;
@@ -277,9 +281,12 @@ await step("17-svg-import", async () => {
     <circle cx="70" cy="30" r="12" transform="translate(0 0)" />
   </svg>`;
   const chooser = page.waitForEvent("filechooser");
-  page.once("dialog", (d) => d.accept("50"));
   await page.locator(".toolbar").getByRole("button", { name: "SVG" }).click();
   await (await chooser).setFiles({ name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
+  // The width is asked in Whittle's own dialog.
+  const ask = page.getByRole("dialog", { name: "Import logo.svg" });
+  await ask.getByRole("textbox").fill("50");
+  await ask.getByRole("button", { name: "Import" }).click();
   await page.waitForFunction(() => {
     const s = window.whittle.useApp.getState();
     return s.mode.kind === "sketch" && s.doc.features.find((f) => f.id === s.mode.sketchId).entities.length === 3;

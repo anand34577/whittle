@@ -13,11 +13,13 @@ import {
   findFeature,
   finishSketch,
   mutate,
+  setPrefs,
   sketchMutate,
   updateFeature,
   useApp,
 } from "../state/store";
 import { ExprInput, Segmented, Toggle } from "./ExprInput";
+import { ColorPicker, Disclosure, NumberField, Select } from "./controls";
 import { FeatureEditor } from "./FeatureEditors";
 import { Icon, type IconName } from "./icons";
 
@@ -36,6 +38,12 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   move: "move",
   combine: "combine",
   import: "import",
+  sweep: "sweep",
+  coil: "coil",
+  split: "split",
+  offset: "offset",
+  scale: "scale",
+  draft: "draft",
 };
 
 const ENTITY_LABELS: Record<SketchEntity["type"], string> = {
@@ -73,14 +81,14 @@ function ShapeActions() {
       </div>
       <div className="copyrow">
         <span>Copies</span>
-        <input className="mini mono" type="number" min={2} max={100} value={count} onChange={(e) => setCount(Math.max(2, Math.min(100, +e.target.value || 2)))} aria-label="Number of copies" />
+        <NumberField value={count} min={2} max={100} onChange={setCount} ariaLabel="Number of copies" width={104} />
         <button className="btn btn--small" onClick={() => circularCopies(count)} title="Evenly around the sketch origin">
           Around origin
         </button>
       </div>
       <div className="copyrow">
         <span>Gap</span>
-        <input className="mini mono" type="number" value={gap} onChange={(e) => setGap(+e.target.value || 0)} aria-label="Gap between copies" />
+        <NumberField value={gap} step={1} onChange={setGap} ariaLabel="Gap between copies" width={104} />
         <button className="btn btn--small" onClick={() => linearCopies(count, gap, 0)} title="In a row along X">
           Row →
         </button>
@@ -269,17 +277,15 @@ function EntityEditor({ e }: { e: SketchEntity }) {
         <>
           <Toggle label="Smooth curve" hint="A flowing spline through the points" checked={!!e.smooth} onChange={(v) => set("Smooth", (d) => void ((d as typeof e).smooth = v))} />
           {!e.smooth && <ExprInput label="Round corners" kind="length" value={e.corner ?? "0"} min={0} onChange={(v) => set("Corner", (d) => void ((d as typeof e).corner = v))} />}
-          <details className="points">
-            <summary>
-              {e.points.length} points
-            </summary>
+          <Toggle label="Open path" hint="A line that isn't closed: a path for sweeps, never a solid" checked={!!e.open} onChange={(v) => set("Open", (d) => void ((d as typeof e).open = v))} />
+          <Disclosure summary={`${e.points.length} points`}>
             {e.points.map((p, i) => (
               <div className="field-row" key={i}>
                 <ExprInput label={`P${i + 1} X`} kind="length" value={p[0]} onChange={(v) => set("Point", (d) => void ((d as typeof e).points[i]![0] = v))} />
                 <ExprInput label="Y" kind="length" value={p[1]} onChange={(v) => set("Point", (d) => void ((d as typeof e).points[i]![1] = v))} />
               </div>
             ))}
-          </details>
+          </Disclosure>
         </>
       )}
       <Segmented
@@ -363,7 +369,7 @@ const massText = (g: number) => (g >= 1000 ? `${trim(g / 1000, 2)} kg` : `${trim
 const UNIT_NAMES: Record<LengthUnit, string> = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches", ft: "feet" };
 
 /** Densities in g/cm³ (typical values). */
-const MATERIALS = [
+export const MATERIALS = [
   { id: "pla", label: "PLA", density: 1.24, group: "Plastics" },
   { id: "petg", label: "PETG", density: 1.27, group: "Plastics" },
   { id: "abs", label: "ABS", density: 1.04, group: "Plastics" },
@@ -380,15 +386,27 @@ const MATERIALS = [
   { id: "oak", label: "Oak", density: 0.75, group: "Wood & other" },
   { id: "plywood", label: "Plywood", density: 0.6, group: "Wood & other" },
   { id: "mdf", label: "MDF", density: 0.75, group: "Wood & other" },
+  { id: "walnut", label: "Walnut", density: 0.64, group: "Wood & other" },
+  { id: "bamboo", label: "Bamboo", density: 0.7, group: "Wood & other" },
   { id: "glass", label: "Glass", density: 2.5, group: "Wood & other" },
   { id: "concrete", label: "Concrete", density: 2.4, group: "Wood & other" },
-];
+  { id: "ceramic", label: "Ceramic (porcelain)", density: 2.4, group: "Wood & other" },
+  { id: "silicone", label: "Silicone rubber", density: 1.1, group: "Plastics" },
+  { id: "tpu", label: "TPU (flexible)", density: 1.21, group: "Plastics" },
+  { id: "pc", label: "Polycarbonate", density: 1.2, group: "Plastics" },
+  { id: "pom", label: "Acetal (POM)", density: 1.41, group: "Plastics" },
+  { id: "al7075", label: "Aluminium 7075", density: 2.81, group: "Metals" },
+  { id: "castiron", label: "Cast iron", density: 7.2, group: "Metals" },
+  { id: "zinc", label: "Zinc (die cast)", density: 6.6, group: "Metals" },
+  { id: "silver", label: "Sterling silver", density: 10.4, group: "Metals" },
+  { id: "gold", label: "Gold (18k)", density: 15.6, group: "Metals" },
+].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
 
 function Inspector() {
   const doc = useApp((s) => s.doc);
   const regen = useApp((s) => s.regen);
   const selection = useApp((s) => s.selection);
-  const [mat, setMat] = useState("pla");
+  const mat = useApp((s) => (MATERIALS.some((m) => m.id === s.prefs.material) ? s.prefs.material : "pla"));
   const unit = doc.units;
   const L = (v: number) => formatQuantity(v, "length", unit);
   const density = MATERIALS.find((m) => m.id === mat)!.density;
@@ -433,10 +451,12 @@ function Inspector() {
                   onClick={() => mutate("Body color", (d) => void (d.bodies[body.id]!.color = c))}
                 />
               ))}
-              <label className="swatch swatch--custom" title="Any color" style={{ background: meta.color }}>
-                <input type="color" value={meta.color} onChange={(e) => mutate("Body color", (d) => void (d.bodies[body.id]!.color = e.target.value), "color" + body.id)} />
-                <Icon name="plus" size={12} />
-              </label>
+              <ColorPicker
+                label="Any color"
+                value={meta.color}
+                presets={BODY_COLORS}
+                onChange={(c) => mutate("Body color", (d) => void (d.bodies[body.id]!.color = c), "color" + body.id)}
+              />
             </div>
             <div className="looks" role="radiogroup" aria-label="Finish">
               {LOOKS.map((l) => (
@@ -495,17 +515,13 @@ function Inspector() {
                 <dt>Mass</dt>
                 <dd className="mono">
                   {massText(((body ? body.volume : totalVolume) / 1000) * density)}
-                  <select className="select select--inline" value={mat} onChange={(e) => setMat(e.target.value)} aria-label="Material">
-                    {[...new Set(MATERIALS.map((m) => m.group))].map((g) => (
-                      <optgroup key={g} label={g}>
-                        {MATERIALS.filter((m) => m.group === g).map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                  <Select
+                    size="sm"
+                    ariaLabel="Material"
+                    value={mat}
+                    onChange={(v) => setPrefs({ material: v })}
+                    options={MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))}
+                  />
                 </dd>
               </>
             )}

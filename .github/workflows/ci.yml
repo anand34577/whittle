@@ -90,6 +90,7 @@ jobs:
           npx --yes wait-on@8 -t 60000 http://localhost:4173/
           node tests/e2e/smoke.mjs http://localhost:4173/ test-results/smoke
           node tests/e2e/features.mjs http://localhost:4173/ test-results/features
+          node tests/e2e/advanced.mjs http://localhost:4173/ test-results/advanced
       - name: Self-hosted server (accounts, storage, versions)
         run: |
           cargo build --locked --manifest-path apps/server/Cargo.toml

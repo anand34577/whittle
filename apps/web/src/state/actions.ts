@@ -13,7 +13,13 @@ import {
   isSketchConsumed,
   planeOrigin,
   makeChamfer,
+  makeCoil,
   makeCombine,
+  makeDraft,
+  makeOffset,
+  makeScale,
+  makeSplit,
+  makeSweep,
   makeExtrude,
   makeFillet,
   makeHole,
@@ -285,6 +291,66 @@ export function startPattern() {
   beginNewFeature(makePattern(get().doc, body), "New Pattern");
 }
 
+/** Sweep: the selected sketches (profile first), else the two newest unused ones. */
+export function startSweep() {
+  const { selection, doc } = get();
+  let ids = selection.flatMap((p) => (p.kind === "sketch" ? [p.sketchId] : []));
+  if (ids.length < 2) {
+    const end = activeEnd(doc);
+    const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length > 0 && !isSketchConsumed(doc, f.id));
+    // A sketch with an open path is the path; the other one is the profile.
+    const path = [...sketches].reverse().find((s) => s.type === "sketch" && s.entities.some((e) => e.type === "polyline" && e.open));
+    const profile = [...sketches].reverse().find((s) => s.id !== path?.id);
+    ids = [profile?.id ?? "", path?.id ?? ""];
+  }
+  beginNewFeature(makeSweep(doc, ids[0] ?? "", ids[1] ?? ""), "New Sweep");
+  if (!ids[0] || !ids[1]) toast("info", "A sweep needs two sketches: a closed cross-section, and a path (an open line) for it to follow.");
+}
+
+export function startCoil(kind: "spring" | "thread") {
+  const f = makeCoil(get().doc, kind);
+  beginNewFeature(f, `New ${f.name}`);
+}
+
+export function startSplit() {
+  const body = selectedBodyId() ?? lastBodyId();
+  if (!body) return toast("info", "Create a body first, then split it.");
+  beginNewFeature(makeSplit(get().doc, body), "New Split");
+}
+
+export function startOffset() {
+  const body = selectedBodyId() ?? lastBodyId();
+  if (!body) return toast("info", "Create a body first, then offset it.");
+  beginNewFeature(makeOffset(get().doc, body), "New Offset");
+}
+
+export function startScale() {
+  const body = selectedBodyId() ?? lastBodyId();
+  if (!body) return toast("info", "Create a body first, then scale it.");
+  beginNewFeature(makeScale(get().doc, body), "New Scale");
+}
+
+export function startDraft() {
+  const faces = get()
+    .selection.map((p) => faceRefFromPick(p))
+    .filter((x): x is FaceRef => !!x);
+  const f = makeDraft(get().doc);
+  if (f.type === "draft") f.faces = faces;
+  beginNewFeature(f, `New ${f.name}`);
+}
+
+/** Fillet or chamfer every edge of the selected (or latest) body. */
+export function startEdgeFeatureAll(kind: "fillet" | "chamfer") {
+  const id = selectedBodyId() ?? lastBodyId();
+  const body = pickableBodies().find((b) => b.id === id);
+  if (!body) return toast("info", "Create a body first.");
+  const f = kind === "fillet" ? makeFillet(get().doc) : makeChamfer(get().doc);
+  if (f.type === "fillet" || f.type === "chamfer") f.edges = body.edges.map((e) => ({ bodyId: body.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length }));
+  if (f.type === "fillet") f.radius = "1";
+  if (f.type === "chamfer") f.distance = "0.5";
+  beginNewFeature(f, `New ${f.name}`);
+}
+
 function lastBodyId(): Id | undefined {
   return get().regen?.bodies.at(-1)?.id;
 }
@@ -336,6 +402,45 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f && f.type === "sweep" && p?.kind === "sketch") {
+    mutate("Pick sketch", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "sweep") return;
+      if (x.profile === p.sketchId) x.profile = "";
+      else if (x.path === p.sketchId) x.path = "";
+      else if (!x.profile) x.profile = p.sketchId;
+      else x.path = p.sketchId;
+    });
+    return;
+  }
+  if (f && f.type === "draft" && p?.kind === "face") {
+    const ref = faceRefFromPick(p);
+    if (!ref) return;
+    if (ref.surface !== "PLANE" && ref.surface !== "CYLINDRE" && ref.surface !== "CONE") return toast("warn", "Only flat, cylindrical or conical faces can be drafted.");
+    mutate("Pick face", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "draft") return;
+      const i = x.faces.findIndex((e) => d3(e.center, ref.center) < 1e-6);
+      if (i >= 0) x.faces.splice(i, 1);
+      else x.faces.push(ref);
+    });
+    return;
+  }
+  if (f && (f.type === "fillet" || f.type === "chamfer") && p?.kind === "face") {
+    // Clicking a face takes all of its edges (click again to remove them).
+    const body = pickableBodies().find((b) => b.id === p.bodyId);
+    const idx = body?.faceEdges?.[p.index] ?? [];
+    const refs = idx.map((i) => edgeRefFromPick({ kind: "edge", bodyId: p.bodyId, index: i }, body ? [body] : undefined)).filter((x): x is EdgeRef => !!x);
+    if (!refs.length) return;
+    mutate("Pick face edges", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || (x.type !== "fillet" && x.type !== "chamfer")) return;
+      const has = (r: EdgeRef) => x.edges.findIndex((e) => d3(e.mid, r.mid) < 1e-6);
+      if (refs.every((r) => has(r) >= 0)) x.edges = x.edges.filter((e) => !refs.some((r) => d3(e.mid, r.mid) < 1e-6));
+      else for (const r of refs) if (has(r) < 0) x.edges.push(r);
+    });
+    return;
+  }
   if (f && f.type === "loft" && p?.kind === "sketch") {
     mutate("Pick profile", (d) => {
       const x = d.features.find((y) => y.id === f.id);
@@ -361,10 +466,10 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
-  if (f && (f.type === "move" || f.type === "mirror" || f.type === "pattern") && bodyOf && bodyOf !== f.id) {
+  if (f && (f.type === "move" || f.type === "mirror" || f.type === "pattern" || f.type === "split" || f.type === "offset" || f.type === "scale") && bodyOf && bodyOf !== f.id) {
     mutate("Pick body", (d) => {
       const x = d.features.find((y) => y.id === f.id);
-      if (x && (x.type === "move" || x.type === "mirror" || x.type === "pattern")) x.bodyId = bodyOf;
+      if (x && (x.type === "move" || x.type === "mirror" || x.type === "pattern" || x.type === "split" || x.type === "offset" || x.type === "scale")) x.bodyId = bodyOf;
     });
     return;
   }

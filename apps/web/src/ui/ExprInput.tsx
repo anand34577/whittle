@@ -6,6 +6,7 @@
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { type QuantityKind, documentEvaluator, formatQuantity, trim } from "@whittle/core";
 import { commitSession, useApp } from "../state/store";
+import { Switch } from "./controls";
 
 interface Props {
   label: string;
@@ -167,13 +168,7 @@ export function Segmented<T extends string>({
   );
 }
 
+/** On/off option (an app-drawn switch, never a native checkbox). */
 export function Toggle({ label, checked, onChange, hint }: { label: string; checked: boolean; onChange: (v: boolean) => void; hint?: string }) {
-  return (
-    <label className="toggle">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="toggle__track" aria-hidden="true" />
-      <span className="toggle__label">{label}</span>
-      {hint && <span className="toggle__hint">{hint}</span>}
-    </label>
-  );
+  return <Switch label={label} checked={checked} onChange={onChange} hint={hint} />;
 }

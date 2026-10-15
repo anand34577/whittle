@@ -1,3 +1,5 @@
+import { confirmDialog } from "./dialogs";
+
 /**
  * Where Whittle is running, and the small set of things that differ:
  *
@@ -15,6 +17,11 @@ export interface ServerConfig {
   needsSetup: boolean;
   maxUploadBytes: number;
   maxVersions: number;
+  /** "Forgot password?" is available (email is set up). */
+  passwordReset: boolean;
+  requireEmail: boolean;
+  /** The AI assistant is allowed (servers can turn it off). */
+  ai?: boolean;
 }
 
 export interface ServerUser {
@@ -26,7 +33,10 @@ export interface ServerUser {
   disabled: boolean;
   hasPassword: boolean;
   sso: boolean;
+  /** Waiting to be linked to single sign-on by email. */
+  ssoLink: boolean;
   createdAt: number;
+  lastLoginAt: number | null;
 }
 
 export type Platform =
@@ -123,14 +133,7 @@ export async function detectPlatform(): Promise<Platform> {
   }
 }
 
-/** Yes/no question: a native dialog on the desktop, the browser's confirm elsewhere. */
-export async function ask(message: string, okLabel = "OK"): Promise<boolean> {
-  if (tauri()) {
-    try {
-      return await invoke<boolean>("ask_dialog", { title: "Whittle", message, okLabel });
-    } catch {
-      /* fall through */
-    }
-  }
-  return window.confirm(message);
+/** Yes/no question in Whittle's own dialog (the same on desktop, server and browser). */
+export function ask(opts: { title: string; message: string; confirmLabel?: string; danger?: boolean; details?: string[] }): Promise<boolean> {
+  return confirmDialog(opts);
 }

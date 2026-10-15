@@ -1,25 +1,25 @@
-//! whittle-server command line.
-//!
-//!   whittle-server                       run the server (configured by environment variables)
-//!   whittle-server user add NAME [--admin]   create a local account (password from WHITTLE_PASSWORD or stdin)
-//!   whittle-server user passwd NAME      set a new password
-//!   whittle-server user admin NAME on|off
-//!   whittle-server user list
-//!   whittle-server --version | --help
+//! whittle-server command line: run the server, manage accounts, back up,
+//! restore, move to another database and check the installation. See HELP.
 
 use std::net::SocketAddr;
 
 use tokio::io::AsyncBufReadExt;
-use whittle_server::{auth, build_state, db, router, Config, Shared};
+use whittle_server::{auth, build_state, db, router, tools, Config, Shared};
 
 const HELP: &str = "whittle-server: self-hosted Whittle (web app, accounts, design storage)
 
 USAGE:
-  whittle-server                           run the server
-  whittle-server user add NAME [--admin]   create a local account
-  whittle-server user passwd NAME          set a new password
-  whittle-server user admin NAME on|off    grant or remove administrator rights
-  whittle-server user list                 list accounts
+  whittle-server                                   run the server
+  whittle-server user add NAME [--email E] [--admin]   create a local account
+  whittle-server user passwd NAME                  set a new password
+  whittle-server user email NAME ADDRESS           set an account's email
+  whittle-server user admin NAME on|off            grant or remove administrator rights
+  whittle-server user list                         list accounts
+  whittle-server backup FILE.zip                   back up accounts, settings and designs (safe while running)
+  whittle-server restore FILE.zip [--force]        restore a backup (--force replaces existing data)
+  whittle-server migrate-db URL [--force]          copy everything to another database, e.g.
+                                                   postgres://user:pass@host/whittle
+  whittle-server doctor                            check the configuration and dependencies
   whittle-server --version
 
 Passwords are read from WHITTLE_PASSWORD, or from the first line of standard input.
@@ -54,6 +54,27 @@ async fn run(args: Vec<String>) -> Result<(), String> {
         }
         [] | ["serve"] => serve().await,
         ["user", rest @ ..] => user_command(rest).await,
+        ["backup", file] => {
+            println!("{}", tools::backup(&Config::from_env()?, std::path::Path::new(file)).await?);
+            Ok(())
+        }
+        ["restore", file, flags @ ..] => {
+            println!("{}", tools::restore(&Config::from_env()?, std::path::Path::new(file), flags.contains(&"--force")).await?);
+            Ok(())
+        }
+        ["migrate-db", url, flags @ ..] => {
+            println!("{}", tools::migrate_db(&Config::from_env()?, url, flags.contains(&"--force")).await?);
+            Ok(())
+        }
+        ["doctor"] => {
+            let (report, ok) = tools::doctor(&Config::from_env()?).await;
+            println!("{report}");
+            if ok {
+                Ok(())
+            } else {
+                Err("some checks failed".into())
+            }
+        }
         _ => Err(format!("unknown command. Try --help.\n\n{HELP}")),
     }
 }
@@ -111,9 +132,18 @@ async fn user_command(rest: &[&str]) -> Result<(), String> {
     match rest {
         ["add", name, flags @ ..] => {
             let admin = flags.contains(&"--admin");
+            let email = flags.iter().position(|f| *f == "--email").and_then(|i| flags.get(i + 1)).copied();
+            let email = auth::clean_email(&state, email, None, false).await.map_err(err)?;
             let password = read_password().await?;
-            let u = auth::create_local_user(&state, name, Some(&password), None, None, admin).await.map_err(err)?;
+            let u = auth::create_local_user(&state, name, Some(&password), None, email.as_deref(), admin).await.map_err(err)?;
+            db::audit(&state.db, None, "user.create", Some(&u.username), "command line").await;
             println!("created {}{}", u.username, if u.is_admin { " (administrator)" } else { "" });
+        }
+        ["email", name, address] => {
+            let u = db::user_by(&state.db, "username", name).await.map_err(|e| e.to_string())?.ok_or("no such user")?;
+            let email = auth::clean_email(&state, Some(address), Some(&u.id), true).await.map_err(err)?;
+            sqlx::query("UPDATE users SET email = $1 WHERE id = $2").bind(email).bind(&u.id).execute(&state.db).await.map_err(|e| e.to_string())?;
+            println!("email updated for {}", u.username);
         }
         ["passwd", name] => {
             let u = db::user_by(&state.db, "username", name).await.map_err(|e| e.to_string())?.ok_or("no such user")?;
@@ -137,9 +167,10 @@ async fn user_command(rest: &[&str]) -> Result<(), String> {
             for r in rows {
                 let u = db::user_from_row(&r).map_err(|e| e.to_string())?;
                 println!(
-                    "{:<24} {:<28} {}{}{}",
+                    "{:<24} {:<28} {:<32} {}{}{}",
                     u.username,
                     u.display_name,
+                    u.email.as_deref().unwrap_or("-"),
                     if u.is_admin { "admin " } else { "" },
                     if u.sso { "sso " } else { "" },
                     if u.disabled { "disabled" } else { "" }

@@ -37,6 +37,8 @@ export interface BodyResult {
   edgeRanges: Int32Array;
   faces: FaceInfo[];
   edges: EdgeInfo[];
+  /** For each face, the indices (into `edges`) of its boundary edges. */
+  faceEdges: number[][];
   volume: number;
   area: number;
   centerOfMass: Vec3;
@@ -83,7 +85,7 @@ export interface RegenResult {
   rebuilt: number;
 }
 
-export type ExportFormat = "step" | "stl" | "3mf";
+export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply";
 
 export type KernelRequest =
   | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id }

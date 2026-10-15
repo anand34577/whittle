@@ -1,0 +1,166 @@
+/*
+ * Extra themes, accent colors, density and interface size.
+ * Each theme redefines the semantic tokens from tokens.css; components never
+ * reference raw colors, so every theme styles the whole app.
+ */
+
+/* ── Midnight: deep blue-black ─────────────────────────────────── */
+[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg-0: oklch(0.15 0.015 260);
+  --bg-1: oklch(0.185 0.018 260);
+  --bg-2: oklch(0.22 0.02 260);
+  --bg-3: oklch(0.265 0.022 260);
+  --bg-inset: oklch(0.13 0.014 260);
+  --line: oklch(0.3 0.022 260);
+  --line-soft: oklch(0.25 0.02 260);
+  --line-strong: oklch(0.4 0.025 260);
+  --text-1: oklch(0.94 0.01 260);
+  --text-2: oklch(0.76 0.015 260);
+  --text-3: oklch(0.58 0.018 260);
+  --select: oklch(0.78 0.12 230);
+  --select-soft: oklch(0.78 0.12 230 / 0.16);
+  --ok: oklch(0.76 0.13 155);
+  --warn: oklch(0.83 0.14 85);
+  --danger: oklch(0.69 0.18 22);
+  --danger-soft: oklch(0.69 0.18 22 / 0.15);
+  --shadow: 0 1px 0 oklch(1 0 0 / 0.03) inset, 0 8px 24px oklch(0 0 0 / 0.45);
+  --shadow-pop: 0 14px 44px oklch(0 0 0 / 0.55), 0 0 0 1px var(--line);
+  --tick: oklch(0.94 0.01 260 / 0.14);
+}
+
+/* ── Blueprint: engineering blue, white linework ──────────────── */
+[data-theme="blueprint"] {
+  color-scheme: dark;
+  --bg-0: oklch(0.26 0.07 255);
+  --bg-1: oklch(0.3 0.075 255);
+  --bg-2: oklch(0.34 0.08 255);
+  --bg-3: oklch(0.39 0.085 255);
+  --bg-inset: oklch(0.23 0.065 255);
+  --line: oklch(0.47 0.08 255);
+  --line-soft: oklch(0.4 0.08 255);
+  --line-strong: oklch(0.6 0.08 250);
+  --text-1: oklch(0.97 0.01 250);
+  --text-2: oklch(0.85 0.03 250);
+  --text-3: oklch(0.7 0.05 250);
+  --select: oklch(0.86 0.12 205);
+  --select-soft: oklch(0.86 0.12 205 / 0.18);
+  --ok: oklch(0.82 0.14 155);
+  --warn: oklch(0.88 0.14 90);
+  --danger: oklch(0.74 0.16 25);
+  --danger-soft: oklch(0.74 0.16 25 / 0.18);
+  --shadow: 0 8px 24px oklch(0.1 0.05 255 / 0.5);
+  --shadow-pop: 0 14px 44px oklch(0.1 0.05 255 / 0.6), 0 0 0 1px var(--line);
+  --tick: oklch(0.97 0.01 250 / 0.18);
+}
+
+/* ── Studio: neutral grey ─────────────────────────────────────── */
+[data-theme="studio"] {
+  color-scheme: dark;
+  --bg-0: oklch(0.2 0.002 270);
+  --bg-1: oklch(0.235 0.003 270);
+  --bg-2: oklch(0.27 0.003 270);
+  --bg-3: oklch(0.31 0.004 270);
+  --bg-inset: oklch(0.18 0.002 270);
+  --line: oklch(0.34 0.004 270);
+  --line-soft: oklch(0.29 0.004 270);
+  --line-strong: oklch(0.44 0.005 270);
+  --text-1: oklch(0.94 0.002 270);
+  --text-2: oklch(0.77 0.003 270);
+  --text-3: oklch(0.6 0.004 270);
+  --select: oklch(0.74 0.13 245);
+  --select-soft: oklch(0.74 0.13 245 / 0.16);
+  --ok: oklch(0.76 0.13 150);
+  --warn: oklch(0.83 0.14 85);
+  --danger: oklch(0.68 0.18 25);
+  --danger-soft: oklch(0.68 0.18 25 / 0.14);
+  --shadow: 0 8px 24px oklch(0 0 0 / 0.4);
+  --shadow-pop: 0 14px 44px oklch(0 0 0 / 0.5), 0 0 0 1px var(--line);
+  --tick: oklch(0.94 0.002 270 / 0.14);
+}
+
+/* ── High contrast ────────────────────────────────────────────── */
+[data-theme="contrast"] {
+  color-scheme: dark;
+  --bg-0: #000;
+  --bg-1: #000;
+  --bg-2: #0d0d0d;
+  --bg-3: #1f1f1f;
+  --bg-inset: #000;
+  --line: #8c8c8c;
+  --line-soft: #5c5c5c;
+  --line-strong: #e6e6e6;
+  --text-1: #fff;
+  --text-2: #f0f0f0;
+  --text-3: #cfcfcf;
+  --select: #00e5ff;
+  --select-soft: rgb(0 229 255 / 0.22);
+  --ok: #5cff8a;
+  --warn: #ffd400;
+  --danger: #ff6b6b;
+  --danger-soft: rgb(255 107 107 / 0.2);
+  --shadow: none;
+  --shadow-pop: 0 0 0 2px #fff;
+  --tick: rgb(255 255 255 / 0.3);
+}
+[data-theme="contrast"] :focus-visible {
+  outline-width: 3px;
+}
+
+/* ── Accent colors ────────────────────────────────────────────── */
+/* Orange is the default from tokens.css; light themes get a darker shade for contrast. */
+[data-accent="amber"] { --accent: oklch(0.8 0.15 80); --accent-hover: oklch(0.85 0.14 82); --accent-ink: oklch(0.22 0.05 70); --accent-soft: oklch(0.8 0.15 80 / 0.15); }
+[data-accent="rose"] { --accent: oklch(0.7 0.17 10); --accent-hover: oklch(0.75 0.16 10); --accent-ink: oklch(0.99 0.01 10); --accent-soft: oklch(0.7 0.17 10 / 0.15); }
+[data-accent="violet"] { --accent: oklch(0.7 0.16 290); --accent-hover: oklch(0.75 0.15 290); --accent-ink: oklch(0.99 0.01 290); --accent-soft: oklch(0.7 0.16 290 / 0.16); }
+[data-accent="blue"] { --accent: oklch(0.7 0.15 255); --accent-hover: oklch(0.75 0.14 255); --accent-ink: oklch(0.99 0.01 255); --accent-soft: oklch(0.7 0.15 255 / 0.16); }
+[data-accent="teal"] { --accent: oklch(0.74 0.12 185); --accent-hover: oklch(0.79 0.11 185); --accent-ink: oklch(0.2 0.04 185); --accent-soft: oklch(0.74 0.12 185 / 0.15); }
+[data-accent="green"] { --accent: oklch(0.73 0.15 145); --accent-hover: oklch(0.78 0.14 145); --accent-ink: oklch(0.2 0.05 145); --accent-soft: oklch(0.73 0.15 145 / 0.15); }
+[data-theme="paper"][data-accent="amber"] { --accent: oklch(0.66 0.15 70); --accent-ink: oklch(0.99 0.01 70); }
+[data-theme="paper"][data-accent="rose"] { --accent: oklch(0.58 0.19 10); }
+[data-theme="paper"][data-accent="violet"] { --accent: oklch(0.55 0.18 290); }
+[data-theme="paper"][data-accent="blue"] { --accent: oklch(0.55 0.16 255); }
+[data-theme="paper"][data-accent="teal"] { --accent: oklch(0.56 0.11 185); --accent-ink: oklch(0.99 0.01 185); }
+[data-theme="paper"][data-accent="green"] { --accent: oklch(0.56 0.15 145); --accent-ink: oklch(0.99 0.01 145); }
+
+/* ── Density ──────────────────────────────────────────────────── */
+[data-density="compact"] {
+  --h-title: 36px;
+  --h-toolbar: 44px;
+  --h-timeline: 50px;
+  --h-status: 24px;
+  --w-browser: 220px;
+  --w-panel: 280px;
+  --sp-3: 10px;
+  --sp-4: 12px;
+}
+[data-density="spacious"] {
+  --h-title: 44px;
+  --h-toolbar: 60px;
+  --h-timeline: 64px;
+  --h-status: 30px;
+  --w-browser: 264px;
+  --w-panel: 330px;
+  --sp-3: 14px;
+  --sp-4: 20px;
+  --fs-sm: 12.5px;
+  --fs-md: 13.5px;
+}
+
+/* ── Interface size: the whole app scales (popovers and tooltips keep their size) ── */
+#root {
+  zoom: var(--ui-scale, 1);
+  width: calc(100% / var(--ui-scale, 1));
+  height: calc(100% / var(--ui-scale, 1));
+}
+
+/* ── Reduced motion (preference, in addition to the OS setting) ── */
+[data-motion="reduced"] {
+  --dur-fast: 0ms;
+  --dur: 0ms;
+}
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after {
+  animation-duration: 0ms !important;
+  transition-duration: 0ms !important;
+}

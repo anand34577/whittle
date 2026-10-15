@@ -15,7 +15,7 @@ function pickBeforeFor(): string | undefined {
   const { session, doc } = useApp.getState();
   if (!session) return undefined;
   const f = findFeature(doc, session.featureId);
-  return f && ["fillet", "chamfer", "shell", "hole", "combine", "move"].includes(f.type) ? f.id : undefined;
+  return f && ["fillet", "chamfer", "shell", "hole", "combine", "move", "draft", "split", "offset", "scale", "mirror", "pattern"].includes(f.type) ? f.id : undefined;
 }
 
 function schedule() {
@@ -28,7 +28,7 @@ function schedule() {
     useApp.setState({ regenBusy: true });
     try {
       const result = await kernel!.regen(doc, session ? "preview" : "final", pickBeforeFor());
-      if (result) useApp.setState({ regen: result, kernelError: null });
+      if (result) useApp.setState({ regen: result, builtDoc: doc, kernelError: null });
     } catch (e) {
       useApp.setState({ kernelError: e instanceof Error ? e.message : String(e) });
     } finally {

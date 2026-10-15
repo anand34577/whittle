@@ -26,6 +26,16 @@ export function featureInputs(f: Feature): Id[] {
       return [...f.sketches, ...(f.target ? [f.target] : [])];
     case "combine":
       return [...(f.target ? [f.target] : []), ...f.tools];
+    case "sweep":
+      return [f.profile, f.path, ...(f.target ? [f.target] : [])];
+    case "coil":
+      return f.target ? [f.target] : [];
+    case "split":
+    case "offset":
+    case "scale":
+      return f.bodyId ? [f.bodyId] : [];
+    case "draft":
+      return [...new Set(f.faces.map((x) => x.bodyId))];
     case "import":
       return [];
   }
@@ -74,7 +84,14 @@ export function createsBody(f: Feature): boolean {
     case "revolve":
     case "primitive":
     case "loft":
+    case "sweep":
+    case "coil":
       return f.op === "new";
+    case "split":
+      return f.keep === "both";
+    case "offset":
+    case "scale":
+      return f.copy;
     case "mirror":
     case "pattern":
       return !f.merge;
@@ -90,7 +107,10 @@ export function createsBody(f: Feature): boolean {
 /** A sketch is "consumed" once a downstream feature uses it (Fusion-style dimming). */
 export function isSketchConsumed(doc: WhittleDocument, sketchId: Id): boolean {
   return doc.features.some(
-    (f) => ((f.type === "extrude" || f.type === "revolve") && f.sketch === sketchId) || (f.type === "loft" && f.sketches.includes(sketchId)),
+    (f) =>
+      ((f.type === "extrude" || f.type === "revolve") && f.sketch === sketchId) ||
+      (f.type === "loft" && f.sketches.includes(sketchId)) ||
+      (f.type === "sweep" && (f.profile === sketchId || f.path === sketchId)),
   );
 }
 
@@ -103,10 +123,7 @@ export function activeEnd(doc: WhittleDocument): number {
 export function bodyIdsBefore(doc: WhittleDocument, endIndex = activeEnd(doc)): Id[] {
   const ids: Id[] = [];
   doc.features.slice(0, endIndex).forEach((f) => {
-    if (f.suppressed) return;
-    if ((f.type === "extrude" || f.type === "revolve" || f.type === "primitive" || f.type === "loft") && f.op === "new") ids.push(f.id);
-    if ((f.type === "mirror" || f.type === "pattern") && !f.merge) ids.push(f.id);
-    if ((f.type === "move" && f.copy) || f.type === "import") ids.push(f.id);
+    if (!f.suppressed && createsBody(f)) ids.push(f.id);
   });
   return ids;
 }

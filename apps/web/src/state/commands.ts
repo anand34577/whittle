@@ -7,8 +7,15 @@ import type { IconName } from "../ui/icons";
 import {
   addPrimitive,
   importModel,
+  startCoil,
   startCombine,
+  startDraft,
   startEdgeFeature,
+  startEdgeFeatureAll,
+  startOffset,
+  startScale,
+  startSplit,
+  startSweep,
   startExtrude,
   startHole,
   startLoft,
@@ -22,6 +29,7 @@ import {
 import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
 import { exportSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, rotateEntity } from "./sketchOps";
+import { THEMES } from "./prefs";
 import {
   type AppState,
   type DisplayMode,
@@ -87,6 +95,9 @@ export const COMMANDS: Command[] = [
   { id: "extrude", label: "Extrude", group: "Create", icon: "extrude", keys: "E", keywords: "push pull pad boss height thickness", hint: "Turn a sketch into a solid by pulling it", when: inModel, run: model(startExtrude) },
   { id: "revolve", label: "Revolve", group: "Create", icon: "revolve", keys: "R", keywords: "lathe spin turn rotate around axis vase", hint: "Spin a sketch around an axis", when: inModel, run: model(startRevolve) },
   { id: "loft", label: "Loft", group: "Create", icon: "loft", keywords: "blend transition morph between profiles", hint: "Blend smoothly between two or more sketches", when: inModel, run: model(startLoft) },
+  { id: "sweep", label: "Sweep", group: "Create", icon: "sweep", keywords: "pipe tube path rail handle gasket wire follow along curve", hint: "Move a cross-section along a path: pipes, handles, rails", when: inModel, run: model(startSweep) },
+  { id: "spring", label: "Coil / spring", short: "Coil", group: "Create", icon: "coil", keywords: "helix helical spring coil spiral auger", hint: "A helical coil: springs, spirals, augers", when: inModel, run: model(() => startCoil("spring")) },
+  { id: "thread", label: "Thread", group: "Create", icon: "thread", keywords: "screw bolt nut tap threaded rod helix iso metric", hint: "A screw thread: join it to a rod, or cut it from a hole", when: inModel, run: model(() => startCoil("thread")) },
   { id: "hole", label: "Hole", group: "Create", icon: "hole", keys: "D", keywords: "drill screw bolt counterbore countersink m3 m4 bore", hint: "Drill holes on a face: simple, counterbored or countersunk", when: (s) => inModel(s) && hasBodies(s), run: model(startHole) },
   { id: "box", label: "Box", group: "Shapes", icon: "box", keywords: "cube block primitive quick shape", hint: "Add a box you can size directly", when: inModel, run: model(() => addPrimitive("box")) },
   { id: "cylinder", label: "Cylinder", group: "Shapes", icon: "cylinder", keywords: "rod post peg primitive quick shape", hint: "Add a cylinder", when: inModel, run: model(() => addPrimitive("cylinder")) },
@@ -104,6 +115,12 @@ export const COMMANDS: Command[] = [
   { id: "combine", label: "Combine", group: "Modify", icon: "combine", keys: "J", keywords: "boolean join merge union subtract cut intersect", hint: "Join, cut or intersect bodies", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startCombine) },
   { id: "mirror", label: "Mirror", group: "Modify", icon: "mirror", keywords: "symmetry flip copy reflect", hint: "Mirror a body across an origin plane", when: (s) => inModel(s) && hasBodies(s), run: model(startMirror) },
   { id: "pattern", label: "Pattern", group: "Modify", icon: "pattern", keywords: "array repeat copies linear circular", hint: "Repeat a body in a row or around an axis", when: (s) => inModel(s) && hasBodies(s), run: model(startPattern) },
+  { id: "split", label: "Split body", short: "Split", group: "Modify", icon: "split", keywords: "cut in half slice divide trim separate two parts", hint: "Cut a body in two along a plane, or trim one side away", when: (s) => inModel(s) && hasBodies(s), run: model(startSplit) },
+  { id: "draft", label: "Draft", group: "Modify", icon: "draft", keywords: "taper angle mould mold casting release tilt faces", hint: "Tilt faces so a part releases from a mould", when: (s) => inModel(s) && hasBodies(s), run: model(startDraft) },
+  { id: "offset", label: "Offset body", short: "Offset", group: "Modify", icon: "offset", keywords: "grow shrink thicken clearance tolerance inflate", hint: "Grow or shrink a whole body (clearances and tolerances)", when: (s) => inModel(s) && hasBodies(s), run: model(startOffset) },
+  { id: "scale", label: "Scale body", short: "Scale", group: "Modify", icon: "scale", keywords: "resize bigger smaller enlarge reduce percent", hint: "Make a body bigger or smaller", when: (s) => inModel(s) && hasBodies(s), run: model(startScale) },
+  { id: "fillet-all", label: "Round all edges", group: "Modify", icon: "fillet", keywords: "fillet every edge soften smooth whole body", hint: "Fillet every edge of a body at once", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeatureAll("fillet")) },
+  { id: "chamfer-all", label: "Bevel all edges", group: "Modify", icon: "chamfer", keywords: "chamfer every edge whole body", hint: "Chamfer every edge of a body at once", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeatureAll("chamfer")) },
   // Inspect
   {
     id: "measure",
@@ -134,13 +151,34 @@ export const COMMANDS: Command[] = [
   },
   {
     id: "overhang",
-    label: "Print check",
+    label: "Overhang check",
+    short: "Overhangs",
     group: "Inspect",
     icon: "overhang",
     keywords: "3d print overhang support analysis printable",
-    hint: "Show faces that will need support when 3D printing",
-    on: (s) => s.view.overhang,
-    run: () => setView({ overhang: !get().view.overhang }),
+    hint: "3D printing: show faces that will need support",
+    on: (s) => s.view.analysis === "overhang",
+    run: () => setView({ analysis: get().view.analysis === "overhang" ? null : "overhang" }),
+  },
+  {
+    id: "draft-analysis",
+    label: "Draft analysis",
+    group: "Inspect",
+    icon: "draft",
+    keywords: "mould mold casting injection release angle undercut",
+    hint: "Moulding and casting: color faces by draft angle toward the pull direction (Z)",
+    on: (s) => s.view.analysis === "draft",
+    run: () => setView({ analysis: get().view.analysis === "draft" ? null : "draft" }),
+  },
+  {
+    id: "zebra",
+    label: "Zebra stripes",
+    group: "Inspect",
+    icon: "zebra",
+    keywords: "surface quality continuity smooth reflection curvature industrial design class a",
+    hint: "Surface design: reflection stripes show how smoothly faces flow into each other",
+    on: (s) => s.view.analysis === "zebra",
+    run: () => setView({ analysis: get().view.analysis === "zebra" ? null : "zebra" }),
   },
   display("edges", "Shaded with edges", "solid default"),
   display("shaded", "Shaded", "smooth no edges"),
@@ -152,6 +190,7 @@ export const COMMANDS: Command[] = [
   { id: "show-all", label: "Show all bodies", group: "View", icon: "eye", keywords: "unhide reveal", run: () => mutate("Show all", (d) => void Object.values(d.bodies).forEach((b) => (b.visible = true))) },
   // Sketch tools
   { id: "tool-line", label: "Line", group: "Sketch", icon: "line", keys: "L", keywords: "polyline polygon outline profile", hint: "Click points; click the first point to close", when: inSketch, run: () => setSketchTool("polyline") },
+  { id: "tool-path", label: "Path", group: "Sketch", icon: "path", keys: "A", keywords: "open line wire rail spine curve for sweep guide", hint: "An open line: a path for sweeps (Enter to finish)", when: inSketch, run: () => setSketchTool("path") },
   { id: "tool-rect", label: "Rectangle", group: "Sketch", icon: "rect", keys: "R", keywords: "square box", hint: "Two corners", when: inSketch, run: () => setSketchTool("rect") },
   { id: "tool-circle", label: "Circle", group: "Sketch", icon: "circle", keys: "C", keywords: "round hole diameter", hint: "Center, then radius", when: inSketch, run: () => setSketchTool("circle") },
   { id: "tool-ellipse", label: "Ellipse", group: "Sketch", icon: "ellipse", keys: "E", keywords: "oval egg", hint: "Center, then a corner of its box", when: inSketch, run: () => setSketchTool("ellipse") },
@@ -242,7 +281,7 @@ export const COMMANDS: Command[] = [
   { id: "download-copy", label: "Save a copy to this computer", group: "File", icon: "export", keywords: "download backup whittle file", when: (s) => s.platform.kind === "server", run: () => void downloadCopy() },
   { id: "history", label: "Version history", group: "File", icon: "history", keywords: "versions restore previous older backup revert undo save", hint: "Every save is kept: look back and restore", run: () => useApp.setState({ panel: "versions" }) },
   { id: "account", label: "Account", group: "File", icon: "users", keywords: "sign out logout password user profile", when: (s) => s.platform.kind === "server" && !!s.platform.user, run: () => useApp.setState({ panel: "account" }) },
-  { id: "users", label: "Manage users", group: "File", icon: "users", keywords: "admin accounts people team", when: (s) => s.platform.kind === "server" && !!s.platform.user?.isAdmin && s.platform.config.auth === "required", run: () => useApp.setState({ panel: "users" }) },
+  { id: "users", label: "Administration", group: "File", icon: "shield", keywords: "admin accounts people team users manage merge sso smtp email settings audit", when: (s) => s.platform.kind === "server" && !!s.platform.user?.isAdmin && s.platform.config.auth === "required", run: () => useApp.setState({ panel: "users" }) },
   { id: "export", label: "Export…", group: "File", icon: "export", keywords: "step stl 3mf print slicer download cad cnc", hint: "STEP for other CAD and machining, 3MF / STL for 3D printing", run: () => useApp.setState({ panel: "export" }) },
   { id: "export-step", label: "Export STEP", short: "STEP", group: "File", icon: "export", keywords: "cad exchange fusion solidworks onshape freecad cnc machining", hint: "Exact geometry for other CAD tools, CNC and manufacturing", run: () => void exportDesign("step") },
   { id: "export-3mf", label: "Export 3MF", short: "3MF", hint: "Mesh with units and colors, for 3D-printing slicers", group: "File", icon: "print", keywords: "3d print slicer bambu prusa orca cura", run: () => void exportDesign("3mf") },
@@ -250,8 +289,18 @@ export const COMMANDS: Command[] = [
   // View
   { id: "view-home", label: "Home view", group: "View", icon: "home", keys: "H", keywords: "reset camera iso", run: () => requestView("home") },
   { id: "view-fit", label: "Fit to view", group: "View", icon: "fit", keys: "Shift+H", keywords: "zoom all frame", run: () => requestView("fit") },
-  { id: "theme-paper", label: "Paper theme (light)", group: "View", icon: "sun", keywords: "light mode bright", run: () => setTheme("paper") },
-  { id: "theme-graphite", label: "Graphite theme (dark)", group: "View", icon: "moon", keywords: "dark mode night", run: () => setTheme("graphite") },
+  ...THEMES.map((t): Command => ({
+    id: `theme-${t.id}`,
+    label: `${t.label} theme`,
+    group: "View",
+    icon: t.dark ? "moon" : "sun",
+    keywords: `${t.dark ? "dark" : "light"} mode appearance color scheme`,
+    on: (s) => s.prefs.theme === t.id,
+    run: () => setTheme(t.id),
+  })),
+  { id: "theme-system", label: "Match system theme", group: "View", icon: "palette", keywords: "auto os dark light mode appearance", on: (s) => s.prefs.theme === "system", run: () => setTheme("system") },
+  { id: "assistant", label: "AI assistant", short: "Assistant", group: "Help", icon: "assistant", keys: "Ctrl+I", keywords: "ai chat claude gpt openai ollama llm generate prompt describe design copilot", hint: "Describe a part or a change and let AI build it with Whittle's tools", when: (s) => s.platform.kind !== "server" || s.platform.config.ai !== false, on: (s) => s.assistant, run: () => useApp.setState({ assistant: !get().assistant }) },
+  { id: "settings", label: "Settings", group: "File", icon: "settings", keys: "Ctrl+,", keywords: "preferences options theme appearance navigation mouse units profile accent density", hint: "Themes, navigation, units, workspace and more", run: () => useApp.setState({ panel: "settings" }) },
   { id: "shortcuts", label: "Keyboard shortcuts", group: "Help", icon: "keyboard", keys: "?", keywords: "keys hotkeys help", run: () => useApp.setState({ panel: "shortcuts" }) },
   { id: "coach", label: "Guided first part", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started", run: () => useApp.setState({ coach: true, panel: null }) },
   { id: "welcome", label: "Start screen & templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
@@ -274,6 +323,8 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
     if (k === "s" && e.shiftKey) return "save-as";
     if (k === "s") return "save";
     if (k === "o") return "open";
+    if (k === ",") return "settings";
+    if (k === "i") return "assistant";
     if (k === "d" && s.mode.kind === "sketch") return "duplicate";
     return null;
   }
@@ -282,7 +333,7 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
   if (e.key === "?") return "shortcuts";
   if (s.mode.kind === "sketch") {
     if (e.shiftKey && k === "r") return "rotate-shape";
-    const map: Record<string, string> = { l: "tool-line", r: "tool-rect", c: "tool-circle", e: "tool-ellipse", p: "tool-polygon", o: "tool-slot", t: "tool-text", g: "tool-gear", v: "tool-select", x: "construction" };
+    const map: Record<string, string> = { l: "tool-line", a: "tool-path", r: "tool-rect", c: "tool-circle", e: "tool-ellipse", p: "tool-polygon", o: "tool-slot", t: "tool-text", g: "tool-gear", v: "tool-select", x: "construction" };
     return map[k] ?? null;
   }
   if (e.shiftKey && k === "h") return "view-fit";

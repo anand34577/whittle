@@ -40,7 +40,156 @@ export async function exportShapes(
     return { data: await blobBytes(blob), mime: "model/stl", ext: "stl" };
   }
 
+  if (format === "obj") return { data: strToU8(buildOBJ(doc, entries)), mime: "model/obj", ext: "obj" };
+  if (format === "ply") return { data: buildPLY(entries), mime: "application/x-ply", ext: "ply" };
+  if (format === "glb") return { data: buildGLB(doc, entries), mime: "model/gltf-binary", ext: "glb" };
   return { data: build3MF(doc, entries), mime: "model/3mf", ext: "3mf" };
+}
+
+const MESH = { tolerance: 0.01, angularTolerance: 0.1 };
+
+/** Wavefront OBJ: one named object per body, with a material per body color (inline .mtl names). */
+function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][]): string {
+  const out = [`# ${doc.name}, exported from Whittle (units: millimetres)`];
+  let base = 1;
+  for (const [id, shape] of entries) {
+    const m = weld(shape.mesh(MESH));
+    out.push(`o ${(doc.bodies[id]?.name ?? id).replace(/\s+/g, "_")}`);
+    for (let i = 0; i < m.vertices.length; i += 3) out.push(`v ${m.vertices[i]!.toFixed(5)} ${m.vertices[i + 1]!.toFixed(5)} ${m.vertices[i + 2]!.toFixed(5)}`);
+    for (let i = 0; i < m.triangles.length; i += 3) out.push(`f ${m.triangles[i]! + base} ${m.triangles[i + 1]! + base} ${m.triangles[i + 2]! + base}`);
+    base += m.vertices.length / 3;
+  }
+  return out.join("\n") + "\n";
+}
+
+/** Binary PLY mesh (scanning and mesh tools such as MeshLab and CloudCompare). */
+function buildPLY(entries: [Id, Shape3D][]): Uint8Array {
+  const parts = entries.map(([, shape]) => weld(shape.mesh(MESH)));
+  const nv = parts.reduce((a, m) => a + m.vertices.length / 3, 0);
+  const nf = parts.reduce((a, m) => a + m.triangles.length / 3, 0);
+  const header = strToU8(
+    `ply
+format binary_little_endian 1.0
+comment Whittle (millimetres)
+element vertex ${nv}
+property float x
+property float y
+property float z
+element face ${nf}
+property list uchar int vertex_indices
+end_header
+`,
+  );
+  const body = new DataView(new ArrayBuffer(nv * 12 + nf * 13));
+  let o = 0;
+  for (const m of parts) for (const v of m.vertices) (body.setFloat32(o, v, true), (o += 4));
+  let base = 0;
+  for (const m of parts) {
+    for (let i = 0; i < m.triangles.length; i += 3) {
+      body.setUint8(o, 3);
+      body.setInt32(o + 1, m.triangles[i]! + base, true);
+      body.setInt32(o + 5, m.triangles[i + 1]! + base, true);
+      body.setInt32(o + 9, m.triangles[i + 2]! + base, true);
+      o += 13;
+    }
+    base += m.vertices.length / 3;
+  }
+  const out = new Uint8Array(header.length + body.byteLength);
+  out.set(header);
+  out.set(new Uint8Array(body.buffer), header.length);
+  return out;
+}
+
+/**
+ * glTF 2.0 binary (.glb): the web, AR, game engines, Blender and renderers.
+ * Metres (the glTF unit) and Y-up, one node per body with its color.
+ */
+function buildGLB(doc: WhittleDocument, entries: [Id, Shape3D][]): Uint8Array {
+  const chunks: Uint8Array[] = [];
+  let offset = 0;
+  const bufferViews: object[] = [];
+  const accessors: object[] = [];
+  const meshes: object[] = [];
+  const nodes: object[] = [];
+  const materials: object[] = [];
+  const push = (data: Uint8Array, target: number) => {
+    const pad = (4 - (data.byteLength % 4)) % 4;
+    bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: data.byteLength, target });
+    chunks.push(data, new Uint8Array(pad));
+    offset += data.byteLength + pad;
+    return bufferViews.length - 1;
+  };
+  entries.forEach(([id, shape], k) => {
+    const m = shape.mesh(MESH);
+    // Z-up millimetres -> Y-up metres.
+    const pos = new Float32Array(m.vertices.length);
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < m.vertices.length; i += 3) {
+      const v = [m.vertices[i]! / 1000, m.vertices[i + 2]! / 1000, -m.vertices[i + 1]! / 1000];
+      for (let a = 0; a < 3; a++) {
+        pos[i + a] = v[a]!;
+        min[a] = Math.min(min[a]!, v[a]!);
+        max[a] = Math.max(max[a]!, v[a]!);
+      }
+    }
+    const nrm = new Float32Array(m.normals.length);
+    for (let i = 0; i < m.normals.length; i += 3) {
+      nrm[i] = m.normals[i]!;
+      nrm[i + 1] = m.normals[i + 2]!;
+      nrm[i + 2] = -m.normals[i + 1]!;
+    }
+    const idx = Uint32Array.from(m.triangles);
+    const pv = push(new Uint8Array(pos.buffer), 34962);
+    const nv = push(new Uint8Array(nrm.buffer), 34962);
+    const iv = push(new Uint8Array(idx.buffer), 34963);
+    const count = pos.length / 3;
+    accessors.push({ bufferView: pv, componentType: 5126, count, type: "VEC3", min, max });
+    accessors.push({ bufferView: nv, componentType: 5126, count, type: "VEC3" });
+    accessors.push({ bufferView: iv, componentType: 5125, count: idx.length, type: "SCALAR" });
+    const hex = (doc.bodies[id]?.color ?? "#cccccc").replace("#", "");
+    const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    const rgb = [0, 2, 4].map((i) => lin(parseInt(hex.slice(i, i + 2), 16) || 0));
+    const look = doc.bodies[id]?.look;
+    materials.push({
+      name: doc.bodies[id]?.name ?? id,
+      pbrMetallicRoughness: { baseColorFactor: [...rgb, look === "glass" ? 0.45 : 1], metallicFactor: look === "metal" ? 0.9 : 0.05, roughnessFactor: look === "metal" ? 0.3 : look === "satin" ? 0.35 : 0.6 },
+      ...(look === "glass" ? { alphaMode: "BLEND" } : {}),
+    });
+    meshes.push({ name: doc.bodies[id]?.name ?? id, primitives: [{ attributes: { POSITION: k * 3, NORMAL: k * 3 + 1 }, indices: k * 3 + 2, material: k }] });
+    nodes.push({ name: doc.bodies[id]?.name ?? id, mesh: k });
+  });
+  const bin = new Uint8Array(offset);
+  let at = 0;
+  for (const c of chunks) (bin.set(c, at), (at += c.byteLength));
+  const json = {
+    asset: { version: "2.0", generator: "Whittle" },
+    scene: 0,
+    scenes: [{ name: doc.name, nodes: nodes.map((_, i) => i) }],
+    nodes,
+    meshes,
+    materials,
+    accessors,
+    bufferViews,
+    buffers: [{ byteLength: bin.byteLength }],
+  };
+  let jsonBytes = strToU8(JSON.stringify(json));
+  const jpad = (4 - (jsonBytes.byteLength % 4)) % 4;
+  if (jpad) jsonBytes = Uint8Array.from([...jsonBytes, ...new Array(jpad).fill(0x20)]);
+  const total = 12 + 8 + jsonBytes.byteLength + 8 + bin.byteLength;
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x46546c67, true);
+  dv.setUint32(4, 2, true);
+  dv.setUint32(8, total, true);
+  dv.setUint32(12, jsonBytes.byteLength, true);
+  dv.setUint32(16, 0x4e4f534a, true);
+  out.set(jsonBytes, 20);
+  const b = 20 + jsonBytes.byteLength;
+  dv.setUint32(b, bin.byteLength, true);
+  dv.setUint32(b + 4, 0x004e4942, true);
+  out.set(bin, b + 8);
+  return out;
 }
 
 /**

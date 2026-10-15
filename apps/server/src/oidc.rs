@@ -1,6 +1,12 @@
 //! OpenID Connect sign-in (Authorization Code + PKCE + nonce). Works with any
 //! standard provider: Authentik, Keycloak, Authelia, Zitadel, Google, Entra ID...
-//! Accounts are matched by issuer + subject, never by email.
+//!
+//! Accounts are matched by issuer + subject. An identity is linked to an
+//! existing account only when that is safe and intended:
+//!   - the signed-in person links it themselves (Account → Link single sign-on);
+//!   - an administrator added the account without a password, or flagged it
+//!     for linking, and the provider has verified the same email;
+//!   - an administrator turned on "link by verified email" for the server.
 
 use std::{
     collections::HashMap,
@@ -30,6 +36,8 @@ struct Pending {
     nonce: Nonce,
     return_to: String,
     at: Instant,
+    /// Link the identity to this (signed-in) account instead of signing in.
+    link_user: Option<String>,
 }
 
 #[derive(Default)]
@@ -84,10 +92,20 @@ fn safe_return(r: Option<String>) -> String {
 pub struct StartQuery {
     #[serde(rename = "return")]
     return_to: Option<String>,
+    /// "1": link single sign-on to the signed-in account.
+    link: Option<String>,
 }
 
-pub async fn start(State(s): State<Shared>, Query(q): Query<StartQuery>) -> Response {
+pub async fn start(State(s): State<Shared>, headers: axum::http::HeaderMap, Query(q): Query<StartQuery>) -> Response {
     let Some(cfg) = s.config.oidc.clone() else { return fail("Single sign-on isn't configured on this server") };
+    let link_user = if q.link.as_deref() == Some("1") {
+        match auth::user_from_headers(&s, &headers).await {
+            Ok(Some(u)) if u.id != "local" => Some(u.id),
+            _ => return fail("Sign in first, then link your single sign-on account from your Account page."),
+        }
+    } else {
+        None
+    };
     let http = match http_client() {
         Ok(h) => h,
         Err(e) => return fail(&e),
@@ -110,7 +128,7 @@ pub async fn start(State(s): State<Shared>, Query(q): Query<StartQuery>) -> Resp
     let (url, csrf, nonce) = req.set_pkce_challenge(challenge).url();
     let mut pending = s.oidc.pending.lock().await;
     pending.retain(|_, p| p.at.elapsed() < PENDING_TTL);
-    pending.insert(csrf.secret().clone(), Pending { verifier, nonce, return_to: safe_return(q.return_to), at: Instant::now() });
+    pending.insert(csrf.secret().clone(), Pending { verifier, nonce, return_to: safe_return(q.return_to), at: Instant::now(), link_user });
     Redirect::to(url.as_str()).into_response()
 }
 
@@ -163,41 +181,64 @@ async fn finish(s: &Shared, q: CallbackQuery) -> Result<(axum::http::HeaderValue
 
     let subject = format!("{}|{}", cfg.issuer, claims.subject().as_str());
     let email = claims.email().map(|e| e.as_str().to_owned());
+    let verified_email = email.clone().filter(|_| claims.email_verified() == Some(true));
     let name = claims.name().and_then(|n| n.get(None)).map(|n| n.as_str().to_owned());
     let preferred = claims.preferred_username().map(|u| u.as_str().to_owned());
+    let existing = db::user_by(&s.db, "oidc_subject", &subject).await.map_err(|e| e.to_string())?;
 
-    let user = match db::user_by(&s.db, "oidc_subject", &subject).await.map_err(|e| e.to_string())? {
-        Some(u) => u,
-        None if !cfg.auto_create => {
-            // Accounts are created by administrators: link the single sign-on account they added
-            // for this (provider-verified) email. Only password-less accounts qualify, so nobody
-            // can sign up with someone else's email and capture their sign-in.
-            let invited = match (email.as_deref(), claims.email_verified()) {
-                (Some(e), Some(true)) => {
-                    let sql = format!(
-                        "SELECT {} FROM users WHERE LOWER(email) = LOWER($1) AND oidc_subject IS NULL AND password_hash IS NULL AND id <> 'local'",
-                        db::USER_COLUMNS
-                    );
-                    let rows = sqlx::query(&sql).bind(e).fetch_all(&s.db).await.map_err(|e| e.to_string())?;
-                    match rows.as_slice() {
-                        [r] => Some(db::user_from_row(r).map_err(|e| e.to_string())?),
-                        _ => None,
-                    }
-                }
+    // Linking from the Account page: attach this identity to the signed-in account.
+    if let Some(uid) = pending.link_user {
+        if let Some(other) = existing.filter(|u| u.id != uid) {
+            return Err(format!(
+                "That single sign-on account is already used by the Whittle account \"{}\". Ask an administrator to merge the two accounts.",
+                other.username
+            ));
+        }
+        sqlx::query("UPDATE users SET oidc_subject = $1, sso_link = 0 WHERE id = $2").bind(&subject).bind(&uid).execute(&s.db).await.map_err(|e| e.to_string())?;
+        db::audit(&s.db, Some(&uid), "user.sso_link", None, "linked single sign-on themselves").await;
+        let ret = pending.return_to;
+        let cookie = auth::start_session(s, &uid).await.map_err(|e| e.1)?;
+        return Ok((cookie, if ret.contains('?') { format!("{ret}&linked=1") } else { format!("{ret}?linked=1") }));
+    }
+
+    let (link_by_email, auto_create) = {
+        let st = s.settings.read().await;
+        (st.oidc_link_by_email, st.oidc_auto_create(&s.config))
+    };
+    // An existing account this identity may join, matched by the provider-verified email:
+    // password-less invitations and accounts an administrator flagged always; any
+    // account when the server links by verified email. Never when the match is ambiguous.
+    let linkable = match (&existing, verified_email.as_deref()) {
+        (None, Some(e)) => {
+            let sql = format!(
+                "SELECT {} FROM users WHERE LOWER(email) = LOWER($1) AND oidc_subject IS NULL AND id <> 'local' AND (password_hash IS NULL OR sso_link = 1 OR $2 = 1)",
+                db::USER_COLUMNS
+            );
+            let rows = sqlx::query(&sql).bind(e).bind(link_by_email as i64).fetch_all(&s.db).await.map_err(|e| e.to_string())?;
+            match rows.as_slice() {
+                [r] => Some(db::user_from_row(r).map_err(|e| e.to_string())?),
                 _ => None,
-            };
-            let Some(u) = invited else {
-                return Err("You don't have an account here yet. Ask an administrator to add you with your email address.".into());
-            };
-            sqlx::query("UPDATE users SET oidc_subject = $1 WHERE id = $2 AND oidc_subject IS NULL")
+            }
+        }
+        _ => None,
+    };
+
+    let user = match (existing, linkable) {
+        (Some(u), _) => u,
+        (None, Some(u)) => {
+            sqlx::query("UPDATE users SET oidc_subject = $1, sso_link = 0 WHERE id = $2 AND oidc_subject IS NULL")
                 .bind(&subject)
                 .bind(&u.id)
                 .execute(&s.db)
                 .await
                 .map_err(|e| e.to_string())?;
+            db::audit(&s.db, Some(&u.id), "user.sso_link", Some(&u.username), "linked by verified email").await;
             u
         }
-        None => {
+        (None, None) if !auto_create => {
+            return Err("You don't have an account here yet. Ask an administrator to add you with your email address.".into());
+        }
+        (None, None) => {
             let base = preferred.clone().or_else(|| email.as_ref().map(|e| e.split('@').next().unwrap_or("").to_owned())).unwrap_or_default();
             let username = unique_username(s, &base).await?;
             let first = db::user_count(&s.db).await.map_err(|e| e.to_string())? == 0;
@@ -216,6 +257,7 @@ async fn finish(s: &Shared, q: CallbackQuery) -> Result<(axum::http::HeaderValue
             )
             .await
             .map_err(|e| e.to_string())?;
+            db::audit(&s.db, Some(&id), "account.sso_signup", Some(&username), "").await;
             db::user_by(&s.db, "id", &id).await.map_err(|e| e.to_string())?.ok_or("Account creation failed")?
         }
     };

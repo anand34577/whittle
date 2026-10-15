@@ -10,3 +10,4 @@ apps/desktop/src-tauri/gen/
 *.log
 .claude/
 Claude-Account-*.cmd
+target-*/

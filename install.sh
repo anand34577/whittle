@@ -8,7 +8,10 @@
 #   --server          install the self-hosted server (Linux, x86_64 or arm64) instead of the desktop app
 #   --version 0.2.0   a specific release instead of the latest
 #   --appimage        Linux desktop: use the AppImage even when a .deb or .rpm would fit
+#   --upgrade         same as installing again: settings and data are kept (the server is backed up first)
 #   --uninstall       remove the desktop app (your .whittle files are never touched)
+#   --server --uninstall [--purge]
+#                     remove the server; --purge also deletes its data, settings and backups
 #
 # Every download is checked against the release's SHA256SUMS.
 set -eu
@@ -17,14 +20,18 @@ REPO=anand34577/whittle
 MODE=desktop
 VERSION=""
 APPIMAGE=0
+UNINSTALL=0
+PURGE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --server) MODE=server ;;
+    --upgrade) ;;
+    --purge) PURGE=1 ;;
     --version) VERSION="${2#v}"; shift ;;
     --version=*) VERSION="${1#--version=}"; VERSION="${VERSION#v}" ;;
     --appimage) APPIMAGE=1 ;;
-    --uninstall) MODE=uninstall ;;
+    --uninstall) UNINSTALL=1 ;;
     -h|--help) sed -n '2,14p' "$0" 2>/dev/null || echo "See https://github.com/$REPO/wiki/Installation"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -55,8 +62,15 @@ as_root() {
   fi
 }
 
+# ---- uninstall (server) ----
+if [ "$UNINSTALL" = 1 ] && [ "$MODE" = server ]; then
+  [ -x /opt/whittle/uninstall.sh ] || die "No Whittle server is installed here (or it predates the uninstaller: stop the service and remove /opt/whittle)."
+  if [ "$PURGE" = 1 ]; then as_root /opt/whittle/uninstall.sh --purge; else as_root /opt/whittle/uninstall.sh; fi
+  exit 0
+fi
+
 # ---- uninstall (desktop) ----
-if [ "$MODE" = uninstall ]; then
+if [ "$UNINSTALL" = 1 ]; then
   if [ "$OS" = Darwin ]; then
     for d in /Applications/Whittle.app "$HOME/Applications/Whittle.app"; do
       [ -d "$d" ] && { say "Removing $d"; rm -rf "$d" 2>/dev/null || as_root rm -rf "$d"; }

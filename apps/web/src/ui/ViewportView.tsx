@@ -21,6 +21,7 @@ import { type SketchUIState, SketchController } from "../viewport/sketchTools";
 import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/Viewport";
 import { Icon } from "./icons";
 import { ViewCube } from "./ViewCube";
+import { Slider } from "./controls";
 
 /** Lets App.tsx route key presses to the sketch controller first. */
 export const sketchKeys: { handle: ((e: KeyboardEvent) => boolean) | null; typeDigit: ((key: string) => boolean) | null } = {
@@ -145,7 +146,11 @@ function ViewDock() {
       <div className="dock__group">
         <DockButton id="measure" label="Measure" />
         <DockButton id="section" label="Section" />
-        <DockButton id="overhang" label="Print check" />
+      </div>
+      <div className="dock__group" aria-label="Analysis">
+        <DockButton id="overhang" label="Overhangs" />
+        <DockButton id="draft-analysis" label="Draft" />
+        <DockButton id="zebra" label="Zebra" />
       </div>
       <div className="dock__group">
         <DockButton id="grid" />
@@ -183,15 +188,14 @@ function SectionControl({ vp }: { vp: Viewport | null }) {
           Flip
         </button>
       </div>
-      <input
-        type="range"
-        className="range"
+      <Slider
         min={lo - 0.01}
         max={hi + 0.01}
         step={(hi - lo) / 400 || 0.1}
         value={Math.min(hi, Math.max(lo, section.offset))}
-        onChange={(e) => setView({ section: { ...section, offset: +e.target.value } })}
-        aria-label="Section position"
+        onChange={(v) => setView({ section: { ...section, offset: v } })}
+        ariaLabel="Section position"
+        format={(v) => `${trim(v / f, 2)} ${units}`}
       />
       <div className="mono small muted">
         {section.axis.toUpperCase()} = {trim(section.offset / f, 2)} {units}
@@ -324,6 +328,9 @@ export function ViewportView() {
   }, [controller, cameraListeners]);
 
   useEffect(() => vp?.setTheme(theme), [vp, theme]);
+  const nav = useApp((s) => s.prefs.nav);
+  const invertZoom = useApp((s) => s.prefs.invertZoom);
+  useEffect(() => vp?.setNavigation(nav, invertZoom), [vp, nav, invertZoom]);
   useEffect(() => vp?.setView(view), [vp, view]);
 
   // Bodies.
@@ -403,14 +410,16 @@ export function ViewportView() {
     const ev = documentEvaluator(doc);
     const end = activeEnd(doc);
     const list: SketchDrawable[] = [];
-    const showAll = sessionFeature?.type === "loft";
+    const showAll = sessionFeature?.type === "loft" || sessionFeature?.type === "sweep";
     for (const f of doc.features.slice(0, end)) {
       if (f.type !== "sketch") continue;
       const fr = regen.sketches.find((s) => s.id === f.id);
       if (!fr) continue;
       const active = f.id === sketchId;
       const selected = selection.some((p) => p.kind === "sketch" && p.sketchId === f.id);
-      const inLoft = sessionFeature?.type === "loft" && sessionFeature.sketches.includes(f.id);
+      const inLoft =
+        (sessionFeature?.type === "loft" && sessionFeature.sketches.includes(f.id)) ||
+        (sessionFeature?.type === "sweep" && (sessionFeature.profile === f.id || sessionFeature.path === f.id));
       const hovered = hover?.kind === "sketch" && hover.sketchId === f.id;
       if (!active && !selected && !hovered && !showAll && isSketchConsumed(doc, f.id)) continue;
       const shapes: SketchDrawable["shapes"] = [];
@@ -421,7 +430,7 @@ export function ViewportView() {
             shapes.push({
               id: e.id,
               pts,
-              closed: true,
+              closed: !(r.type === "polyline" && r.open),
               construction: !!e.construction || r.type === "text",
               selected: active ? e.id === selectedEntity : selected || inLoft,
               hovered: active ? e.id === sketchUI?.hoverEntity : hovered,

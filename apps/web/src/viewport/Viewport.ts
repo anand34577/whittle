@@ -17,6 +17,7 @@ import type { BodyResult, SketchFrame } from "@whittle/kernel";
 import type { Pick, ViewSettings } from "../state/store";
 import { lookById } from "./looks";
 import { VIEWPORT_THEMES, type ViewportTheme } from "./theme";
+import { type NavPreset, navAction } from "../state/prefs";
 
 export type CubeView = "front" | "back" | "left" | "right" | "top" | "bottom" | "iso";
 
@@ -67,6 +68,26 @@ interface BodyView {
 }
 
 const OVERHANG_COS = Math.cos((45 * Math.PI) / 180);
+const DRAFT_NONE = (0.1 * Math.PI) / 180;
+const DRAFT_LOW = (1 * Math.PI) / 180;
+
+/**
+ * Zebra stripes: replace the lit color with black and white bands of the
+ * reflected view direction. Smooth (tangent / curvature continuous) joins
+ * show unbroken stripes; kinks show as jumps.
+ */
+function zebra(mat: THREE.MeshStandardMaterial) {
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <dithering_fragment>",
+      `#include <dithering_fragment>
+      vec3 zr = reflect(normalize(vViewPosition), normalize(normal));
+      float zs = step(0.5, fract(atan(zr.y, zr.x) * 3.0));
+      gl_FragColor.rgb = mix(vec3(0.06), vec3(0.94), zs);`,
+    );
+  };
+  mat.customProgramCacheKey = () => "zebra";
+}
 
 const tmpV = new THREE.Vector3();
 const ease = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -125,7 +146,7 @@ export class Viewport {
   readonly renderer: THREE.WebGLRenderer;
   private persp = new THREE.PerspectiveCamera(32, 1, 0.1, 100000);
   private orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 100000);
-  private view: ViewSettings = { display: "edges", section: null, overhang: false, grid: true, ortho: false };
+  private view: ViewSettings = { display: "edges", section: null, analysis: null, grid: true, ortho: false };
   private lastBodies: { list: BodyResult[]; meta: Record<Id, BodyMeta> } = { list: [], meta: {} };
   private measureGroup = new THREE.Group();
   private fillGroup = new THREE.Group();
@@ -153,7 +174,9 @@ export class Viewport {
   private filter: PickFilter = { faces: true, edges: true, planes: false, sketches: true };
   private sketchHit: { id: Id; pts: Vec3[][] }[] = [];
   private anim: { from: Turntable; to: Turntable; t0: number; dur: number } | null = null;
-  private drag: { x: number; y: number; button: number; moved: boolean; mode: "orbit" | "pan" | "none" } | null = null;
+  private drag: { x: number; y: number; button: number; moved: boolean; mode: "orbit" | "pan" | "zoom" | "none" } | null = null;
+  private nav: NavPreset = "whittle";
+  private invertZoom = false;
   private lastHoverKey = "";
   private resizeObs: ResizeObserver;
   private disposed = false;
@@ -257,6 +280,12 @@ export class Viewport {
     this.applyOrbit();
     for (const m of this.lineMaterials) m.resolution.set(w, h);
     this.invalidate();
+  }
+
+  /** Mouse mapping (see navAction) and wheel direction. */
+  setNavigation(preset: NavPreset, invertZoom: boolean) {
+    this.nav = preset;
+    this.invertZoom = invertZoom;
   }
 
   setTheme(name: keyof typeof VIEWPORT_THEMES) {
@@ -410,11 +439,12 @@ export class Viewport {
     const clipping = section ? [this.clip] : [];
     const xray = !overlay && v.display === "xray";
     const opacity = xray ? Math.min(0.28, look.opacity) : look.opacity;
-    const overhang = !overlay && v.overhang;
-    if (overhang) geo.setAttribute("color", this.overhangColors(b, color));
+    const analysis = overlay ? null : v.analysis;
+    const tinted = analysis === "overhang" || analysis === "draft";
+    if (tinted) geo.setAttribute("color", this.analysisColors(b, color, analysis));
     const mat = new THREE.MeshStandardMaterial({
-      color: overhang ? "#ffffff" : color,
-      vertexColors: overhang,
+      color: tinted ? "#ffffff" : color,
+      vertexColors: tinted,
       roughness: look.roughness,
       metalness: look.metalness,
       transparent: opacity < 1,
@@ -426,6 +456,7 @@ export class Viewport {
       side: section ? THREE.FrontSide : THREE.DoubleSide,
       clippingPlanes: clipping,
     });
+    if (analysis === "zebra") zebra(mat);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.userData.bodyId = b.id;
     const egeo = new LineSegmentsGeometry();
@@ -453,17 +484,28 @@ export class Viewport {
     return { id: b.id, data: b, mesh, edges, cap, visible: true };
   }
 
-  /** Per-vertex colors: faces that point down steeper than 45° (off the bed) turn red. */
-  private overhangColors(b: BodyResult, color: string): THREE.BufferAttribute {
+  /**
+   * Per-vertex analysis colors.
+   * overhang: faces pointing down steeper than 45 degrees (off the bed) turn red.
+   * draft: walls along the pull (Z) with under 0.1 degrees of draft are red,
+   * under 1 degree amber, everything that releases cleanly green.
+   */
+  private analysisColors(b: BodyResult, color: string, kind: "overhang" | "draft"): THREE.BufferAttribute {
     const base = new THREE.Color(color);
     const warn = new THREE.Color("#e2553f");
+    const amber = new THREE.Color("#e6a23c");
+    const good = new THREE.Color("#4fb36b");
     const n = b.normals;
     const p = b.positions;
     const bed = b.bbox[0][2] + 0.05;
     const out = new Float32Array(n.length);
     for (let i = 0; i < n.length; i += 3) {
-      const down = n[i + 2]! < -OVERHANG_COS && p[i + 2]! > bed;
-      const c = down ? warn : base;
+      let c = base;
+      if (kind === "overhang") c = n[i + 2]! < -OVERHANG_COS && p[i + 2]! > bed ? warn : base;
+      else {
+        const draft = Math.abs(Math.asin(Math.max(-1, Math.min(1, n[i + 2]!))));
+        c = draft < DRAFT_NONE ? warn : draft < DRAFT_LOW ? amber : good;
+      }
       out[i] = c.r;
       out[i + 1] = c.g;
       out[i + 2] = c.b;
@@ -515,7 +557,7 @@ export class Viewport {
       this.clip.setFromNormalAndCoplanarPoint(n, p);
     }
     const rebuild =
-      prev.display !== v.display || !!prev.section !== !!v.section || prev.overhang !== v.overhang;
+      prev.display !== v.display || !!prev.section !== !!v.section || prev.analysis !== v.analysis;
     if (rebuild) this.setBodies(this.lastBodies.list, this.lastBodies.meta);
     this.grid.visible = v.grid;
     if (prev.ortho !== v.ortho) {
@@ -943,10 +985,9 @@ export class Viewport {
     this.renderer.domElement.setPointerCapture(e.pointerId);
     this.renderer.domElement.focus({ preventScroll: true });
     const inSketch = !!this.sketchFrame;
-    let mode: "orbit" | "pan" | "none" = "none";
-    if (e.button === 0) mode = inSketch ? "none" : "orbit";
-    else if (e.button === 1) mode = e.shiftKey ? "orbit" : "pan";
-    else if (e.button === 2) mode = inSketch ? "orbit" : "pan";
+    const mode = navAction(this.nav, e.button, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }, inSketch);
+    // Middle-button presses would otherwise start the browser's autoscroll.
+    if (e.button === 1) e.preventDefault();
     this.drag = { x: e.clientX, y: e.clientY, button: e.button, moved: false, mode };
     this.cb.onContext(null, [-1, -1]);
     this.anim = null;
@@ -965,6 +1006,9 @@ export class Viewport {
         if (d.mode === "orbit") {
           this.orbit.theta -= dx * 0.0075;
           this.orbit.phi = THREE.MathUtils.clamp(this.orbit.phi - dy * 0.0075, 0.0001, Math.PI - 0.0001);
+        } else if (d.mode === "zoom") {
+          const k = Math.pow(1.006, (this.invertZoom ? -dy : dy));
+          this.orbit.distance = THREE.MathUtils.clamp(this.orbit.distance * k, 0.5, 200000);
         } else {
           const px = this.pixelSize;
           const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
@@ -1025,7 +1069,7 @@ export class Viewport {
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
     this.anim = null;
-    const factor = Math.pow(1.0015, e.deltaY * (e.deltaMode === 1 ? 33 : 1));
+    const factor = Math.pow(1.0015, (this.invertZoom ? -1 : 1) * e.deltaY * (e.deltaMode === 1 ? 33 : 1));
     // Zoom toward the cursor: the point under the cursor stays put.
     this.raycaster.setFromCamera(this.ndc(e), this.camera);
     const viewDir = new THREE.Vector3().subVectors(this.orbit.target, this.camera.position).normalize();

@@ -2,11 +2,15 @@
 //! OIDC) and per-user design storage with version history. Geometry runs in
 //! the browser, so the server stays small.
 
+pub mod admin;
 pub mod auth;
 pub mod config;
 pub mod db;
 pub mod designs;
+pub mod mail;
 pub mod oidc;
+pub mod settings;
+pub mod tools;
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
@@ -20,7 +24,7 @@ use axum::{
 };
 use base64::Engine;
 use rand::RngCore;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tower_http::{
     compression::CompressionLayer,
     services::{ServeDir, ServeFile},
@@ -36,6 +40,9 @@ pub struct AppState {
     /// Failed sign-ins per (address, username), for brute-force protection.
     pub login_failures: Mutex<HashMap<String, (u32, Instant)>>,
     pub oidc: oidc::OidcState,
+    /// Runtime settings administrators change (sign-up, single sign-on, email).
+    pub settings: RwLock<settings::ServerSettings>,
+    pub started: Instant,
 }
 
 pub type Shared = Arc<AppState>;
@@ -98,19 +105,29 @@ struct PublicConfig {
     needs_setup: bool,
     max_upload_bytes: usize,
     max_versions: i64,
+    /// "Forgot password?" works (email is set up and passwords are allowed).
+    password_reset: bool,
+    /// New accounts need an email address.
+    require_email: bool,
+    /// The AI assistant is allowed on this server.
+    ai: bool,
 }
 
 async fn public_config(State(s): State<Shared>) -> ApiResult<Json<PublicConfig>> {
     let needs_setup = !s.config.auth_none && db::user_count(&s.db).await? == 0;
+    let st = s.settings.read().await;
     Ok(Json(PublicConfig {
         version: env!("CARGO_PKG_VERSION"),
         auth: if s.config.auth_none { "none" } else { "required" },
         local: s.config.auth_local,
         oidc: s.config.oidc.as_ref().map(|o| o.name.clone()),
-        signup: s.config.auth_local && (s.config.signup || needs_setup),
+        signup: s.config.auth_local && (st.signup(&s.config) || needs_setup),
         needs_setup,
         max_upload_bytes: s.config.max_upload_bytes,
         max_versions: s.config.max_versions,
+        password_reset: s.config.auth_local && st.smtp.configured(),
+        require_email: !s.config.auth_none && st.require_email(),
+        ai: s.config.ai,
     }))
 }
 
@@ -129,14 +146,17 @@ async fn require_app_header(req: Request, next: Next) -> Response {
 }
 
 const CSP: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data:; frame-ancestors 'none'";
+/// With the AI assistant on, the browser may also reach AI providers (HTTPS) and model servers on the same computer.
+const CSP_AI: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data: https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'";
 /// The geometry worker runs OpenCascade, whose WebAssembly bindings compile JS at
 /// start-up, so only that script may use eval. A worker gets the policy sent with its own script.
 const WORKER_CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; connect-src 'self' blob: data:; font-src 'self' data:";
 
-async fn content_security_policy(req: Request, next: Next) -> Response {
+async fn content_security_policy(State(s): State<Shared>, req: Request, next: Next) -> Response {
     let worker = req.uri().path().contains("/assets/worker-");
     let mut res = next.run(req).await;
-    res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(if worker { WORKER_CSP } else { CSP }));
+    let page = if s.config.ai { CSP_AI } else { CSP };
+    res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(if worker { WORKER_CSP } else { page }));
     res
 }
 
@@ -148,22 +168,40 @@ pub async fn build_state(config: Config) -> Result<Shared, String> {
     if config.auth_none {
         auth::ensure_local_user(&db).await.map_err(|e| e.to_string())?;
     }
-    Ok(Arc::new(AppState { config, db, login_failures: Mutex::new(HashMap::new()), oidc: oidc::OidcState::default() }))
+    let settings = settings::ServerSettings::load(&db, &config).await?;
+    Ok(Arc::new(AppState {
+        config,
+        db,
+        login_failures: Mutex::new(HashMap::new()),
+        oidc: oidc::OidcState::default(),
+        settings: RwLock::new(settings),
+        started: Instant::now(),
+    }))
 }
 
 pub fn router(state: Shared) -> Router {
     let api = Router::new()
         .route("/config", get(public_config))
         .route("/health", get(health))
-        .route("/auth/me", get(auth::me))
+        .route("/auth/me", get(auth::me).patch(auth::update_me))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/register", post(auth::register))
         .route("/auth/password", post(auth::change_password))
+        .route("/auth/forgot", post(auth::forgot))
+        .route("/auth/reset", post(auth::reset))
         .route("/auth/oidc/start", get(oidc::start))
         .route("/auth/oidc/callback", get(oidc::callback))
-        .route("/admin/users", get(auth::admin_list).post(auth::admin_create))
-        .route("/admin/users/{id}", axum::routing::patch(auth::admin_update).delete(auth::admin_delete))
+        .route("/admin/overview", get(admin::overview))
+        .route("/admin/audit", get(admin::audit_log))
+        .route("/admin/settings", get(admin::get_settings).put(admin::put_settings))
+        .route("/admin/settings/test-email", post(admin::test_email))
+        .route("/admin/users", get(admin::list).post(admin::create))
+        .route("/admin/users/{id}", axum::routing::patch(admin::update).delete(admin::delete))
+        .route("/admin/users/{id}/merge", post(admin::merge))
+        .route("/admin/users/{id}/unlink-sso", post(admin::unlink_sso))
+        .route("/admin/users/{id}/signout", post(admin::revoke_sessions))
+        .route("/admin/users/{id}/send-reset", post(admin::send_reset))
         .route("/designs", get(designs::list).post(designs::create))
         .route("/designs/{id}", get(designs::download).put(designs::save).delete(designs::remove))
         .route("/designs/{id}/thumbnail", get(designs::thumbnail))
@@ -194,6 +232,6 @@ pub fn router(state: Shared) -> Router {
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
-        .layer(middleware::from_fn(content_security_policy))
+        .layer(middleware::from_fn_with_state(state.clone(), content_security_policy))
         .layer(TraceLayer::new_for_http())
 }
