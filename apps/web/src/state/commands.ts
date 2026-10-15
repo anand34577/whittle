@@ -44,8 +44,9 @@ import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, sa
 import { exportSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
 import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS } from "@whittle/core";
-import { breakSelection, gridPatternSelection, moveSelection, scaleSelection, availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
+import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
+import { intersectIntoSketch } from "./sectionCurves";
 import { THEMES } from "./prefs";
 import {
   type AppState,
@@ -261,6 +262,12 @@ export const COMMANDS: Command[] = [
   { id: "tool-carc", label: "Center-point arc", short: "Center arc", group: "Sketch", icon: "path", keywords: "arc centre radius sweep", hint: "Center, start, then end", when: inSketch, run: () => setSketchTool("carc") },
   { id: "tool-polygonc", label: "Circumscribed polygon", short: "Circ. polygon", group: "Sketch", icon: "polygon", keywords: "polygon apothem flat to flat hexagon", hint: "Center, then the middle of an edge", when: inSketch, run: () => setSketchTool("polygonC") },
   { id: "tool-polygone", label: "Edge polygon", short: "Edge polygon", group: "Sketch", icon: "polygon", keywords: "polygon side length hexagon", hint: "Two points define one edge", when: inSketch, run: () => setSketchTool("polygonE") },
+  { id: "geo-stretch", label: "Stretch", group: "Sketch", icon: "move", keywords: "pull drag extend points lengthen move ends", hint: "Select points, then pull them: attached lines stretch", when: inSketch, run: () => void stretchSelection() },
+  { id: "sketch-intersect", label: "Intersect", group: "Sketch", icon: "section", keywords: "section slice cut plane cross outline body project", hint: "Draw the outline where the model crosses this sketch plane", when: inSketch, run: intersectIntoSketch },
+  { id: "tool-cspline", label: "Control-point spline", short: "Control spline", group: "Sketch", icon: "path", keywords: "bspline nurbs handles control points curve smooth freeform", hint: "Click control points that steer a smooth curve (it doesn't pass through them)", when: inSketch, run: () => setSketchTool("cspline") },
+  { id: "tool-earc", label: "Elliptical arc", short: "Ellipse arc", group: "Sketch", icon: "ellipse", keywords: "oval partial ellipse arc curve", hint: "Center, major axis, minor radius, then the arc's start and end", when: inSketch, run: () => setSketchTool("earc") },
+  { id: "tool-tan2c", label: "2-tangent circle", short: "2-tangent", group: "Sketch", icon: "circle", keywords: "circle touch tangent two lines fillet round between", hint: "Click two curves, then a spot for the center: the circle touches both", when: inSketch, run: () => setSketchTool("tan2c") },
+  { id: "tool-tan3c", label: "3-tangent circle", short: "3-tangent", group: "Sketch", icon: "circle", keywords: "circle touch tangent three lines inscribed incircle", hint: "Click three curves, then a spot inside: the circle touches all three", when: inSketch, run: () => setSketchTool("tan3c") },
   { id: "tool-conic", label: "Conic curve", short: "Conic", group: "Sketch", icon: "path", keywords: "parabola ellipse hyperbola rho apex", hint: "Start, end, then the apex; type rho for the shape", when: inSketch, run: () => setSketchTool("conic") },
   { id: "tool-pcircle", label: "Constrained circle", short: "Circle", group: "Sketch", icon: "circle", keywords: "circle constraint radius dimension", hint: "Center, then radius", when: inSketch, run: () => setSketchTool("pcircle") },
   { id: "tool-project", label: "Project model edges", short: "Project", group: "Sketch", icon: "link", keywords: "include intersect reference edge face outline copy existing body derive", hint: "Click an edge or face of the model to copy it into the sketch as locked geometry", when: (s) => inSketch(s) && hasBodies(s), run: () => setSketchTool("project") },

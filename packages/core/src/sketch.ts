@@ -10,7 +10,7 @@ export type ResolvedEntity =
   | { id: string; type: "circle"; cx: number; cy: number; r: number; construction: boolean; mode: string }
   | { id: string; type: "polygon"; cx: number; cy: number; r: number; sides: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "slot"; cx: number; cy: number; length: number; width: number; angle: number; construction: boolean; mode: string }
-  | { id: string; type: "polyline"; points: Vec2[]; arcs: boolean[]; splines: boolean[]; corner: number; smooth: boolean; open: boolean; construction: boolean; mode: string }
+  | { id: string; type: "polyline"; points: Vec2[]; arcs: boolean[]; splines: boolean[]; corner: number; smooth: boolean; ctrl: boolean; open: boolean; construction: boolean; mode: string }
   | { id: string; type: "ellipse"; cx: number; cy: number; rx: number; ry: number; angle: number; construction: boolean; mode: string }
   | { id: string; type: "text"; x: number; y: number; text: string; size: number; bold: boolean; angle: number; construction: boolean; mode: string }
   | { id: string; type: "gear"; cx: number; cy: number; teeth: number; module: number; bore: number; construction: boolean; mode: string };
@@ -88,7 +88,7 @@ export function resolveEntity(e: SketchEntity, ev: Evaluator): ResolvedEntity {
       splines.forEach((s, i) => {
         if (s && (i === 0 || (e.open && i === points.length - 1))) throw new Error("A spline needs a plain point before and after it");
       });
-      return { ...common, type: "polyline", points, arcs, splines, corner, smooth: !!e.smooth, open: !!e.open };
+      return { ...common, type: "polyline", points, arcs, splines, corner, smooth: !!e.smooth, ctrl: !!e.ctrl, open: !!e.open };
     }
     case "ellipse": {
       const rx = L(e.rx, "Radius X");
@@ -188,6 +188,7 @@ export function entityOutline(r: ResolvedEntity, segments = 64): Vec2[] {
       });
     }
     case "polyline": {
+      if (r.ctrl && r.points.length >= 3) return bsplineSamples(r.points, !r.open, 12);
       if (r.smooth && r.points.length >= 3) return r.open ? smoothOpen(r.points, 12) : smoothClosed(r.points, 12);
       if (r.arcs.some(Boolean) || r.splines.some(Boolean)) return polylinePath(r.points, r.arcs, !r.open, 16, r.splines);
       if (!r.open && r.corner > 0 && r.points.length >= 3) return roundCorners(r.points, r.corner);
@@ -344,6 +345,32 @@ export function offsetPoints(pts: Vec2[], d: number, closed: boolean): Vec2[] {
 export function thickenPath(pts: Vec2[], t: number, side: "center" | "inside" | "outside" = "center"): Vec2[] {
   const [l, r] = side === "center" ? [t / 2, -t / 2] : side === "inside" ? [t, 0] : [0, -t];
   return [...offsetPoints(pts, l, false), ...offsetPoints(pts, r, false).reverse()];
+}
+
+/**
+ * Uniform cubic B-spline steered by control points. An open curve starts at the first point and
+ * ends at the last (the ends are repeated); a closed one is periodic.
+ */
+export function bsplineSamples(ctrl: Vec2[], closed: boolean, perSpan: number): Vec2[] {
+  const pts = closed ? ctrl : [ctrl[0]!, ctrl[0]!, ...ctrl, ctrl[ctrl.length - 1]!, ctrl[ctrl.length - 1]!];
+  const n = pts.length;
+  const spans = closed ? n : n - 3;
+  const out: Vec2[] = [];
+  for (let i = 0; i < spans; i++) {
+    const [a, b, c, d] = [pts[i % n]!, pts[(i + 1) % n]!, pts[(i + 2) % n]!, pts[(i + 3) % n]!];
+    for (let k = 0; k < perSpan; k++) {
+      const t = k / perSpan;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const w0 = (1 - t) ** 3 / 6;
+      const w1 = (3 * t3 - 6 * t2 + 4) / 6;
+      const w2 = (-3 * t3 + 3 * t2 + 3 * t + 1) / 6;
+      const w3 = t3 / 6;
+      out.push([w0 * a[0] + w1 * b[0] + w2 * c[0] + w3 * d[0], w0 * a[1] + w1 * b[1] + w2 * c[1] + w3 * d[1]]);
+    }
+  }
+  if (!closed) out.push(ctrl[ctrl.length - 1]!);
+  return out;
 }
 
 /** Closed Catmull-Rom curve through the points. */

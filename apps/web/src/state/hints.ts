@@ -31,6 +31,10 @@ const TOOL_HINTS: Record<string, [string, string]> = {
   gpoint: ["Click to place a point", ""],
   trim: ["Click the piece of a line, arc or circle to cut away (between crossings)", ""],
   extend: ["Click near the end of a line or arc to stretch it to the next curve", ""],
+  cspline: ["Click the first control point", "Click more control points: they steer the curve but it doesn't pass through them · click the last point again, Enter or Esc to finish"],
+  earc: ["Click the center", "Click the end of the major axis, then a point for the minor radius, then where the arc starts and ends (counter-clockwise)"],
+  tan2c: ["Click the first line or circle to touch", "Click the second one, then a spot for the circle's center (its size is set by a radius you can edit)"],
+  tan3c: ["Click the first line or circle to touch", "Click the next two, then a spot inside where the circle should sit"],
   path: ["Click where the path starts", "Click the next point \u00b7 Enter (or click the last point again) finishes \u00b7 A turns arcs on/off \u00b7 Backspace undoes a point"],
 };
 

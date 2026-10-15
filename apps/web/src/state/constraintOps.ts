@@ -127,6 +127,37 @@ export function addTangentArcGeometry(from: Id | undefined, to: Vec2) {
   });
 }
 
+/** A circle tangent to two or three curves; `guess` is where its center roughly is (picks one of the solutions). */
+export function addTangentCircleGeometry(refs: Id[], guess: Vec2) {
+  const o = openSketch();
+  if (!o || refs.length < 2) return;
+  const geo = resolveGeometry(o.sk, o.sol);
+  const gap = (id: Id): number => {
+    const g = geo.find((x) => x.id === id);
+    if (g?.type === "line") {
+      const [dx, dy] = [g.b[0] - g.a[0], g.b[1] - g.a[1]];
+      const l = Math.hypot(dx, dy) || 1;
+      return Math.abs((guess[0] - g.a[0]) * dy - (guess[1] - g.a[1]) * dx) / l;
+    }
+    if (g?.type === "circle" || g?.type === "arc") return Math.abs(Math.hypot(guess[0] - g.c[0], guess[1] - g.c[1]) - g.r);
+    return Infinity;
+  };
+  const r = Math.min(...refs.map(gap));
+  if (!isFinite(r) || r < 1e-6) return void toast("info", "Click a spot between the curves, away from them, for the circle's center.");
+  let failed: string | undefined;
+  geoMutate("Draw tangent circle", (sk) => {
+    const id = addCircle(sk, guess, r);
+    if (!id) return;
+    for (const ref of refs) {
+      const res = addConstraint(sk, "tangent", [id, ref]);
+      if ("error" in res) failed = res.error;
+    }
+    // Two tangents leave one freedom: keep the radius it was drawn with (change it with a dimension).
+    if (refs.length === 2) addConstraint(sk, "radius", [id], String(Math.round(r * 1000) / 1000));
+  });
+  if (failed) toast("info", failed);
+}
+
 export function addCircleGeometry(c: Vec2 | Id, r: number) {
   if (r <= 1e-9) return;
   geoMutate("Draw circle", (sk) => void addCircle(sk, c, r));
@@ -509,6 +540,16 @@ async function askNumbers(title: string, label: string, initial: string, message
 }
 
 /** Move the selected geometry, or add a moved copy. Distances are in mm after evaluation. */
+/** Pull the selected points; lines and curves attached to them stretch along. */
+export async function stretchSelection() {
+  const o = openSketch();
+  const pts = sketchSelection().filter((id) => o?.sk.geometry?.find((g) => g.id === id)?.type === "point");
+  if (!pts.length) return void toast("info", "Select the points you want to pull (click them, Shift+click for more), then Stretch. Lines attached to those points stretch with them.");
+  const u = useApp.getState().doc.units;
+  const r = await askNumbers("Stretch", `X, Y distance (${u})`, "5, 0", "How far to pull the selected points along the sketch's X and Y.", ["length", "length"]);
+  if (r) copyEdit("Stretch", (sk) => moveGeometry(sk, pts, r[0]!, r[1]!, false));
+}
+
 export async function moveSelection(copy: boolean) {
   const sel = sketchSelection();
   const u = useApp.getState().doc.units;

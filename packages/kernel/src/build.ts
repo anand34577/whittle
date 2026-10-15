@@ -188,6 +188,7 @@ function entityDrawing(r: ResolvedEntity): Drawing {
     case "gear":
       return polyDrawing(entityOutline(r));
     case "polyline": {
+      if (r.ctrl && r.points.length >= 3) return drawPointsInterpolation(entityOutline(r), {}, { closeShape: !r.open });
       if (r.smooth && r.points.length >= 3) return drawPointsInterpolation(r.points, {}, { closeShape: true });
       const d = r.arcs.some(Boolean) || r.splines.some(Boolean) ? penPath(r.points, r.arcs, true, r.splines) : polyDrawing(r.points);
       if (r.corner > 0) {
@@ -1111,7 +1112,7 @@ function thinProfile(sk: SketchBuilt, t: number, side: "center" | "inside" | "ou
     if (e.type !== "polyline" || !e.open || e.construction) continue;
     const r = resolveEntity(e, ev);
     if (r.type !== "polyline" || r.points.length < 2) continue;
-    const line = r.smooth && r.points.length >= 3 ? entityOutline(r) : polylinePath(r.points, r.arcs, false, 16, r.splines);
+    const line = (r.smooth || r.ctrl) && r.points.length >= 3 ? entityOutline(r) : polylinePath(r.points, r.arcs, false, 16, r.splines);
     const band = polyDrawing(thickenPath(line, t, side));
     out = out ? out.fuse(band) : band;
   }
@@ -1193,7 +1194,8 @@ export function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator):
   let d: Drawing;
   if (r.type === "polyline" && r.open) {
     if (r.points.length < 2) throw new FeatureError("The path needs at least two points.");
-    if (r.smooth && r.points.length >= 3) d = drawPointsInterpolation(r.points, {}, { closeShape: false });
+    if (r.ctrl && r.points.length >= 3) d = drawPointsInterpolation(entityOutline(r), {}, { closeShape: false });
+    else if (r.smooth && r.points.length >= 3) d = drawPointsInterpolation(r.points, {}, { closeShape: false });
     else d = penPath(r.points, r.arcs, false, r.splines);
   } else d = entityDrawing(r);
   const placed = d.sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch;

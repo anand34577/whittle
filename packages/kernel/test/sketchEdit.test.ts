@@ -1,6 +1,6 @@
 /** Move/copy, scale, grid pattern and break of constraint geometry. */
 import { beforeAll, describe, expect, it } from "vitest";
-import { type SketchFeature, addArc, addConstraint, addEntityGeometry, addLine, breakLine, endTangent, tangentArcThrough, createEvaluator, makeEntity, makeSketch, moveGeometry, newDocument, rectPattern, resolveEntity, resolveGeometry, scaleGeometry } from "@whittle/core";
+import { type SketchFeature, addCircle, bsplineSamples, addArc, addConstraint, addEntityGeometry, addLine, breakLine, endTangent, tangentArcThrough, createEvaluator, makeEntity, makeSketch, moveGeometry, newDocument, rectPattern, resolveEntity, resolveGeometry, scaleGeometry } from "@whittle/core";
 import { initSolver, solveSketch } from "../src/solver";
 
 beforeAll(async () => {
@@ -73,5 +73,72 @@ describe("tangent arc", () => {
 
   it("refuses an end point straight ahead of the line", () => {
     expect(tangentArcThrough([0, 0], [1, 0], [5, 0])).toBeNull();
+  });
+});
+
+describe("tangent circles", () => {
+  it("2-tangent circle between two perpendicular lines stays tangent to both", () => {
+    const sk = sketch();
+    const l1 = addLine(sk, [0, 0], [40, 0]);
+    const l2 = addLine(sk, [0, 0], [0, 40]);
+    const c = addCircle(sk, [9, 9], 6)!;
+    expect("id" in addConstraint(sk, "tangent", [c, l1])).toBe(true);
+    expect("id" in addConstraint(sk, "tangent", [c, l2])).toBe(true);
+    expect("id" in addConstraint(sk, "radius", [c], "5")).toBe(true);
+    expect(solveSketch(sk, ev)?.state).not.toBe("error");
+    const sol = solveSketch(sk, ev)!;
+    const circle = resolveGeometry(sk, sol).find((g) => g.type === "circle")!;
+    if (circle.type !== "circle") throw new Error("no circle");
+    expect(circle.r).toBeCloseTo(5, 3);
+    const lines = resolveGeometry(sk, sol).filter((g) => g.type === "line");
+    for (const l of lines) {
+      if (l.type !== "line") continue;
+      const [dx, dy] = [l.b[0] - l.a[0], l.b[1] - l.a[1]];
+      const d = Math.abs((circle.c[0] - l.a[0]) * dy - (circle.c[1] - l.a[1]) * dx) / Math.hypot(dx, dy);
+      expect(d).toBeCloseTo(5, 2);
+    }
+  });
+});
+
+describe("control-point spline", () => {
+  it("starts and ends at the end points but passes beside the inner control points", () => {
+    const pts = bsplineSamples([[0, 0], [10, 20], [20, 0], [30, 20]], false, 12);
+    expect(pts[0]).toEqual([0, 0]);
+    expect(pts.at(-1)).toEqual([30, 20]);
+    // The curve stays inside the control polygon's hull: it never reaches the 20 mm peak.
+    const mid = pts[Math.floor(pts.length / 2)]!;
+    expect(mid[1]).toBeGreaterThan(5);
+    expect(mid[1]).toBeLessThan(15);
+  });
+
+  it("closes into a periodic curve", () => {
+    const pts = bsplineSamples([[0, 0], [10, 0], [10, 10], [0, 10]], true, 8);
+    expect(pts).toHaveLength(32);
+  });
+});
+
+describe("sketch intersect", () => {
+  it("slices a box mesh into one closed square outline", async () => {
+    const { Builder } = await import("../src/build");
+    const { createRequire } = await import("node:module");
+    const { setOC } = await import("replicad");
+    const opencascade = (await import("replicad-opencascadejs")).default;
+    const require = createRequire(import.meta.url);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setOC(await (opencascade as any)({ locateFile: () => require.resolve("replicad-opencascadejs/wasm") }));
+    const { makePrimitive, sliceMesh, chainSegments2D, simplifyChain } = await import("@whittle/core");
+    const doc = newDocument();
+    const b = makePrimitive(doc, "box");
+    if (b.type === "primitive") (b.width = "20"), (b.depth = "20"), (b.height = "20");
+    doc.features.push(b);
+    doc.bodies[b.id] = { name: "b", color: "#ccc", visible: true };
+    const body = new Builder().regen(doc, "final").bodies[0]!;
+    const segs = sliceMesh(body, [0, 0, 10], [1, 0, 0], [0, 1, 0], [0, 0, 1]);
+    const chains = chainSegments2D(segs);
+    expect(chains).toHaveLength(1);
+    expect(chains[0]!.closed).toBe(true);
+    const pts = simplifyChain(chains[0]!.pts, true);
+    expect(pts).toHaveLength(4);
+    expect(Math.max(...pts.map((p) => p[0]))).toBeCloseTo(10, 3);
   });
 });

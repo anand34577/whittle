@@ -122,6 +122,8 @@ export interface PolylineEntity extends EntityBase {
   smooth?: boolean;
   /** An open path (for sweeps and guides): never becomes a solid region. */
   open?: boolean;
+  /** A control-point spline: the points steer a smooth B-spline curve that does not pass through them. */
+  ctrl?: boolean;
 }
 
 export interface EllipseEntity extends EntityBase {

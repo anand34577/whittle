@@ -22,7 +22,7 @@ import {
   trim,
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace } from "../state/actions";
-import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure } from "../state/measure";
@@ -362,6 +362,7 @@ export function ViewportView() {
         addArc: addArcGeometry,
         addTangentArc: addTangentArcGeometry,
         addCircle: addCircleGeometry,
+        addTangentCircle: addTangentCircleGeometry,
         addSpline: addSplineGeometry,
         addPoint: addFreePoint,
         corner: cornerAt,

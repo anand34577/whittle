@@ -215,9 +215,9 @@ export function Toolbar() {
         <div className="toolbar__mode">
           <span className="pill pill--accent">Sketch</span>
         </div>
-        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic"]} activeId={active} />
-        <Group label="Special" ids={["tool-project", "tool-text", "tool-gear", "import-image", "import-svg"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
-        <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
+        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic", "tool-cspline", "tool-earc", "tool-tan2c", "tool-tan3c"]} activeId={active} />
+        <Group label="Special" ids={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg"]} more={["calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} activeId={active} />
+        <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-stretch", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
         <Group
           label="Constrain"
           ids={profile === "engineer" || profile === "designer" ? ["tool-segment", "tool-arc", "tool-spline", "tool-pcircle", "tool-dimension", "tool-sfillet", "tool-schamfer", "tool-trim", "tool-extend"] : ["tool-segment", "tool-spline", "tool-dimension", "tool-sfillet"]}
