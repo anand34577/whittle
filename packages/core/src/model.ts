@@ -240,6 +240,65 @@ export interface ConstructFeature extends FeatureBase {
   value: Expr;
 }
 
+/** A thin reinforcing wall from an open sketch path: stands in the sketch plane and extends `depth` to one side. */
+export interface RibFeature extends FeatureBase {
+  type: "rib";
+  sketch: Id;
+  thickness: Expr;
+  depth: Expr;
+  flip: boolean;
+  op: BodyOp;
+  target?: Id;
+}
+
+/** A modeled screw thread cut along a cylindrical face (external rod or internal hole). */
+export interface ThreadFeature extends FeatureBase {
+  type: "thread";
+  face: FaceRef | null;
+  pitch: Expr;
+  /** Threaded length along the face; empty = the whole face. */
+  length: Expr;
+  /** Groove depth; empty = ISO proportion of the pitch. */
+  depth: Expr;
+  lefthand: boolean;
+}
+
+/** Replace flat faces with a plane (another face, or a construction plane): the body grows or shrinks to meet it. */
+export interface ReplaceFaceFeature extends FeatureBase {
+  type: "replaceFace";
+  faces: FaceRef[];
+  target: FaceRef | null;
+  plane?: Id;
+  /** While true the next face click sets the target face instead of adding a face to replace. */
+  pickTarget?: boolean;
+}
+
+/** Delete the faces of a hole, pocket or boss and heal the gap (the opening must be flat). */
+export interface DeleteFaceFeature extends FeatureBase {
+  type: "deleteFace";
+  faces: FaceRef[];
+}
+
+/** Move a body so one of its flat faces meets a flat face of another body. */
+export interface AlignFeature extends FeatureBase {
+  type: "align";
+  bodyId?: Id;
+  from: FaceRef | null;
+  to: FaceRef | null;
+  /** Face to face by default; flip turns the body around. */
+  flip: boolean;
+  offset: Expr;
+}
+
+/** New bodies from the cells the tool bodies cut each other into (overlaps and leftovers). */
+export interface BoundaryFillFeature extends FeatureBase {
+  type: "boundaryFill";
+  tools: Id[];
+  /** Indices of the cells to keep as bodies. */
+  cells: number[];
+  keepTools: boolean;
+}
+
 export interface SketchFeature extends FeatureBase {
   type: "sketch";
   plane: PlaneRef;
@@ -343,14 +402,21 @@ export interface MirrorFeature extends FeatureBase {
   plane: OriginPlane;
   /** Move the mirror plane along its normal. */
   offset?: Expr;
+  /** Mirror across a construction plane instead of an origin plane. */
+  planeRef?: Id;
   merge: boolean;
 }
 
 export interface PatternFeature extends FeatureBase {
   type: "pattern";
   bodyId?: Id;
-  pattern: "linear" | "circular";
+  pattern: "linear" | "circular" | "path";
   axis: "x" | "y" | "z";
+  /** A construction axis to repeat along / around instead of an origin axis. */
+  axisRef?: Id;
+  /** Path pattern: the sketch whose first path the copies follow, and whether they turn with it. */
+  path?: Id;
+  follow?: boolean;
   count: Expr;
   spacing: Expr;
   angle: Expr;
@@ -433,6 +499,10 @@ export interface SplitFeature extends FeatureBase {
   offset: Expr;
   /** "both" keeps each side as its own body. */
   keep: "both" | "above" | "below";
+  /** Only cut the faces along the plane; keep one body. */
+  facesOnly?: boolean;
+  /** Split along a construction plane instead of an origin plane. */
+  planeRef?: Id;
 }
 
 /** Grow or shrink a whole body by a distance (clearances, tolerances, coatings). */
@@ -527,6 +597,12 @@ export type Feature =
   | JointFeature
   | ConstructionPlaneFeature
   | ConstructFeature
+  | RibFeature
+  | ThreadFeature
+  | ReplaceFaceFeature
+  | DeleteFaceFeature
+  | AlignFeature
+  | BoundaryFillFeature
   | OffsetFaceFeature
   | HoleFeature
   | LoftFeature

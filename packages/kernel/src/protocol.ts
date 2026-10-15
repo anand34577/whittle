@@ -75,6 +75,8 @@ export interface FeatureStatus {
   message?: string;
   fix?: FeatureFix;
   ms?: number;
+  /** Boundary Fill: the cells the tool bodies were cut into. */
+  cells?: { volume: number; center: Vec3 }[];
 }
 
 export interface RegenResult {

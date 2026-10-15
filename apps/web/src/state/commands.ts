@@ -10,7 +10,16 @@ import {
   startCoil,
   startCombine,
   startDraft,
+  startAlign,
+  startBoundaryFill,
   startConstruct,
+  startDeleteFace,
+  startEmboss,
+  startReplaceFace,
+  startRib,
+  startSplitFaces,
+  startThreadFace,
+  startWeb,
   startConstructionPlane,
   startJoint,
   startOffsetFace,
@@ -390,6 +399,20 @@ export const COMMANDS: Command[] = [
   { id: "coach", label: "Guided first part", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started", run: () => useApp.setState({ coach: true, panel: null }) },
   { id: "welcome", label: "Start screen & templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
 ];
+
+const NEEDS_BODY = (s: AppState) => inModel(s) && hasBodies(s);
+COMMANDS.push(
+  { id: "rib", label: "Rib", group: "Create", icon: "extrude", keywords: "reinforce stiffen gusset support wall", hint: "A thin reinforcing wall from a line sketched through the part", when: inModel, run: model(startRib) },
+  { id: "web", label: "Web", group: "Create", icon: "extrude", keywords: "thin wall reinforce open line", hint: "A thin wall from an open line, standing up from the sketch", when: inModel, run: model(startWeb) },
+  { id: "emboss", label: "Emboss", group: "Create", icon: "text", keywords: "raise text logo label relief", hint: "Raise the newest sketch's shapes or text off the face it sits on", when: inModel, run: model(() => startEmboss(false)) },
+  { id: "engrave", label: "Engrave", group: "Create", icon: "text", keywords: "sink carve text logo label deboss", hint: "Cut the newest sketch's shapes or text into the face it sits on", when: inModel, run: model(() => startEmboss(true)) },
+  { id: "thread-face", label: "Thread on a face", short: "Thread", group: "Create", icon: "thread", keywords: "screw bolt helix cylinder hole tap external internal", hint: "Cut a real screw thread along a rod or inside a hole", when: NEEDS_BODY, run: model(startThreadFace) },
+  { id: "boundary-fill", label: "Boundary Fill", group: "Create", icon: "combine", keywords: "cells overlap enclosed region bodies intersection volume", hint: "Turn the regions where bodies overlap into new bodies", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startBoundaryFill) },
+  { id: "replace-face", label: "Replace Face", group: "Modify", icon: "move", keywords: "match flat plane extend trim face to surface", hint: "Bring flat faces to another face or plane", when: NEEDS_BODY, run: model(startReplaceFace) },
+  { id: "delete-face", label: "Delete Face", group: "Modify", icon: "trash", keywords: "remove heal hole pocket boss defeature simplify fill", hint: "Remove a hole, pocket or boss and heal the gap", when: NEEDS_BODY, run: model(startDeleteFace) },
+  { id: "align", label: "Align", group: "Modify", icon: "move", keywords: "mate face to face snap place flush position body", hint: "Move a body so a flat face meets a face of another body", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startAlign) },
+  { id: "split-faces", label: "Split Faces", group: "Modify", icon: "split", keywords: "divide face line plane region", hint: "Cut the faces along a plane without separating the body", when: NEEDS_BODY, run: model(startSplitFaces) },
+);
 
 const CONSTRUCT_ICON = (m: ConstructMode): IconName => (m.startsWith("plane") || m === "midplane" ? "plane" : m.startsWith("axis") ? "axis" : "point");
 const CONSTRUCT_COMMANDS: Command[] = (Object.keys(CONSTRUCT_MODES) as ConstructMode[]).map((m) => ({

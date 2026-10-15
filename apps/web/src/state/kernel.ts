@@ -15,7 +15,7 @@ function pickBeforeFor(): string | undefined {
   const { session, doc } = useApp.getState();
   if (!session) return undefined;
   const f = findFeature(doc, session.featureId);
-  return f && ["fillet", "chamfer", "shell", "hole", "combine", "move", "draft", "offsetFace", "cplane", "construct", "joint", "split", "offset", "scale", "mirror", "pattern"].includes(f.type) ? f.id : undefined;
+  return f && ["fillet", "chamfer", "shell", "hole", "combine", "move", "draft", "offsetFace", "cplane", "construct", "thread", "replaceFace", "deleteFace", "align", "boundaryFill", "joint", "split", "offset", "scale", "mirror", "pattern"].includes(f.type) ? f.id : undefined;
 }
 
 function schedule() {

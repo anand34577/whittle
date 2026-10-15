@@ -93,6 +93,18 @@ export function hintFor(s: AppState): string {
         return "Type a factor (2 = twice the size) · Enter to finish";
       case "joint":
         return !f.bodyId ? "Click the body that moves" : !f.fixedId ? "Click the body it is attached to · choose the joint type · change Angle or Distance to drive it" : "Change Angle or Distance to drive the joint · Enter to finish";
+      case "rib":
+        return !f.sketch ? "Click the sketch with the rib line" : "Set thickness and depth · flip to change the side · Enter to finish";
+      case "thread":
+        return !f.face ? "Click the round face to thread" : "Set the pitch · leave length and depth on automatic for a standard thread · Enter to finish";
+      case "replaceFace":
+        return f.faces.length === 0 ? "Click the flat faces to replace" : !f.target && !f.plane ? "Now click the face to meet (or choose a plane)" : "Enter to finish";
+      case "deleteFace":
+        return f.faces.length === 0 ? "Click every wall of the hole, pocket or boss to delete" : "Enter to heal the gap";
+      case "align":
+        return !f.from ? "Click a flat face on the body to move" : !f.to ? "Now click the flat face of the other body" : "Flip it or leave a gap · Enter to finish";
+      case "boundaryFill":
+        return f.tools.length < 2 ? "Click two or more overlapping bodies" : "Tick the cells to keep as a body · Enter to finish";
       case "construct":
         return CONSTRUCT_MODES[f.mode].hint + " · Enter to finish";
       case "cplane":

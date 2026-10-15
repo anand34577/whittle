@@ -189,11 +189,11 @@ function toolsFor(profile: Profile | null) {
   const pro = profile === "engineer" || profile === "designer";
   return {
     create: pro
-      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["pipe", "thread", "spring", "import"] }
-      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "loft", "thread", "spring", "import"] },
+      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["pipe", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] }
+      : { primary: ["extrude", "revolve", "hole"], more: ["sweep", "pipe", "loft", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "import"] },
     modify: pro
-      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["press-pull", "joint", "combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
-      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["press-pull", "joint", "combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
+      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["press-pull", "replace-face", "delete-face", "align", "split-faces", "joint", "combine", "mirror", "pattern", "split", "offset", "scale", "fillet-all", "chamfer-all"] }
+      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["press-pull", "replace-face", "delete-face", "align", "split-faces", "joint", "combine", "mirror", "pattern", "split", "draft", "offset", "scale", "fillet-all", "chamfer-all"] },
   };
 }
 

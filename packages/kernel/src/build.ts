@@ -66,6 +66,7 @@ import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } 
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { constructFrame } from "./construct";
+import { CELL_INFO, alignBody, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale } from "./refs";
 
@@ -134,7 +135,7 @@ function describeError(f: Feature, e: unknown): string {
   return FRIENDLY[f.type] ?? "This feature couldn't be built.";
 }
 
-function planeFromFrame(f: SketchFrame): Plane {
+export function planeFromFrame(f: SketchFrame): Plane {
   return new Plane(f.origin, f.xDir, f.normal);
 }
 
@@ -144,9 +145,9 @@ const ORIGIN_FRAMES: Record<string, { xDir: Vec3; yDir: Vec3; normal: Vec3 }> = 
   YZ: { xDir: [0, 1, 0], yDir: [0, 0, 1], normal: [1, 0, 0] },
 };
 
-const deg = (rad: number) => (rad * 180) / Math.PI;
+export const deg = (rad: number) => (rad * 180) / Math.PI;
 
-function polyDrawing(pts: [number, number][]): Drawing {
+export function polyDrawing(pts: [number, number][]): Drawing {
   if (pts.length < 3) throw new FeatureError("A closed shape needs at least three points");
   let pen = draw(pts[0]);
   for (const p of pts.slice(1)) pen = pen.lineTo(p);
@@ -297,7 +298,7 @@ function bboxOverlap(a: Shape3D, b: Shape3D): boolean {
 }
 
 /** Merge coplanar faces / collinear edges left over by booleans. */
-function clean(s: Shape3D): Shape3D {
+export function clean(s: Shape3D): Shape3D {
   try {
     return s.simplify();
   } catch {
@@ -305,12 +306,12 @@ function clean(s: Shape3D): Shape3D {
   }
 }
 
-function lastBody(bodies: Map<Id, Shape3D>): Id | undefined {
+export function lastBody(bodies: Map<Id, Shape3D>): Id | undefined {
   return [...bodies.keys()].pop();
 }
 
 /** Apply a body operation (new / join / cut / intersect) for a tool shape. */
-function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
+export function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
   if (op === "new") {
     bodies.set(featureId, tool);
     return;
@@ -377,7 +378,7 @@ function planeFrame(id: Id, plane: PlaneRef, bodies: Map<Id, Shape3D>, sketches:
   };
 }
 
-function bodyForRefs(bodies: Map<Id, Shape3D>, bodyId: Id): Shape3D {
+export function bodyForRefs(bodies: Map<Id, Shape3D>, bodyId: Id): Shape3D {
   const b = bodies.get(bodyId);
   if (!b) throw new FeatureError("The body this feature was applied to no longer exists. Re-pick the edges or faces.");
   return b;
@@ -396,7 +397,7 @@ function torusZ(major: number, minor: number): Shape3D {
 }
 
 /** Rotate a shape built along +Z so that +Z points along `dir`, then move it to `at`. */
-function orient(s: Shape3D, dir: Vec3, at: Vec3): Shape3D {
+export function orient(s: Shape3D, dir: Vec3, at: Vec3): Shape3D {
   const d = norm(dir);
   const c = dot([0, 0, 1], d);
   let out = s;
@@ -407,9 +408,9 @@ function orient(s: Shape3D, dir: Vec3, at: Vec3): Shape3D {
   return out.translate(at);
 }
 
-const AXES: Record<"x" | "y" | "z", Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+export const AXES: Record<"x" | "y" | "z", Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 
-function boxCenter(s: Shape3D): Vec3 {
+export function boxCenter(s: Shape3D): Vec3 {
   const [a, b] = s.boundingBox.bounds;
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
 }
@@ -499,6 +500,7 @@ export class Builder {
         }
       }
     }
+    for (const s of statuses) if (CELL_INFO.has(s.id)) s.cells = CELL_INFO.get(s.id);
     return { bodies, sketches, planes, status: statuses, pickBodies, ms: performance.now() - t0, rebuilt };
   }
 
@@ -575,6 +577,24 @@ export class Builder {
   /** Mutates the body/sketch maps; returns a warning message, if any. */
   private apply(f: Feature, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchBuilt>, ev: Evaluator): string | undefined {
     switch (f.type) {
+      case "rib":
+        return applyOp(bodies, f.id, f.op, f.target, ribTool(f, sketches, ev));
+
+      case "thread":
+        return threadTool(f, bodies, ev);
+
+      case "replaceFace":
+        return replaceFaces(f, bodies, (id) => sketches.get(id)?.frame);
+
+      case "deleteFace":
+        return deleteFaces(f, bodies);
+
+      case "align":
+        return alignBody(f, bodies, ev);
+
+      case "boundaryFill":
+        return boundaryCells(f, bodies);
+
       case "construct": {
         const { frame, warning } = constructFrame(f, {
           body: (id) => bodyForRefs(bodies, id),
@@ -744,10 +764,17 @@ export class Builder {
         const id = f.bodyId ?? lastBody(bodies);
         if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to split.");
         const off = ev.num(f.offset, "length", "Offset");
-        const parts = bodies.get(id)!.split(f.plane, off);
+        const ref = f.planeRef ? sketches.get(f.planeRef)?.frame : undefined;
+        if (f.planeRef && !ref) throw new FeatureError("The construction plane is missing. Pick another plane.");
+        const parts = bodies.get(id)!.split(ref ? planeFromFrame(ref) : f.plane, off);
         const above = parts.positive as Shape3D | null;
         const below = parts.negative as Shape3D | null;
         if (!above || !below) throw new FeatureError("The plane doesn't cross this body, so there's nothing to split. Change the offset.");
+        if (f.facesOnly) {
+          // Joining the halves without merging faces leaves the old faces cut along the plane.
+          bodies.set(id, joinKeepingFaces(above, below));
+          return;
+        }
         if (f.keep === "both") {
           bodies.set(id, clean(above));
           bodies.set(f.id, clean(below));
@@ -892,7 +919,9 @@ export class Builder {
         if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to mirror.");
         const src = bodies.get(id)!;
         const off = f.offset ? ev.num(f.offset, "length", "Offset") : 0;
-        const copy = src.clone().mirror(f.plane, scale(MIRROR_NORMALS[f.plane], off));
+        const ref = f.planeRef ? sketches.get(f.planeRef)?.frame : undefined;
+        if (f.planeRef && !ref) throw new FeatureError("The construction plane is missing. Pick another plane.");
+        const copy = ref ? src.clone().mirror(ref.normal, add(ref.origin, scale(ref.normal, off))) : src.clone().mirror(f.plane, scale(MIRROR_NORMALS[f.plane], off));
         if (f.merge) {
           bodies.set(id, clean(src.fuse(copy)));
         } else bodies.set(f.id, copy);
@@ -905,9 +934,13 @@ export class Builder {
         const count = ev.num(f.count, "count", "Count");
         if (count < 2 || count > 200) throw new FeatureError("The count must be between 2 and 200.");
         const src = bodies.get(id)!;
-        const axis = AXES[f.axis];
+        const axisFrame = f.axisRef ? sketches.get(f.axisRef)?.frame : undefined;
+        if (f.axisRef && !axisFrame) throw new FeatureError("The construction axis is missing. Pick another axis.");
+        const axis = axisFrame ? axisFrame.normal : AXES[f.axis];
+        const axisAt: Vec3 = axisFrame ? axisFrame.origin : [0, 0, 0];
         const copies: Shape3D[] = [];
-        if (f.pattern === "linear") {
+        if (f.pattern === "path") copies.push(...patternOnPath(f, src, sketches, ev));
+        else if (f.pattern === "linear") {
           const spacing = ev.num(f.spacing, "length", "Spacing");
           const count2 = f.count2 ? Math.round(ev.num(f.count2, "count", "Second count")) : 1;
           if (count2 < 1 || count * count2 > 400) throw new FeatureError("A grid can have at most 400 copies.");
@@ -923,7 +956,7 @@ export class Builder {
           const total = deg(ev.num(f.angle, "angle", "Angle"));
           const full = Math.abs(Math.abs(total) - 360) < 1e-6;
           const stepDeg = full ? total / count : total / (count - 1);
-          for (let i = 1; i < count; i++) copies.push(src.clone().rotate(stepDeg * i, [0, 0, 0], axis));
+          for (let i = 1; i < count; i++) copies.push(src.clone().rotate(stepDeg * i, axisAt, axis));
         }
         if (f.merge) {
           let acc = src;
@@ -1152,7 +1185,7 @@ function taperedExtrude(drawing: Drawing, frame: SketchFrame, dist: number, angl
 }
 
 /** The path a sweep follows: the sketch's first open line, else its first outline. */
-function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire {
+export function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire {
   const open = f.entities.find((e) => e.type === "polyline" && e.open);
   const e = open ?? f.entities.find((x) => !x.construction);
   if (!e) throw new FeatureError("The path sketch is empty. Draw a path (open line) or a shape in it.", undefined, true);

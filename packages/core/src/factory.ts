@@ -71,6 +71,12 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   offsetFace: "Press/Pull",
   cplane: "Plane",
   construct: "Construct",
+  rib: "Rib",
+  thread: "Thread",
+  replaceFace: "Replace Face",
+  deleteFace: "Delete Face",
+  align: "Align",
+  boundaryFill: "Boundary Fill",
   joint: "Joint",
 };
 
@@ -262,6 +268,30 @@ export const CONSTRUCT_MODES: Record<ConstructMode, { label: string; faces: numb
 export function makeConstruct(doc: WhittleDocument, mode: ConstructMode): Feature {
   const label = mode.startsWith("plane") || mode === "midplane" ? "Plane" : mode.startsWith("axis") ? "Axis" : "Point";
   return { id: uid("cg"), type: "construct", name: nextName(doc, label), mode, faces: [], edges: [], points: [], value: mode === "planePath" ? "50" : "0" };
+}
+
+export function makeRib(doc: WhittleDocument, sketch: Id): Feature {
+  return { id: uid("rb"), type: "rib", name: nextName(doc, "Rib"), sketch, thickness: "2", depth: "10", flip: false, op: "join" };
+}
+
+export function makeThread(doc: WhittleDocument): Feature {
+  return { id: uid("th"), type: "thread", name: nextName(doc, "Thread"), face: null, pitch: "1.5", length: "", depth: "", lefthand: false };
+}
+
+export function makeReplaceFace(doc: WhittleDocument): Feature {
+  return { id: uid("rf"), type: "replaceFace", name: nextName(doc, "Replace Face"), faces: [], target: null };
+}
+
+export function makeDeleteFace(doc: WhittleDocument): Feature {
+  return { id: uid("df"), type: "deleteFace", name: nextName(doc, "Delete Face"), faces: [] };
+}
+
+export function makeAlign(doc: WhittleDocument, bodyId?: Id): Feature {
+  return { id: uid("al"), type: "align", name: nextName(doc, "Align"), bodyId, from: null, to: null, flip: false, offset: "0" };
+}
+
+export function makeBoundaryFill(doc: WhittleDocument, tools: Id[]): Feature {
+  return { id: uid("bf"), type: "boundaryFill", name: nextName(doc, "Boundary Fill"), tools, cells: [], keepTools: true };
 }
 
 export function makeMirror(doc: WhittleDocument, bodyId?: Id): Feature {

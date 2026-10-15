@@ -8,6 +8,18 @@ export function featureInputs(f: Feature): Id[] {
       return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
     case "cplane":
       return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
+    case "rib":
+      return [f.sketch, ...(f.target ? [f.target] : [])];
+    case "thread":
+      return f.face ? [f.face.bodyId] : [];
+    case "replaceFace":
+      return [...new Set([...f.faces.map((x) => x.bodyId), ...(f.target ? [f.target.bodyId] : []), ...(f.plane ? [f.plane] : [])])];
+    case "deleteFace":
+      return [...new Set(f.faces.map((x) => x.bodyId))];
+    case "align":
+      return [...new Set([...(f.bodyId ? [f.bodyId] : []), ...(f.from ? [f.from.bodyId] : []), ...(f.to ? [f.to.bodyId] : [])])];
+    case "boundaryFill":
+      return f.tools;
     case "construct":
       return [...new Set([...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId)])];
     case "extrude":
@@ -21,7 +33,9 @@ export function featureInputs(f: Feature): Id[] {
     case "shell":
       return [...new Set([...(f.bodyId ? [f.bodyId] : []), ...f.faces.map((x) => x.bodyId)])];
     case "mirror":
+      return [...(f.bodyId ? [f.bodyId] : []), ...(f.planeRef ? [f.planeRef] : [])];
     case "pattern":
+      return [...(f.bodyId ? [f.bodyId] : []), ...(f.axisRef ? [f.axisRef] : []), ...(f.path ? [f.path] : [])];
     case "move":
       return f.bodyId ? [f.bodyId] : [];
     case "hole":
@@ -35,6 +49,7 @@ export function featureInputs(f: Feature): Id[] {
     case "coil":
       return f.target ? [f.target] : [];
     case "split":
+      return [...(f.bodyId ? [f.bodyId] : []), ...(f.planeRef ? [f.planeRef] : [])];
     case "offset":
     case "scale":
       return f.bodyId ? [f.bodyId] : [];

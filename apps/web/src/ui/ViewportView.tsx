@@ -479,6 +479,9 @@ export function ViewportView() {
     else if (mode.kind === "measure") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "fillet" || f?.type === "chamfer") filter = { faces: false, edges: true, planes: false, sketches: false };
     else if (f?.type === "shell" || f?.type === "hole" || f?.type === "draft" || f?.type === "offsetFace") filter = bodiesOnly;
+    else if (f?.type === "thread" || f?.type === "replaceFace" || f?.type === "deleteFace" || f?.type === "align") filter = bodiesOnly;
+    else if (f?.type === "boundaryFill") filter = bodiesOnly;
+    else if (f?.type === "rib") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
     else if (f?.type === "loft") filter = { faces: false, edges: false, planes: false, sketches: true };
@@ -519,7 +522,7 @@ export function ViewportView() {
     const ev = documentEvaluator(doc);
     const end = activeEnd(doc);
     const list: SketchDrawable[] = [];
-    const showAll = sessionFeature?.type === "loft" || sessionFeature?.type === "sweep";
+    const showAll = sessionFeature?.type === "loft" || sessionFeature?.type === "sweep" || sessionFeature?.type === "rib" || (sessionFeature?.type === "pattern" && sessionFeature.pattern === "path");
     for (const f of doc.features.slice(0, end)) {
       if (f.type !== "sketch") continue;
       const fr = regen.sketches.find((s) => s.id === f.id);

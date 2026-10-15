@@ -50,6 +50,12 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   offsetFace: "move",
   cplane: "plane",
   construct: "plane",
+  rib: "extrude",
+  thread: "thread",
+  replaceFace: "move",
+  deleteFace: "trash",
+  align: "move",
+  boundaryFill: "combine",
   joint: "move",
 };
 

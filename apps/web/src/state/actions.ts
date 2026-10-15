@@ -17,7 +17,13 @@ import {
   makeChamfer,
   makeCoil,
   makeCombine,
+  makeAlign,
+  makeBoundaryFill,
   makeConstruct,
+  makeDeleteFace,
+  makeReplaceFace,
+  makeRib,
+  makeThread,
   makeConstructionPlane,
   makeDraft,
   makeJoint,
@@ -385,6 +391,105 @@ export function startConstructionPlane() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+/** The newest sketch with an open line (or the selected one): a rib or web path. */
+function openLineSketch(): Id | null {
+  const { selection, doc } = get();
+  const picked = selection.find((p) => p.kind === "sketch");
+  if (picked?.kind === "sketch") return picked.sketchId;
+  const sketches = doc.features.slice(0, activeEnd(doc)).filter((f) => f.type === "sketch" && f.entities.some((e) => e.type === "polyline" && e.open));
+  return sketches.at(-1)?.id ?? null;
+}
+
+export function startRib() {
+  const sketch = openLineSketch();
+  const f = makeRib(get().doc, sketch ?? "");
+  if (f.type === "rib") f.target = selectedBodyId();
+  beginNewFeature(f, `New ${f.name}`);
+  if (!sketch) toast("info", "A rib needs a line: sketch one with the Path tool on a plane through the part, then click Rib.");
+}
+
+/** Web: a thin wall from an open line, extruded perpendicular to the sketch. */
+export function startWeb() {
+  const sketch = openLineSketch();
+  if (!sketch) return toast("info", "A web needs a line: sketch one with the Path tool, then click Web.");
+  const f = makeExtrude(get().doc, sketch, (get().regen?.bodies.length ?? 0) > 0 ? "join" : "new");
+  if (f.type === "extrude") {
+    f.thin = "2";
+    f.thinSide = "center";
+    f.distance = "10";
+  }
+  f.name = f.name.replace("Extrude", "Web");
+  beginNewFeature(f, `New ${f.name}`);
+}
+
+/** Emboss (raised) or engrave (sunk) the newest sketch's shapes onto the face it sits on. */
+export function startEmboss(engrave: boolean) {
+  const sketch = sketchForProfile();
+  if (!sketch) return toast("info", "Sketch text or a shape on a flat face first (Text or any shape tool), then click Emboss.");
+  const f = makeExtrude(get().doc, sketch, engrave ? "cut" : "join");
+  const sk = findFeature(get().doc, sketch, "sketch");
+  if (f.type === "extrude") {
+    f.distance = engrave ? "0.6" : "0.8";
+    if (sk?.plane.kind === "face") f.target = sk.plane.face.bodyId;
+    f.flip = false;
+    if (engrave) f.flip = true;
+  }
+  f.name = f.name.replace("Extrude", engrave ? "Engrave" : "Emboss");
+  beginNewFeature(f, `New ${f.name}`);
+}
+
+export function startThreadFace() {
+  const f = makeThread(get().doc);
+  const pick = get().selection.find((p) => p.kind === "face");
+  if (pick && f.type === "thread") {
+    const ref = faceRefFromPick(pick);
+    if (ref?.surface === "CYLINDRE") f.face = ref;
+  }
+  beginNewFeature(f, `New ${f.name}`);
+}
+
+export function startReplaceFace() {
+  const faces = get()
+    .selection.map((p) => faceRefFromPick(p))
+    .filter((x): x is FaceRef => !!x && x.surface === "PLANE");
+  const f = makeReplaceFace(get().doc);
+  if (f.type === "replaceFace") {
+    f.faces = faces;
+    f.pickTarget = true;
+  }
+  beginNewFeature(f, `New ${f.name}`);
+}
+
+export function startDeleteFace() {
+  const faces = get()
+    .selection.map((p) => faceRefFromPick(p))
+    .filter((x): x is FaceRef => !!x);
+  const f = makeDeleteFace(get().doc);
+  if (f.type === "deleteFace") f.faces = faces;
+  beginNewFeature(f, `New ${f.name}`);
+}
+
+export function startAlign() {
+  if ((get().regen?.bodies.length ?? 0) < 2) return toast("info", "Align needs two bodies: one to move and one to meet.");
+  beginNewFeature(makeAlign(get().doc), "New Align");
+}
+
+export function startBoundaryFill() {
+  const ids = [...new Set(get().selection.flatMap((p) => (p.kind === "body" || p.kind === "face" || p.kind === "edge" ? [p.bodyId] : [])))];
+  if ((get().regen?.bodies.length ?? 0) < 2) return toast("info", "Boundary Fill needs two or more overlapping bodies.");
+  beginNewFeature(makeBoundaryFill(get().doc, ids), "New Boundary Fill");
+}
+
+/** Split just the faces along a plane (the body stays in one piece). */
+export function startSplitFaces() {
+  const body = selectedBodyId() ?? lastBodyId();
+  if (!body) return toast("info", "Create a body first, then split its faces.");
+  const f = makeSplit(get().doc, body);
+  if (f.type === "split") f.facesOnly = true;
+  f.name = f.name.replace("Split", "Split Faces");
+  beginNewFeature(f, `New ${f.name}`);
+}
+
 /** Construction plane / axis / point: picks are routed by handlePick. */
 export function startConstruct(mode: ConstructMode) {
   const f = makeConstruct(get().doc, mode);
@@ -529,6 +634,69 @@ export function handlePick(p: Pick | null, additive: boolean) {
         x.points.push(point);
         cap(x.points, need.points);
       }
+    });
+    return;
+  }
+  if (f && f.type === "thread" && p?.kind === "face") {
+    const ref = faceRefFromPick(p);
+    if (!ref) return;
+    if (ref.surface !== "CYLINDRE") return toast("warn", "Threads go on round faces: a rod or the inside of a hole.");
+    mutate("Pick face", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (x && x.type === "thread") x.face = ref;
+    });
+    return;
+  }
+  if (f && (f.type === "replaceFace" || f.type === "deleteFace") && p?.kind === "face") {
+    const ref = faceRefFromPick(p);
+    if (!ref) return;
+    if (f.type === "replaceFace" && ref.surface !== "PLANE") return toast("warn", "Only flat faces can be replaced.");
+    mutate("Pick face", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || (x.type !== "replaceFace" && x.type !== "deleteFace")) return;
+      if (x.type === "replaceFace" && x.pickTarget && x.faces.length > 0) {
+        x.target = ref;
+        x.pickTarget = false;
+        x.plane = undefined;
+        return;
+      }
+      const i = x.faces.findIndex((e) => d3(e.center, ref.center) < 1e-6);
+      if (i >= 0) x.faces.splice(i, 1);
+      else x.faces.push(ref);
+    });
+    return;
+  }
+  if (f && f.type === "align" && p?.kind === "face") {
+    const ref = faceRefFromPick(p);
+    if (!ref) return;
+    if (ref.surface !== "PLANE") return toast("warn", "Align works with flat faces.");
+    mutate("Pick face", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "align") return;
+      if (!x.from || x.to) {
+        x.from = ref;
+        x.to = null;
+        x.bodyId = ref.bodyId;
+      } else if (ref.bodyId !== x.from.bodyId) x.to = ref;
+      else x.from = ref;
+    });
+    return;
+  }
+  if (f && f.type === "boundaryFill" && p && (p.kind === "body" || p.kind === "face" || p.kind === "edge")) {
+    mutate("Pick body", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || x.type !== "boundaryFill") return;
+      const i = x.tools.indexOf(p.bodyId);
+      if (i >= 0) x.tools.splice(i, 1);
+      else x.tools.push(p.bodyId);
+    });
+    return;
+  }
+  if (f && (f.type === "rib" || (f.type === "pattern" && f.pattern === "path")) && p?.kind === "sketch") {
+    mutate("Pick sketch", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (x && x.type === "rib") x.sketch = p.sketchId;
+      if (x && x.type === "pattern") x.path = p.sketchId;
     });
     return;
   }
