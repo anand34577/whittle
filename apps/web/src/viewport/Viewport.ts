@@ -253,7 +253,12 @@ export class Viewport {
     this.disposed = true;
     this.resizeObs.disconnect();
     cancelAnimationFrame(this.frame);
+    // Free everything on the graphics card, not just the renderer: bodies, overlays, and the lighting textures.
+    for (const child of [...this.scene.children]) this.disposeObject(child);
+    this.scene.environment?.dispose();
+    if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
   }
 

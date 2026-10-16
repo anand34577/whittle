@@ -95,3 +95,17 @@ describe("saving", () => {
     expect(doc.modifiedAt).toBe("2000-01-01T00:00:00.000Z");
   });
 });
+
+describe("version", () => {
+  it("is the same everywhere it is written (the release workflow only checks four of the five places)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { APP_VERSION } = await import("../src/file");
+    const root = new URL("../../../", import.meta.url);
+    const read = (p: string) => readFileSync(new URL(p, root), "utf8");
+    expect(JSON.parse(read("package.json")).version).toBe(APP_VERSION);
+    expect(JSON.parse(read("apps/desktop/src-tauri/tauri.conf.json")).version).toBe(APP_VERSION);
+    for (const f of ["apps/server/Cargo.toml", "apps/desktop/src-tauri/Cargo.toml"]) {
+      expect(/^version\s*=\s*"([^"]+)"/m.exec(read(f))?.[1], f).toBe(APP_VERSION);
+    }
+  });
+});

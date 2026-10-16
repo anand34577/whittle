@@ -19,8 +19,9 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 // The geometry library prints internal debug dumps when an operation fails.
 // Failures already reach the user as friendly feature messages, so keep the
-// console for real problems.
-console.error = (...args: unknown[]) => console.debug("[kernel]", ...args);
+// console for real problems (an actual Error object still goes to the console).
+const realError = console.error.bind(console);
+console.error = (...args: unknown[]) => (args.some((a) => a instanceof Error) ? realError(...args) : console.debug("[kernel]", ...args));
 const post = (msg: KernelResponse, transfer: Transferable[] = []) => ctx.postMessage(msg, transfer);
 
 const builder = new Builder();
