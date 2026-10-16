@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { commandById, commandForKey, isAvailable } from "./state/commands";
 import { openDroppedFile, startAutosave, startDesktop } from "./state/files";
-import { apiHooks, detectPlatform } from "./state/platform";
+import { aiAvailable, apiHooks, detectPlatform } from "./state/platform";
 import { startKernel } from "./state/kernel";
 import { cancelSession, commitSession, finishSketch, setSketchTool, toast, useApp } from "./state/store";
 import { Browser } from "./ui/Browser";
@@ -169,7 +169,7 @@ export function App() {
       {panel === "shortcuts" && <ShortcutsDialog />}
       {panel === "parts" && <PartsDialog />}
       {panel === "settings" && <SettingsDialog />}
-      {assistant && !signedOut && (platform.kind !== "server" || platform.config.ai !== false) && <AssistantPanel />}
+      {assistant && !signedOut && aiAvailable(platform) && <AssistantPanel />}
       <DialogHost />
       <TooltipLayer />
     </div>

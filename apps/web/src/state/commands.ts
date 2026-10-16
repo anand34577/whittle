@@ -42,6 +42,7 @@ import {
   startShell,
   startSketch,
 } from "./actions";
+import { aiAvailable } from "./platform";
 import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
 import { exportSketch, importDxfIntoSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
@@ -443,7 +444,7 @@ export const COMMANDS: Command[] = [
     run: () => setTheme(t.id),
   })),
   { id: "theme-system", label: "Match system theme", group: "View", icon: "palette", keywords: "auto os dark light mode appearance", on: (s) => s.prefs.theme === "system", run: () => setTheme("system") },
-  { id: "assistant", label: "AI assistant", short: "Assistant", group: "Help", icon: "assistant", keys: "Ctrl+I", keywords: "ai chat claude gpt openai ollama llm generate prompt describe design copilot", hint: "Describe a part or a change and let AI build it with Whittle's tools", when: (s) => s.platform.kind !== "server" || s.platform.config.ai !== false, on: (s) => s.assistant, run: () => useApp.setState({ assistant: !get().assistant }) },
+  { id: "assistant", label: "AI assistant", short: "Assistant", group: "Help", icon: "assistant", keys: "Ctrl+I", keywords: "ai chat claude gpt openai ollama llm generate prompt describe design copilot", hint: "Describe a part or a change and let AI build it with Whittle's tools", when: (s) => aiAvailable(s.platform), on: (s) => s.assistant, run: () => useApp.setState({ assistant: !get().assistant }) },
   { id: "settings", label: "Settings", group: "File", icon: "settings", keys: "Ctrl+,", keywords: "preferences options theme appearance navigation mouse units profile accent density", hint: "Themes, navigation, units, workspace and more", run: () => useApp.setState({ panel: "settings" }) },
   { id: "shortcuts", label: "Keyboard shortcuts", group: "Help", icon: "keyboard", keys: "?", keywords: "keys hotkeys help", run: () => useApp.setState({ panel: "shortcuts" }) },
   { id: "coach", label: "Guided first part", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started", run: () => useApp.setState({ coach: true, panel: null }) },

@@ -78,6 +78,9 @@ People add providers in **Settings → AI assistant**. Keys are kept in that bro
 directly from the browser to the chosen provider. Local servers need to allow the app's origin (Ollama:
 `OLLAMA_ORIGINS`; LM Studio: enable CORS). On a self-hosted server, `WHITTLE_AI=false` hides the
 assistant and keeps the strict browser security policy.
+The desktop app does not offer the assistant: its security policy blocks connections to outside
+servers, so it would not work there.
+
 
 The loop is capped at 24 turns per request, every step is shown in the panel (expand a step to see the
 exact input and result), and **Stop** aborts the request.

@@ -62,6 +62,7 @@ export function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (!cfg) return null;
@@ -78,7 +79,7 @@ export function SignIn() {
     setBusy(true);
     setError(null);
     try {
-      if (view === "register") await done(await apiJson<ServerUser>("/auth/register", { method: "POST", json: { username, password, displayName, email } }));
+      if (view === "register") await done(await apiJson<ServerUser>("/auth/register", { method: "POST", json: { username, password, displayName, email, setupToken: setupToken || undefined } }));
       else if (view === "signin") await done(await apiJson<ServerUser>("/auth/login", { method: "POST", json: { username, password } }));
       else if (view === "forgot") {
         await apiJson("/auth/forgot", { method: "POST", json: { login: username } });
@@ -133,6 +134,7 @@ export function SignIn() {
                 <>
                   <TextField label="Email" icon="mail" type="email" autoComplete="email" value={email} onChange={setEmail} required={cfg.requireEmail} hint="For password resets and notices" />
                   <TextField label="Your name" autoComplete="name" value={displayName} onChange={setDisplayName} placeholder="Optional" />
+                  {cfg.needsSetupToken && <TextField label="Setup token" icon="key" value={setupToken} onChange={setSetupToken} required hint="WHITTLE_SETUP_TOKEN from the server settings" />}
                 </>
               )}
               {view !== "forgot" && (

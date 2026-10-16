@@ -95,6 +95,7 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $remote_addr;   # with WHITTLE_TRUST_PROXY=true
     }
 }
 ```
@@ -118,6 +119,8 @@ after changes: `sudo systemctl restart whittle`.
 | `WHITTLE_MAX_VERSIONS` | `50` | Versions kept per design; older ones are pruned. |
 | `WHITTLE_SESSION_DAYS` | `30` | How long a sign-in lasts. |
 | `WHITTLE_AI` | `true` | Allow the in-app AI assistant. `false` hides it and keeps the strictest browser security policy. |
+| `WHITTLE_TRUST_PROXY` | `false` | Set to `true` only behind a reverse proxy you control that sets `X-Forwarded-For`. Sign-in and password-reset limits then count each visitor's own address; without it they all share the proxy's address, so a few failed attempts lock everyone out. Never enable it when the server is reachable directly. |
+| `WHITTLE_SETUP_TOKEN` | *(none)* | If set, whoever creates the first (administrator) account must enter this value, so a stranger who reaches a new server first can't claim it. |
 | `WHITTLE_SMTP_HOST` | | Mail server for invitations, password resets and notices (see [Email](#email-smtp)). |
 | `WHITTLE_SMTP_PORT` | by security: 587 / 465 / 25 | |
 | `WHITTLE_SMTP_SECURITY` | `starttls` | `starttls`, `tls`, `starttls-optional` or `none` (plain, unencrypted). |

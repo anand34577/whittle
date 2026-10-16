@@ -60,7 +60,12 @@ fn parse_whittle(bytes: &[u8]) -> Result<Parsed, String> {
         return Err("That isn't a Whittle design file".into());
     }
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| "The design file is damaged".to_string())?;
-    let doc: serde_json::Value = {
+    // Only the name is needed, so the document is checked as JSON without building the whole tree in memory.
+    #[derive(serde::Deserialize)]
+    struct Head {
+        name: Option<String>,
+    }
+    let doc: Head = {
         let mut f = zip.by_name("document.json").map_err(|_| "The design file has no document.json".to_string())?;
         if f.size() > MAX_DOCUMENT_BYTES {
             return Err("The design is too large".into());
@@ -73,7 +78,7 @@ fn parse_whittle(bytes: &[u8]) -> Result<Parsed, String> {
         }
         serde_json::from_str(&s).map_err(|_| "The design's document.json isn't valid".to_string())?
     };
-    let name = doc.get("name").and_then(|n| n.as_str()).unwrap_or("Untitled").chars().take(200).collect::<String>();
+    let name = doc.name.as_deref().unwrap_or("Untitled").chars().take(200).collect::<String>();
     let thumbnail = match zip.by_name("thumbnail.png") {
         Ok(mut f) if f.size() <= 4 * 1024 * 1024 => {
             let mut v = Vec::new();
@@ -84,7 +89,11 @@ fn parse_whittle(bytes: &[u8]) -> Result<Parsed, String> {
     Ok(Parsed { name: if name.trim().is_empty() { "Untitled".into() } else { name }, thumbnail })
 }
 
+/// A big upload expands to a lot of memory while it is checked, so only a couple are checked at the same time.
+static PARSE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
 async fn parse_upload(body: Bytes) -> ApiResult<(Bytes, Parsed)> {
+    let _slot = PARSE_SLOTS.acquire().await.map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "Upload failed"))?;
     let b = body.clone();
     let parsed = tokio::task::spawn_blocking(move || parse_whittle(&b))
         .await

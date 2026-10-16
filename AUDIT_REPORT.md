@@ -385,6 +385,24 @@ refactors (J-01, J-03, D-01, H-01).
 | ND-7 | H-06: cache-key collisions | Accept the 53-bit hash, or combine two independent hashes (cheap) for ~2⁻¹⁰⁶. |
 | ND-8 | J-01: how to build many-shape sketches | (a) Union only overlapping groups (bounding-box graph), keep disjoint shapes as a compound. (b) Build a single face with holes by cutting a prism. (c) Offer a "pattern" fast path for repeated identical holes. (a) is the most general; needs checking against sketch semantics (holes, auto-hole detection). |
 
+### Decisions taken and what was done
+
+Chosen by recommendation after the walk-through (the user asked for everything to be fixed in turn).
+
+| ND | Choice | Result | Verified |
+|---|---|---|---|
+| ND-1 | (a) | `refs.ts`: a lone same-type match is flagged `uncertain` when its area/length changed >4x or it moved >3x its own size. Test: suppressing the boss now gives a warning. | Tested (`kernel/test/audit2.test.ts`) |
+| ND-2 | (a), narrowed | `applyOp` runs `BRepCheck_Analyzer` on each tool. OpenCascade also flags sound shapes (a circle exactly tangent to a side), so a flagged tool only produces a warning when it leaves a body that is invalid *and* has no positive volume. A stricter error broke an existing test, so it was not used. No on-demand "Check geometry" command was added. | Tested (full kernel suite) |
+| ND-3 | (a) | `WHITTLE_TRUST_PROXY`: when true, `ClientAddr` uses the **last** `X-Forwarded-For` entry (the one the proxy appended; earlier ones can be forged). Documented, nginx example updated. A per-username limit was not added. | **UNVERIFIED: Rust, not compiled** |
+| ND-4 | (a) | The assistant is hidden on desktop (`aiAvailable()` in `platform.ts`, used by the panel, toolbar and command). Documented. | Typecheck + web tests; the CSP claim itself is still UNVERIFIED |
+| ND-5 | (c) + part of (b) | `designs.rs`: only `name` is read from `document.json` (no `serde_json::Value` tree), and at most 2 uploads are checked at once. The 256 MB cap is unchanged. | **UNVERIFIED: Rust, not compiled** |
+| ND-6 | (a), opt-in | `WHITTLE_SETUP_TOKEN`: if set, the first account must present it (new field on the first-run form). First-account check and insert are serialised by a lock. With no token set, behaviour is as before. | **UNVERIFIED: Rust, not compiled** (web side typechecks) |
+| ND-7 | (b) | `hashKey` combines two independent 53-bit hashes plus the length. | Tested |
+| ND-8 | (a) + fast path | `sketchDrawing` combines shapes per bounding-box cluster, and builds one outline with many separate holes as a single face with inner loops. 600 holes in a plate: drawing 84 ms (was about 132 s for the sketch). Overlapping or touching holes still use the old hole-by-hole cut. | Tested |
+
+Still open: I-05 to I-09, A-05, D-01, D-03, F-01, J-03, H-01, H-02 (see the findings table).
+
+
 ---
 
 ## 8. Coverage statement and limitations

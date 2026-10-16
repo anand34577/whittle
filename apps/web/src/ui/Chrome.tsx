@@ -1,6 +1,7 @@
 /** Title bar, toolbar, status bar and toasts: the quiet frame around the viewport. */
 import { useEffect, useRef, useState } from "react";
 import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable } from "../state/commands";
+import { aiAvailable } from "../state/platform";
 import { hintFor } from "../state/hints";
 import { history, mutate, setTheme, useApp } from "../state/store";
 import { AccountButton } from "./Account";
@@ -15,7 +16,7 @@ export function TitleBar() {
   const dirty = useApp((s) => s.dirty);
   const theme = useApp((s) => s.theme);
   const assistant = useApp((s) => s.assistant);
-  const aiAllowed = useApp((s) => s.platform.kind !== "server" || s.platform.config.ai !== false);
+  const aiAllowed = useApp((s) => aiAvailable(s.platform));
   const dark = THEMES.find((t) => t.id === theme)?.dark ?? true;
   useApp((s) => s.historyTick);
   const session = useApp((s) => s.session);
