@@ -477,14 +477,33 @@ export async function openVersionAsCopy(item: VersionItem) {
 
 /* ───────────────────────────── Autosave ───────────────────────────── */
 
-const AUTOSAVE_KEY = "whittle.autosave.v1";
+/** One recovery copy per design (so two tabs or two designs don't overwrite each other). */
+const AUTOSAVE_PREFIX = "whittle.autosave.v1";
+const autosaveKey = (docId?: string) => `${AUTOSAVE_PREFIX}:${docId ?? "design"}`;
+const WEEK_MS = 7 * 24 * 3600 * 1000;
 
+function autosaveKeys(): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && (k === AUTOSAVE_PREFIX || k.startsWith(AUTOSAVE_PREFIX + ":"))) keys.push(k);
+  }
+  return keys;
+}
+
+/** The most recent recovery copy of any design. */
 export function readAutosave(): { doc: WhittleDocument; fileName: string | null; at: string } | null {
   try {
-    const raw = localStorage.getItem(AUTOSAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    return { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at };
+    let best: { doc: WhittleDocument; fileName: string | null; at: string } | null = null;
+    for (const k of autosaveKeys()) {
+      try {
+        const data = JSON.parse(localStorage.getItem(k) ?? "");
+        if (!best || String(data.at) > best.at) best = { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at };
+      } catch {
+        /* a damaged copy is skipped */
+      }
+    }
+    return best;
   } catch {
     return null;
   }
@@ -492,7 +511,7 @@ export function readAutosave(): { doc: WhittleDocument; fileName: string | null;
 
 function clearAutosave() {
   try {
-    localStorage.removeItem(AUTOSAVE_KEY);
+    localStorage.removeItem(autosaveKey(useApp.getState().doc.id));
   } catch {
     /* storage may be unavailable */
   }
@@ -511,7 +530,16 @@ export function startAutosave() {
       const toSave = session ? session.base : doc;
       if (toSave.features.length === 0) return;
       try {
-        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ doc: toSave, fileName, at: new Date().toISOString() }));
+        localStorage.setItem(autosaveKey(toSave.id), JSON.stringify({ doc: toSave, fileName, at: new Date().toISOString() }));
+        // Copies of other designs go after a week, so they don't fill the browser's storage.
+        for (const k of autosaveKeys()) {
+          if (k === autosaveKey(toSave.id)) continue;
+          try {
+            if (Date.now() - Date.parse(JSON.parse(localStorage.getItem(k) ?? "").at) > WEEK_MS) localStorage.removeItem(k);
+          } catch {
+            localStorage.removeItem(k);
+          }
+        }
       } catch {
         if (!warned) {
           warned = true;
