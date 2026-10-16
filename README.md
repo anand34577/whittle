@@ -10,8 +10,9 @@ tells you the next step, every value accepts formulas, and errors suggest a fix.
 with you: parameters, a full feature timeline, persistent references and a version history for every
 design.
 
-> Status: **0.2, early preview.** Part modelling works end to end. Assemblies, 2D drawings and sheet
-> metal are on the [roadmap](PLAN.md#10-roadmap).
+> Status: **0.7, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
+> export work end to end. Full assemblies (mates, bills of materials), sheet metal and CAM are on the
+> [roadmap](PLAN.md#10-roadmap).
 
 ## Install
 

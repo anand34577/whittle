@@ -2,7 +2,7 @@
  * The .whittle file format: a ZIP container (like 3MF / OPC) so it is
  * inspectable and robust.
  *
- *   manifest.json   format + app version, units, checksum of document.json
+ *   manifest.json   format, schema and app version, units, save time (no checksum: damage shows up when document.json is read)
  *   document.json   the source of truth (parameters + feature timeline)
  *   thumbnail.png   optional preview
  */
