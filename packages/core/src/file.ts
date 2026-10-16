@@ -13,7 +13,7 @@ import { uid } from "./factory";
 
 export const FILE_EXTENSION = ".whittle";
 export const MIME_TYPE = "application/vnd.whittle+zip";
-export const APP_VERSION = "0.7.0";
+export const APP_VERSION = "0.8.0";
 
 interface Manifest {
   format: "whittle";

@@ -1,7 +1,7 @@
 {
   "name": "whittle",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Whittle — open-source parametric 3D CAD for makers, 3D printing and engineers.",
   "license": "MPL-2.0",
   "type": "module",
