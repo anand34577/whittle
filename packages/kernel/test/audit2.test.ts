@@ -117,3 +117,31 @@ describe("validity check", () => {
     expect(isValidShape(makeBaseBox(10, 10, 10))).toBe(true);
   });
 });
+
+describe("sketches with many shapes", () => {
+  const plate = (n: number, spacing: number, r: number) => {
+    const doc = newDocument();
+    const sk = makeSketch(doc, { kind: "origin", plane: "XY", offset: "0" }) as SketchFeature;
+    sk.entities.push({ id: uid(), type: "rect", x: "0", y: "0", w: String(25 * spacing), h: String(25 * spacing), anchor: "corner" });
+    for (let i = 0; i < n; i++) sk.entities.push({ id: uid(), type: "circle", cx: String((i % 20) * spacing + spacing), cy: String(Math.floor(i / 20) * spacing + spacing), r: String(r) });
+    const ex = makeExtrude(doc, sk.id) as ExtrudeFeature;
+    ex.distance = "5";
+    doc.features.push(sk, ex);
+    doc.bodies[ex.id] = { name: "P", color: "#ccc", visible: true };
+    return doc;
+  };
+
+  it("200 separate holes build in seconds with the right volume", () => {
+    const t = Date.now();
+    const r = new Builder().regen(plate(200, 12, 4), "final");
+    expect(r.status.map((x) => x.state)).toEqual(["ok", "ok"]);
+    expect(r.bodies[0]!.volume).toBeCloseTo((300 * 300 - 200 * Math.PI * 16) * 5, -1);
+    expect(Date.now() - t).toBeLessThan(10000);
+  });
+
+  it("overlapping holes still merge into one", () => {
+    const r = new Builder().regen(plate(40, 6, 4), "final"); // radius 4 at spacing 6: neighbours overlap
+    expect(r.status.map((x) => x.state)).toEqual(["ok", "ok"]);
+    expect(r.bodies[0]!.volume).toBeLessThan((150 * 150 - 40 * Math.PI * 16 * 0.5) * 5);
+  });
+});

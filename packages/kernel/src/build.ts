@@ -36,7 +36,10 @@ import {
   thickenPath,
 } from "@whittle/core";
 import {
-  type Drawing,
+  Blueprint,
+  CompoundBlueprint,
+  Drawing,
+  Blueprints,
   type Edge,
   type Face,
   Plane,
@@ -257,6 +260,84 @@ function touchCount(hole: [number, number][], outer: [number, number][], tol: nu
 /** Warning for the last built sketch, if any (holes that would split it). */
 let sketchWarning: string | undefined;
 
+/** Groups of shape numbers whose (slightly grown) bounding boxes chain together. */
+function clusters(outlines: [number, number][][]): number[][] {
+  const eps = 1e-3;
+  const boxes = outlines.map((pts) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of pts) {
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
+    return [x0 - eps, y0 - eps, x1 + eps, y1 + eps] as [number, number, number, number];
+  });
+  const parent = boxes.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i]!)));
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!, b = boxes[j]!;
+      if (a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]) parent[find(i)] = find(j);
+    }
+  }
+  const groups = new Map<number, number[]>();
+  boxes.forEach((_, i) => {
+    const g = groups.get(find(i));
+    if (g) g.push(i);
+    else groups.set(find(i), [i]);
+  });
+  return [...groups.values()];
+}
+
+/** Several drawings that don't touch, as one drawing (no boolean work). */
+function joinDrawings(parts: Drawing[]): Drawing {
+  if (parts.length === 1) return parts[0]!;
+  const blueprints = parts.flatMap((d) => {
+    const inner = (d as unknown as { innerShape: unknown }).innerShape;
+    return inner instanceof Blueprints ? inner.blueprints : [inner as Blueprint | CompoundBlueprint];
+  });
+  return new Drawing(new Blueprints(blueprints));
+}
+
+/** The fused outlines of one cluster with its holes (and gear bores) cut out; null when the cluster has no outline. */
+function clusterDrawing(resolved: ResolvedEntity[], outlines: [number, number][][], isHole: boolean[], idx: number[]): Drawing | null {
+  let result = null as Drawing | null;
+  for (const i of idx) {
+    if (isHole[i]) continue;
+    const d = entityDrawing(resolved[i]!);
+    result = result ? result.fuse(d) : d;
+  }
+  if (!result) return null;
+  const holes = idx.filter((i) => isHole[i]);
+  for (const i of holes) {
+    const container = idx.find((j) => j !== i && !isHole[j] && polygonInside(outlines[i]!, outlines[j]!));
+    if (container !== undefined && touchCount(outlines[i]!, outlines[container]!, 1e-3) >= 2) {
+      sketchWarning = "A hole touches its outline in two places, which would split the shape in two. Make the hole slightly smaller (or the outline larger).";
+    }
+  }
+  // The common case of one outline with many separate holes inside it is built as one face with inner loops;
+  // anything more tangled (overlapping or touching holes, several outlines) is cut hole by hole.
+  const outer = (result as unknown as { innerShape: unknown }).innerShape;
+  const outers = idx.filter((i) => !isHole[i]);
+  const separate =
+    outers.length === 1 &&
+    outer instanceof Blueprint &&
+    holes.length > 1 &&
+    clusters(holes.map((i) => outlines[i]!)).length === holes.length &&
+    holes.every((i) => polygonInside(outlines[i]!, outlines[outers[0]!]!) && touchCount(outlines[i]!, outlines[outers[0]!]!, 1e-3) === 0);
+  if (separate) {
+    const loops = holes.map((i) => (entityDrawing(resolved[i]!) as unknown as { innerShape: unknown }).innerShape);
+    if (loops.every((l) => l instanceof Blueprint)) result = new Drawing(new CompoundBlueprint([outer, ...(loops as Blueprint[])]));
+    else for (const i of holes) result = result.cut(entityDrawing(resolved[i]!));
+  } else {
+    for (const i of holes) result = result.cut(entityDrawing(resolved[i]!));
+  }
+  // Gear bores are always holes in their own gear.
+  for (const i of idx) {
+    const r = resolved[i]!;
+    if (r.type === "gear" && r.bore > 0) result = result.cut(drawCircle(r.bore / 2).translate(r.cx, r.cy));
+  }
+  return result;
+}
+
 /** Build the 2D profile of a sketch: outer shapes fused, inner shapes become holes. */
 export function sketchDrawing(f: SketchFeature, ev: Evaluator): Drawing | null {
   sketchWarning = undefined;
@@ -283,26 +364,12 @@ export function sketchDrawing(f: SketchFeature, ev: Evaluator): Drawing | null {
     if (r.mode === "add") return false;
     return resolved.some((_, j) => j !== i && polygonInside(outlines[i]!, outlines[j]!) && !polygonInside(outlines[j]!, outlines[i]!));
   });
-  let result = null as Drawing | null;
-  resolved.forEach((r, i) => {
-    if (isHole[i]) return;
-    const d = entityDrawing(r);
-    result = result ? result.fuse(d) : d;
-  });
-  if (!result) throw new FeatureError("Every shape in this sketch is a hole. Add an outer shape.");
-  resolved.forEach((r, i) => {
-    if (!isHole[i]) return;
-    const container = resolved.findIndex((_, j) => j !== i && !isHole[j] && polygonInside(outlines[i]!, outlines[j]!));
-    if (container >= 0 && touchCount(outlines[i]!, outlines[container]!, 1e-3) >= 2) {
-      sketchWarning = "A hole touches its outline in two places, which would split the shape in two. Make the hole slightly smaller (or the outline larger).";
-    }
-    result = result!.cut(entityDrawing(r));
-  });
-  // Gear bores are always holes in their own gear.
-  for (const r of resolved) {
-    if (r.type === "gear" && r.bore > 0) result = result!.cut(drawCircle(r.bore / 2).translate(r.cx, r.cy));
-  }
-  return result;
+  if (!isHole.includes(false)) throw new FeatureError("Every shape in this sketch is a hole. Add an outer shape.");
+  // Shapes whose bounding boxes don't meet can't affect each other, so each cluster is combined on its own (the
+  // boolean cost grows steeply with the number of shapes in one go) and the clusters are then placed side by side.
+  const parts = clusters(outlines).map((idx) => clusterDrawing(resolved, outlines, isHole, idx)).filter((d): d is Drawing => d !== null);
+  if (parts.length === 1) return parts[0]!;
+  return joinDrawings(parts);
 }
 
 function bboxOverlap(a: Shape3D, b: Shape3D): boolean {
