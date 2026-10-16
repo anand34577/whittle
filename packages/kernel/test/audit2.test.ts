@@ -159,3 +159,25 @@ describe("zero distance", () => {
     expect(() => solveSketch(sk, createEvaluator([], "mm"))).toThrow(/zero/);
   });
 });
+
+describe("errors that follow a failed step", () => {
+  it("name the step that failed", () => {
+    const doc = newDocument();
+    const s1 = makeSketch(doc, { kind: "origin", plane: "XY", offset: "0" }) as SketchFeature;
+    s1.entities.push({ id: uid(), type: "rect", x: "0", y: "0", w: "40", h: "40", anchor: "center" });
+    const e1 = makeExtrude(doc, s1.id) as ExtrudeFeature;
+    e1.distance = "10";
+    doc.features.push(s1, e1);
+    doc.bodies[e1.id] = { name: "Base", color: "#ccc", visible: true };
+    const b = new Builder();
+    const body = b.regen(doc, "final").bodies[0]!;
+    const hole = makeHole(doc) as HoleFeature;
+    hole.face = { bodyId: body.id, ...body.faces.find((f) => f.normal[2] > 0.99)! };
+    hole.points = [["0", "0"]];
+    doc.features.push(hole);
+    e1.distance = "0"; // the extrude now fails, and the hole has no body
+    const st = b.regen(doc, "final").status;
+    expect(st[1]!.state).toBe("error");
+    expect(st[2]!.message).toContain(`"${e1.name}" failed`);
+  });
+});

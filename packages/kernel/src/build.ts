@@ -762,7 +762,14 @@ export class Builder {
         snap = this.step(f, prev, ev, key);
       }
       nextCache.push(snap);
-      statuses.push(snap.status);
+      // A step that lost its body because an earlier step failed should say which one.
+      const failedBefore = statuses.findLast((x) => x.state === "error");
+      const failedName = failedBefore && doc.features.find((x) => x.id === failedBefore.id)?.name;
+      statuses.push(
+        snap.status.state === "error" && failedName && snap.status.message?.startsWith("The body this feature was applied to no longer exists")
+          ? { ...snap.status, message: `${snap.status.message} It is probably because "${failedName}" failed above.` }
+          : snap.status,
+      );
       prev = snap;
     }
     for (let i = end; i < doc.features.length; i++) {
