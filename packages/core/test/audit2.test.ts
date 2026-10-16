@@ -65,3 +65,13 @@ describe("renaming a parameter", () => {
     expect((doc.features[5] as unknown as { axis: string }).axis).toBe("z");
   });
 });
+
+describe("opening damaged files", () => {
+  it("refuses a feature list that holds something other than features", () => {
+    expect(() => migrate({ schema: SCHEMA_VERSION, features: [null] })).toThrow(FileFormatError);
+    expect(() => migrate({ schema: SCHEMA_VERSION, features: [5] })).toThrow(FileFormatError);
+    expect(() => migrate({ schema: SCHEMA_VERSION, features: [{ type: "sketch" }] })).toThrow(FileFormatError);
+    expect(() => migrate({ schema: SCHEMA_VERSION, parameters: [null] })).toThrow(FileFormatError);
+    expect(migrate({ schema: SCHEMA_VERSION, features: [{ id: "a", type: "extrude" }] }).features).toHaveLength(1);
+  });
+});

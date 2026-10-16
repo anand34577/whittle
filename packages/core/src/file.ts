@@ -96,6 +96,14 @@ export function migrate(input: unknown): WhittleDocument {
   if (doc.bodies !== undefined && (doc.bodies === null || typeof doc.bodies !== "object" || Array.isArray(doc.bodies))) {
     throw new FileFormatError("The document's body list is damaged.");
   }
+  // The lists may exist but hold junk (null, numbers, half-written entries): the app would fail to draw them.
+  const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+  if (Array.isArray(doc.features) && !doc.features.every((f) => isRecord(f) && typeof f.id === "string" && typeof f.type === "string")) {
+    throw new FileFormatError("The document's feature list is damaged.");
+  }
+  if (Array.isArray(doc.parameters) && !doc.parameters.every((p) => isRecord(p) && typeof p.name === "string" && (typeof p.expr === "string" || typeof p.expr === "number"))) {
+    throw new FileFormatError("The document's parameter list is damaged.");
+  }
   const d = doc as unknown as WhittleDocument;
   d.schema = SCHEMA_VERSION;
   d.parameters ??= [];
