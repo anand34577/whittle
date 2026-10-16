@@ -100,6 +100,10 @@ server {
 }
 ```
 
+Per-person data (preferences, AI assistant settings including provider keys, and crash-recovery drafts) is
+kept in the database (`user_data` table), not in the browser, and is included in `whittle backup`. Provider
+keys are stored as plain text like the SMTP password, so protect the database and backups accordingly.
+
 ## Settings
 
 All settings are environment variables, kept in `/etc/whittle/whittle.env` by the installer. Restart
@@ -137,8 +141,9 @@ starting values.
 
 - **`local`**: usernames and passwords stored on the server (Argon2id). The first account becomes the
   administrator; after that, administrators add people (or set `WHITTLE_SIGNUP=true`).
-- **`oidc`**: single sign-on only. Accounts are created the first time someone signs in (turn that off
-  with `WHITTLE_OIDC_AUTO_CREATE=false`). The first account becomes the administrator.
+- **`oidc`**: single sign-on only. Accounts are **not** created automatically: an administrator adds each
+  person (see below), or you set `WHITTLE_OIDC_AUTO_CREATE=true` to let anyone who can sign in at the
+  provider create an account. The very first sign-in on a new server always creates the administrator.
 - **`local,oidc`**: both buttons on the sign-in screen.
 - **`none`**: no sign-in. Everyone who can reach the server shares one workspace. Use it only on a
   trusted network (a home LAN, behind a VPN, or behind a proxy that does its own authentication).
@@ -167,8 +172,8 @@ Issuer examples: Authentik `https://auth.example.com/application/o/<slug>/` · K
 `https://kc.example.com/realms/<realm>` · Authelia `https://auth.example.com` · Google
 `https://accounts.google.com` · Microsoft Entra `https://login.microsoftonline.com/<tenant>/v2.0`.
 
-To invite people one by one instead of creating accounts automatically, turn off **Create accounts on
-first sign-in** (or set `WHITTLE_OIDC_AUTO_CREATE=false`) and add each person in **Administration →
+Accounts are invited one by one by default (**Create accounts on first sign-in** is off; turn it on, or
+set `WHITTLE_OIDC_AUTO_CREATE=true`, to open it up). Add each person in **Administration →
 People** with the email address they sign in with and no password. Their first single sign-on (with a
 provider-verified email) is linked to that account.
 

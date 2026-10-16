@@ -536,7 +536,12 @@ function RecentLibrary() {
 }
 
 export function Welcome() {
-  const recovered = useMemo(() => readAutosave(), []);
+  const [recovered, setRecovered] = useState<Awaited<ReturnType<typeof readAutosave>>>(null);
+  const who = useApp((s) => (s.platform.kind === "server" ? (s.platform.user?.id ?? "-") : s.platform.kind));
+  const ready = useApp((s) => s.platformReady);
+  useEffect(() => {
+    if (ready) void readAutosave().then(setRecovered);
+  }, [ready, who]);
   const platform = useApp((s) => s.platform.kind);
   const profile = useApp((s) => s.prefs.profile);
   const [asked, setAsked] = useState(false);

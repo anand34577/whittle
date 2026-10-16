@@ -91,6 +91,8 @@ export const NAV_PRESETS: { id: NavPreset; label: string; blurb: string }[] = [
   { id: "trackpad", label: "Trackpad", blurb: "Left-drag orbits, Shift + left-drag pans, Ctrl + left-drag zooms." },
 ];
 
+import { writeStored } from "./stored";
+
 const KEY = "whittle.prefs";
 
 export const DEFAULT_PREFS: Prefs = {
@@ -110,6 +112,7 @@ export const DEFAULT_PREFS: Prefs = {
   smartSketch: null,
 };
 
+/** The first look before the person's saved preferences arrive (from this device when there is no server). */
 export function loadPrefs(): Prefs {
   let p: Partial<Prefs> = {};
   try {
@@ -120,6 +123,11 @@ export function loadPrefs(): Prefs {
   } catch {
     /* storage unavailable or damaged: defaults */
   }
+  return normalizePrefs(p);
+}
+
+/** Fill in defaults and clamp values of preferences read from anywhere. */
+export function normalizePrefs(p: Partial<Prefs>): Prefs {
   const out = { ...DEFAULT_PREFS, ...p };
   if (!THEMES.some((t) => t.id === out.theme) && out.theme !== "system") out.theme = DEFAULT_PREFS.theme;
   out.scale = Math.min(1.3, Math.max(0.85, Number(out.scale) || 1));
@@ -127,11 +135,8 @@ export function loadPrefs(): Prefs {
 }
 
 export function savePrefs(p: Prefs) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(p));
-  } catch {
-    /* not persisted, still applied */
-  }
+  // On a server these go to the database; without one, to this device. Either way they are already applied.
+  void writeStored("prefs", p, 500).catch(() => {});
 }
 
 /** Whether new shapes become constraint-ready geometry: the person's choice, else on for engineers and designers. */

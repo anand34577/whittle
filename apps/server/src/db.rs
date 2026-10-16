@@ -69,6 +69,15 @@ const MIGRATIONS: &[&[&str]] = &[&[
         detail TEXT
     )",
     "CREATE INDEX IF NOT EXISTS audit_at ON audit_log (at)",
+], &[
+    // v3: per-person data kept on the server (preferences, AI assistant settings, recovery drafts).
+    "CREATE TABLE IF NOT EXISTS user_data (
+        user_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        PRIMARY KEY (user_id, key)
+    )",
 ]];
 
 pub async fn connect(url: &str) -> Result<Db, sqlx::Error> {

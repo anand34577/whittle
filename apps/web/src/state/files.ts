@@ -20,6 +20,7 @@ import {
 import type { ExportFormat } from "@whittle/kernel";
 import { importFile } from "./actions";
 import { placeImage } from "./refImage";
+import { deleteStored, listStored, readStored, writeStored } from "./stored";
 import { getKernel } from "./kernel";
 import { addLocalVersion, listLocalVersions } from "./localHistory";
 import { ApiError, api, apiJson, ask, invoke, tauri } from "./platform";
@@ -478,43 +479,29 @@ export async function openVersionAsCopy(item: VersionItem) {
 /* ───────────────────────────── Autosave ───────────────────────────── */
 
 /** One recovery copy per design (so two tabs or two designs don't overwrite each other). */
-const AUTOSAVE_PREFIX = "whittle.autosave.v1";
-const autosaveKey = (docId?: string) => `${AUTOSAVE_PREFIX}:${docId ?? "design"}`;
+const draftKey = (docId?: string) => `draft:${docId ?? "design"}`;
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
-function autosaveKeys(): string[] {
-  const keys: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && (k === AUTOSAVE_PREFIX || k.startsWith(AUTOSAVE_PREFIX + ":"))) keys.push(k);
-  }
-  return keys;
+interface Draft {
+  doc: WhittleDocument;
+  fileName: string | null;
+  at: string;
 }
 
 /** The most recent recovery copy of any design. */
-export function readAutosave(): { doc: WhittleDocument; fileName: string | null; at: string } | null {
+export async function readAutosave(): Promise<Draft | null> {
   try {
-    let best: { doc: WhittleDocument; fileName: string | null; at: string } | null = null;
-    for (const k of autosaveKeys()) {
-      try {
-        const data = JSON.parse(localStorage.getItem(k) ?? "");
-        if (!best || String(data.at) > best.at) best = { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at };
-      } catch {
-        /* a damaged copy is skipped */
-      }
-    }
-    return best;
+    const newest = (await listStored("draft:"))[0];
+    if (!newest) return null;
+    const data = await readStored<Draft>(newest.key);
+    return data ? { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at } : null;
   } catch {
     return null;
   }
 }
 
 function clearAutosave() {
-  try {
-    localStorage.removeItem(autosaveKey(useApp.getState().doc.id));
-  } catch {
-    /* storage may be unavailable */
-  }
+  void deleteStored(draftKey(useApp.getState().doc.id));
 }
 
 export function startAutosave() {
@@ -529,23 +516,19 @@ export function startAutosave() {
       const { doc, fileName, session } = useApp.getState();
       const toSave = session ? session.base : doc;
       if (toSave.features.length === 0) return;
-      try {
-        localStorage.setItem(autosaveKey(toSave.id), JSON.stringify({ doc: toSave, fileName, at: new Date().toISOString() }));
-        // Copies of other designs go after a week, so they don't fill the browser's storage.
-        for (const k of autosaveKeys()) {
-          if (k === autosaveKey(toSave.id)) continue;
-          try {
-            if (Date.now() - Date.parse(JSON.parse(localStorage.getItem(k) ?? "").at) > WEEK_MS) localStorage.removeItem(k);
-          } catch {
-            localStorage.removeItem(k);
+      writeStored(draftKey(toSave.id), { doc: toSave, fileName, at: new Date().toISOString() })
+        .then(async () => {
+          // Copies of other designs go after a week, so they don't pile up.
+          for (const e of await listStored("draft:")) {
+            if (e.key !== draftKey(toSave.id) && e.updatedAt && Date.now() - e.updatedAt > WEEK_MS) void deleteStored(e.key);
           }
-        }
-      } catch {
-        if (!warned) {
-          warned = true;
-          toast("warn", "This design is too large for crash recovery. Save it regularly.");
-        }
-      }
+        })
+        .catch(() => {
+          if (!warned) {
+            warned = true;
+            toast("warn", "This design is too large for crash recovery. Save it regularly.");
+          }
+        });
     }, 800);
   });
   window.addEventListener("beforeunload", (e) => {

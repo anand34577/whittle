@@ -110,7 +110,7 @@ impl Config {
                     .filter(|s| *s != "openid")
                     .map(str::to_owned)
                     .collect(),
-                auto_create: env_bool("WHITTLE_OIDC_AUTO_CREATE", true)?,
+                auto_create: env_bool("WHITTLE_OIDC_AUTO_CREATE", false)?,
             })
         } else {
             None

@@ -8,6 +8,7 @@ import { confirmDialog, promptDialog } from "../state/dialogs";
 import { toast, useApp } from "../state/store";
 import { NumberField, Popover, Select, Switch, Tabs, TextField } from "./controls";
 import { Modal, ago } from "./Dialogs";
+import { forgetUserSettings, loadUserSettings } from "../state/userSettings";
 import { Icon, type IconName } from "./icons";
 
 /** Update who is signed in, and re-read the server's settings (sign-up closes after the first account). */
@@ -21,6 +22,8 @@ async function setUser(user: ServerUser | null) {
     config = { ...config, needsSetup: false, signup: false };
   }
   useApp.setState({ platform: { ...p, user, config } });
+  if (user) void loadUserSettings();
+  else forgetUserSettings();
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));

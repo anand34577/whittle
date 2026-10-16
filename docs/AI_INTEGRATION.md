@@ -74,8 +74,9 @@ await whittle.api.run("constrain_sketch", {
 | **Claude** (Anthropic) | Official Anthropic TypeScript SDK, loaded only when used | Default model `claude-opus-5-5`; server-side refusal fallbacks enabled on models that support them. |
 | **OpenAI-compatible** | `POST {baseUrl}/chat/completions` with `tools` | OpenAI, **Ollama** (`http://localhost:11434/v1`), **LM Studio**, OpenRouter, vLLM, LocalAI, company gateways. |
 
-People add providers in **Settings → AI assistant**. Keys are kept in that browser only and requests go
-directly from the browser to the chosen provider. Local servers need to allow the app's origin (Ollama:
+People add providers in **Settings → AI assistant**. On a Whittle server the settings and keys are kept in
+your account in the server's database (nothing is stored in the browser); without a server they stay on
+that device. Requests go directly from the browser to the chosen provider. Local servers need to allow the app's origin (Ollama:
 `OLLAMA_ORIGINS`; LM Studio: enable CORS). On a self-hosted server, `WHITTLE_AI=false` hides the
 assistant and keeps the strict browser security policy.
 The desktop app does not offer the assistant: its security policy blocks connections to outside

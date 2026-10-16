@@ -48,6 +48,7 @@ const TABLES: &[(&str, &[(&str, Ty)])] = &[
     ("designs", &[("id", Text), ("owner_id", Text), ("name", Text), ("size", Int), ("head", Int), ("has_thumbnail", Int), ("created_at", Int), ("updated_at", Int)]),
     ("design_versions", &[("design_id", Text), ("version", Int), ("size", Int), ("created_at", Int), ("author_id", OptText)]),
     ("settings", &[("key", Text), ("value", Text)]),
+    ("user_data", &[("user_id", Text), ("key", Text), ("value", Text), ("updated_at", Int)]),
     ("audit_log", &[("id", Text), ("at", Int), ("actor", OptText), ("action", Text), ("target", OptText), ("detail", OptText)]),
 ];
 
@@ -80,7 +81,7 @@ async fn dump(pool: &db::Db) -> Result<Dump, String> {
 async fn load(pool: &db::Db, data: &Dump, wipe: bool) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     if wipe {
-        for t in ["sessions", "password_resets", "audit_log", "settings", "design_versions", "designs", "users"] {
+        for t in ["sessions", "password_resets", "audit_log", "settings", "user_data", "design_versions", "designs", "users"] {
             sqlx::query(&format!("DELETE FROM {t}")).execute(&mut *tx).await.map_err(|e| format!("clearing {t}: {e}"))?;
         }
     }

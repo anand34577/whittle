@@ -11,6 +11,7 @@ pub mod mail;
 pub mod oidc;
 pub mod settings;
 pub mod tools;
+pub mod userdata;
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
@@ -205,6 +206,8 @@ pub fn router(state: Shared) -> Router {
         .route("/admin/users/{id}/unlink-sso", post(admin::unlink_sso))
         .route("/admin/users/{id}/signout", post(admin::revoke_sessions))
         .route("/admin/users/{id}/send-reset", post(admin::send_reset))
+        .route("/me/data", get(userdata::list))
+        .route("/me/data/{key}", get(userdata::get).put(userdata::put).delete(userdata::remove))
         .route("/designs", get(designs::list).post(designs::create))
         .route("/designs/{id}", get(designs::download).put(designs::save).delete(designs::remove))
         .route("/designs/{id}/thumbnail", get(designs::thumbnail))

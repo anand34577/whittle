@@ -176,7 +176,7 @@ function About() {
         <dt>Your data</dt>
         <dd>{platform.kind === "server" ? "Stored on your server" : platform.kind === "desktop" ? "Files on this computer" : "Files you save, plus versions in this browser"}</dd>
         <dt>Settings</dt>
-        <dd>Kept on this device</dd>
+        <dd>{platform.kind === "server" ? "Kept in your account on the server" : "Kept on this device"}</dd>
         <dt>License</dt>
         <dd>MPL-2.0</dd>
       </dl>
