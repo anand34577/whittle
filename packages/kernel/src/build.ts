@@ -483,8 +483,6 @@ export class Builder {
       if (f.type !== "import") continue;
       const key = importKey(f);
       if (this.imports.has(key) || this.importErrors.has(key)) continue;
-      const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes]);
       try {
         if (f.format === "whittle") {
           const sub = deserializeDocument(bytes);
@@ -507,6 +505,15 @@ export class Builder {
     const bodies: BodyResult[] = [];
     for (const [id, shape] of prev.bodies) {
       try {
+        // Decoding is inside the try: a damaged file fails its own feature, not every rebuild of the design.
+        let bin: string;
+        try {
+          bin = atob(f.data);
+        } catch {
+          throw new Error("The file embedded in this design is damaged.");
+        }
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes]);
         bodies.push(this.mesh(id, shape, quality));
       } catch (e) {
         statuses.push({ id, state: "error", message: "This body couldn't be displayed: " + String(e) });
