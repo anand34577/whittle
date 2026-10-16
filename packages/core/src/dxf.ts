@@ -28,6 +28,7 @@ const num = (e: Pair[], code: number, d = 0): number => {
   const p = e.find((x) => x[0] === code);
   return p ? Number.parseFloat(p[1]) : d;
 };
+const fin = (...v: number[]) => v.every(Number.isFinite);
 const all = (e: Pair[], code: number): number[] => e.filter((x) => x[0] === code).map((x) => Number.parseFloat(x[1]));
 
 function arcPts(c: Vec2, r: number, a0: number, a1: number, step = Math.PI / 24): Vec2[] {
@@ -88,19 +89,39 @@ export function parseDxf(text: string): DxfResult {
   }
   for (let i = 0; i < ents.length; i++) {
     const { type, data: d } = ents[i]!;
+    // Numbers that can't be read (or a circle with no size) would reach the sketch as NaN: leave such entities out and say so.
+    const bad = () => skipped.add(`${type} (unreadable numbers)`);
     switch (type) {
-      case "LINE":
-        segs.push([[num(d, 10), num(d, 20)], [num(d, 11), num(d, 21)]]);
+      case "LINE": {
+        const a: Vec2 = [num(d, 10), num(d, 20)];
+        const b: Vec2 = [num(d, 11), num(d, 21)];
+        if (fin(...a, ...b)) segs.push([a, b]);
+        else bad();
         break;
-      case "CIRCLE":
-        circles.push({ c: [num(d, 10), num(d, 20)], r: num(d, 40) });
+      }
+      case "CIRCLE": {
+        const c: Vec2 = [num(d, 10), num(d, 20)];
+        const r = num(d, 40);
+        if (fin(...c, r) && r > 0) circles.push({ c, r });
+        else bad();
         break;
-      case "ARC":
-        addPath(arcPts([num(d, 10), num(d, 20)], num(d, 40), (num(d, 50) * Math.PI) / 180, (num(d, 51) * Math.PI) / 180), false);
+      }
+      case "ARC": {
+        const c: Vec2 = [num(d, 10), num(d, 20)];
+        const r = num(d, 40);
+        const a0 = num(d, 50);
+        const a1 = num(d, 51);
+        if (fin(...c, r, a0, a1) && r > 0) addPath(arcPts(c, r, (a0 * Math.PI) / 180, (a1 * Math.PI) / 180), false);
+        else bad();
         break;
+      }
       case "ELLIPSE": {
         const c: Vec2 = [num(d, 10), num(d, 20)];
         const m: Vec2 = [num(d, 11), num(d, 21)];
+        if (!fin(...c, ...m, num(d, 40, 1), num(d, 41, 0), num(d, 42, Math.PI * 2))) {
+          bad();
+          break;
+        }
         const a = Math.hypot(m[0], m[1]);
         const b = a * num(d, 40, 1);
         const rot = Math.atan2(m[1], m[0]);
@@ -126,6 +147,10 @@ export function parseDxf(text: string): DxfResult {
           else if (code === 42 && verts.length) verts[verts.length - 1]!.bulge = Number.parseFloat(value);
         }
         const closed = (num(d, 70) & 1) === 1;
+        if (verts.some((v) => !fin(...v.p, v.bulge))) {
+          bad();
+          break;
+        }
         const pts = bulgePoly(verts, closed);
         addPath(pts, closed);
         break;
@@ -139,6 +164,10 @@ export function parseDxf(text: string): DxfResult {
           j++;
         }
         i = j - 1;
+        if (verts.some((v) => !fin(...v.p, v.bulge))) {
+          bad();
+          break;
+        }
         addPath(bulgePoly(verts, closed), closed);
         break;
       }
@@ -148,8 +177,11 @@ export function parseDxf(text: string): DxfResult {
         const ctlX = all(d, 10);
         const ctlY = all(d, 20);
         const closed = (num(d, 70) & 1) === 1;
-        if (fitX.length >= 2) addPath(fitX.map((x, k) => [x, fitY[k] ?? 0] as Vec2), closed);
-        else if (ctlX.length >= 3) addPath(bsplineSamples(ctlX.map((x, k) => [x, ctlY[k] ?? 0] as Vec2), false, 12), false);
+        const fit = fitX.map((x, k) => [x, fitY[k] ?? 0] as Vec2);
+        const ctl = ctlX.map((x, k) => [x, ctlY[k] ?? 0] as Vec2);
+        if ([...fit, ...ctl].some((p) => !fin(...p))) bad();
+        else if (fitX.length >= 2) addPath(fit, closed);
+        else if (ctlX.length >= 3) addPath(bsplineSamples(ctl, false, 12), false);
         break;
       }
       case "VERTEX":

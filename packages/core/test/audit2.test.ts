@@ -75,3 +75,13 @@ describe("opening damaged files", () => {
     expect(migrate({ schema: SCHEMA_VERSION, features: [{ id: "a", type: "extrude" }] }).features).toHaveLength(1);
   });
 });
+
+describe("DXF import", () => {
+  it("skips entities whose numbers can't be read instead of passing NaN on", () => {
+    const dxf = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\nabc\n20\n0\n11\n5\n21\n5\n0\nCIRCLE\n10\n1\n20\n1\n40\nxyz\n0\nCIRCLE\n10\n1\n20\n1\n40\n3\n0\nLINE\n10\n0\n20\n0\n11\n9\n21\n0\n0\nENDSEC\n0\nEOF\n";
+    const r = parseDxf(dxf);
+    expect(r.circles).toEqual([{ c: [1, 1], r: 3 }]);
+    expect(r.loops).toHaveLength(1);
+    expect(r.loops[0]!.pts).toEqual([[0, 0], [9, 0]]);
+  });
+});
