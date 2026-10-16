@@ -85,3 +85,13 @@ describe("DXF import", () => {
     expect(r.loops[0]!.pts).toEqual([[0, 0], [9, 0]]);
   });
 });
+
+describe("saving", () => {
+  it("stamps the save time into the file, not into every edit", () => {
+    const doc = newDocument("T");
+    doc.modifiedAt = "2000-01-01T00:00:00.000Z";
+    const back = deserializeDocument(serializeDocument(doc));
+    expect(Date.parse(back.modifiedAt)).toBeGreaterThan(Date.parse("2020-01-01"));
+    expect(doc.modifiedAt).toBe("2000-01-01T00:00:00.000Z");
+  });
+});

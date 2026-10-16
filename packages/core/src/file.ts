@@ -32,7 +32,8 @@ export function serializeDocument(doc: WhittleDocument, thumbnail?: Uint8Array):
   };
   const files: Record<string, Uint8Array> = {
     "manifest.json": strToU8(JSON.stringify(manifest, null, 2)),
-    "document.json": strToU8(JSON.stringify(doc, null, 2)),
+    // The save time is stamped here, not on every edit, so an edit that changes nothing doesn't count as a change.
+    "document.json": strToU8(JSON.stringify({ ...doc, modifiedAt: manifest.savedAt }, null, 2)),
   };
   if (thumbnail) files["thumbnail.png"] = thumbnail;
   return zipSync(files, { level: 6 });

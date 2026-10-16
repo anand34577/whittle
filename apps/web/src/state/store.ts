@@ -169,7 +169,6 @@ const get = useApp.getState;
 /* ───────────────────────────── Document edits ───────────────────────────── */
 
 function touch(d: Draft<WhittleDocument>) {
-  d.modifiedAt = new Date().toISOString();
   syncBodies(d);
 }
 
