@@ -29,6 +29,7 @@ import {
   planeOrigin,
   polygonInside,
   chainSegments,
+  crossesItself,
   polylinePath,
   splineBeziers,
   resolveEntity,
@@ -271,6 +272,12 @@ export function sketchDrawing(f: SketchFeature, ev: Evaluator): Drawing | null {
   }
   if (resolved.length === 0) return null;
   const outlines = resolved.map((r) => entityOutline(r, 48));
+  // A bow-tie outline would extrude into an invalid solid that the kernel doesn't flag, so refuse it here.
+  resolved.forEach((r, i) => {
+    if (r.type === "polyline" && !r.open && crossesItself(outlines[i]!)) {
+      throw new FeatureError("An outline in this sketch crosses itself. Move its points so no edges cross.");
+    }
+  });
   const isHole = resolved.map((r, i) => {
     if (r.mode === "subtract") return true;
     if (r.mode === "add") return false;

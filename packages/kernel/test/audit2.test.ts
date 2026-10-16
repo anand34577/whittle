@@ -27,3 +27,31 @@ describe("damaged imports", () => {
     expect(r.bodies).toHaveLength(1);
   });
 });
+
+describe("self-intersecting outlines", () => {
+  const bowTie = (): PolylineEntity => ({ id: uid(), type: "polyline", points: [["0", "0"], ["10", "10"], ["10", "0"], ["0", "10"]] });
+  const extrudeOf = (e: PolylineEntity) => {
+    const doc = newDocument();
+    const sk = makeSketch(doc, { kind: "origin", plane: "XY", offset: "0" }) as SketchFeature;
+    sk.entities.push(e);
+    const ex = makeExtrude(doc, sk.id) as ExtrudeFeature;
+    ex.distance = "10";
+    doc.features.push(sk, ex);
+    doc.bodies[ex.id] = { name: "B", color: "#ccc", visible: true };
+    return doc;
+  };
+
+  it("a bow-tie outline is an error, not an invalid solid reported as fine", () => {
+    const r = new Builder().regen(extrudeOf(bowTie()), "final");
+    expect(r.status[0]!.state).toBe("error");
+    expect(r.status[0]!.message).toMatch(/crosses itself/);
+    expect(r.bodies).toHaveLength(0);
+  });
+
+  it("outlines that only touch at a corner, and ordinary concave shapes, still build", () => {
+    const concave: PolylineEntity = { id: uid(), type: "polyline", points: [["0", "0"], ["20", "0"], ["20", "20"], ["10", "5"], ["0", "20"]] };
+    const r = new Builder().regen(extrudeOf(concave), "final");
+    expect(r.status.map((s) => s.state)).toEqual(["ok", "ok"]);
+    expect(r.bodies[0]!.volume).toBeGreaterThan(0);
+  });
+});
