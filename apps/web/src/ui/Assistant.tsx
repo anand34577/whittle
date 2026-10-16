@@ -6,7 +6,7 @@ import { uid } from "@whittle/core";
 import { useApp } from "../state/store";
 import { Select, TextField } from "./controls";
 import { Icon } from "./icons";
-import { openSettings } from "./Settings";
+import { openSettings } from "./settingsTab";
 
 const TOOL_LABELS: Record<string, string> = {
   get_design: "Read the design",

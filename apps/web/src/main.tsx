@@ -19,8 +19,16 @@ import { dimensionPick } from "./state/constraintOps";
 import { COMMANDS } from "./state/commands";
 import { handlePick } from "./state/actions";
 
-// Debugging, end-to-end tests and scripting: `await whittle.api.run("get_design", {})`.
-(window as unknown as { whittle: unknown }).whittle = { useApp, api: designApi, dimensionPick, commands: COMMANDS, handlePick };
+// Debugging, end-to-end tests and scripting: `await whittle.api.run("get_design", {})`. Off in normal use, so a
+// script injected into the page doesn't get the whole app handed to it; turn it on with
+// `localStorage.setItem("whittle.debug", "1")` and reload.
+let debug = import.meta.env.DEV;
+try {
+  debug ||= localStorage.getItem("whittle.debug") === "1";
+} catch {
+  /* storage may be unavailable */
+}
+if (debug) (window as unknown as { whittle: unknown }).whittle = { useApp, api: designApi, dimensionPick, commands: COMMANDS, handlePick };
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

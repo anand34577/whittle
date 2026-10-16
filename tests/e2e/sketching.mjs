@@ -66,6 +66,7 @@ const fillDialog = async (title, value) => {
 };
 
 await step("01-start", async () => {
+  await page.addInitScript(() => localStorage.setItem("whittle.debug", "1")); // the test hook is off unless asked for
   await page.goto(url);
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
   await page.getByRole("button", { name: /Engineer & professional/ }).click();

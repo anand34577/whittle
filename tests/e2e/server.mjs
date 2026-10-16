@@ -35,6 +35,7 @@ const waitBuilt = () =>
 const state = (fn) => page.evaluate(fn);
 
 await step("01-first-run-setup", async () => {
+  await page.addInitScript(() => localStorage.setItem("whittle.debug", "1")); // the test hook is off unless asked for
   await page.goto(url);
   await page.getByRole("dialog", { name: "Sign in to Whittle" }).waitFor();
   await page.getByText("Create the administrator account").waitFor();

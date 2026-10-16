@@ -207,14 +207,14 @@ Severity: **Critical** crash/data loss/corrupt geometry/security · **High** wro
 |---|---|---|---|---|---|
 | G-01 | High | `apps/web/src/main.tsx` | **No React error boundary.** Any exception while drawing unmounted the entire app: blank page, no way to save the open design. | Browser probe; `audit.mjs` step 10 timed out waiting for a recovery screen on the old build. | **Fixed** `a77e569` (`ErrorBoundary`: Try again / Save a copy / Reload) |
 | G-02 | Medium | kernel worker | **No cancel, timeout or progress for long operations.** A heavy rebuild blocks the single worker until it ends (J-01). `widestSection` runs 41 booleans (`extra.ts:65`). | Code + J-01 measurements. | Partly fixed: Stop button and a 5-minute watchdog restart the engine; no progress display |
-| G-03 | Low | `apps/web/src/main.tsx:23` | `window.whittle` (store, design API, command registry) is exposed in production builds. Same-origin script already has full access, but it widens the impact of any XSS. The e2e suites rely on it. | Code. | Open (Low) |
+| G-03 | Low | `apps/web/src/main.tsx:23` | `window.whittle` (store, design API, command registry) is exposed in production builds. Same-origin script already has full access, but it widens the impact of any XSS. The e2e suites rely on it. | Code. | Fixed: `window.whittle` exists only in dev builds or when `localStorage["whittle.debug"]="1"`; the e2e suites set it |
 | G-04 | Info | `commands.ts` | 145 commands, unique ids, no missing references from the toolbar/menus. Keyboard shortcuts documented in the README exist in the registry. | Script cross-check; e2e `04-shortcuts`. | Verified |
 
 ### 3.8 Code quality (H)
 
 | ID | Sev | File:line | Description | Evidence | Status |
 |---|---|---|---|---|---|
-| H-01 | Low | `kernel/src/{build,extra,surface}.ts`; `web/state/{files,drawings,refImage}.ts`; `web/ui/{Dialogs,Settings,Assistant}.tsx` | Three import cycles. They work today because the cross-imports are only used at call time. | SCC script. | Open |
+| H-01 | Low | `kernel/src/{build,extra,surface}.ts`; `web/state/{files,drawings,refImage}.ts`; `web/ui/{Dialogs,Settings,Assistant}.tsx` | Three import cycles. They work today because the cross-imports are only used at call time. | SCC script. | Fixed: no import cycles remain (shared kernel helpers in `shared.ts`, `simplify.ts`, `Modal.tsx`, `settingsTab.ts`) |
 | H-02 | Low | various | Dead code: unused `point`, `EDGE_SELECTOR` (`designApi.ts:73,80`), `downAt` (`sketchTools.ts:164`), `cplaneFrames` (`Viewport.ts:179`), parameter `sk` (`sketchCopy.ts:206`), `latestRegen` (`client.ts:16`), import `basicFaceExtrusion` (`surface.ts:10`); the `ask_dialog` Tauri command (`desktop lib.rs:187`) is registered but never called by the web app. | `tsc --noUnused*`, grep. | Fixed: unused TypeScript code removed; the unused `ask_dialog` Tauri command is still registered |
 | H-03 | Low | `packages/kernel/src/worker.ts:23` | The worker rewrites `console.error` to `console.debug` for the whole worker, hiding real failures along with OpenCascade's noisy dumps. | Code. | Fixed: real Error objects reach the console |
 | H-04 | Low | `build.ts` (`sketchWarning`, `CELL_INFO` in `extra.ts:92`) | Module-level mutable state used as a side channel between calls; safe only because the worker is single-threaded and synchronous. | Code. | Open |

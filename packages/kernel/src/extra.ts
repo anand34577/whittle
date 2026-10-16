@@ -41,7 +41,7 @@ import {
   measureShapeVolumeProperties,
 } from "replicad";
 import type { SketchFrame } from "./protocol";
-import { FeatureError, bodyForRefs, boxCenter, clean, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./build";
+import { FeatureError, bodyForRefs, boxCenter, clean, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./shared";
 import { circleOf } from "./construct";
 import { add, cross, dist, dot, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 

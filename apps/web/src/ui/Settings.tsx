@@ -6,11 +6,11 @@ import { setPrefs, useApp } from "../state/store";
 import { APP_VERSION } from "@whittle/core";
 import { AssistantSettings } from "./Assistant";
 import { Select, Slider, Switch, Tabs } from "./controls";
-import { Modal } from "./Dialogs";
+import { Modal } from "./Modal";
+import { type Tab, takeStartTab } from "./settingsTab";
 import { Icon } from "./icons";
 import { MATERIALS } from "./PropertiesPanel";
 
-type Tab = "appearance" | "workspace" | "navigation" | "assistant" | "about";
 
 const UNITS: { value: LengthUnit; label: string; hint: string }[] = [
   { value: "mm", label: "Millimetres", hint: "Most CAD, 3D printing and engineering" },
@@ -192,18 +192,9 @@ function About() {
   );
 }
 
-/** Open Settings at a given tab. */
-export function openSettings(tab: Tab = "appearance") {
-  startTab = tab;
-  useApp.setState({ panel: "settings" });
-}
-let startTab: Tab = "appearance";
-
 export function SettingsDialog() {
   const [tab, setTab] = useState<Tab>(() => {
-    const t = startTab;
-    startTab = "appearance";
-    return t;
+    return takeStartTab();
   });
   return (
     <Modal title="Settings" wide>

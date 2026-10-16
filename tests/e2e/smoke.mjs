@@ -30,6 +30,7 @@ const waitBuilt = async () => {
 };
 
 await step("01-welcome", async () => {
+  await page.addInitScript(() => localStorage.setItem("whittle.debug", "1")); // the test hook is off unless asked for
   await page.goto(url);
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
   // First run asks how Whittle will be used; any answer leads to the start screen.
