@@ -91,7 +91,8 @@ describe("file format", () => {
     const doc = newDocument("Bracket");
     doc.parameters.push(p("width", "40"));
     const back = deserializeDocument(serializeDocument(doc));
-    expect(back).toEqual(doc);
+    // Saving stamps the save time; everything else comes back exactly.
+    expect(back).toEqual({ ...doc, modifiedAt: back.modifiedAt });
   });
 
   it("refuses files from the future", () => {
