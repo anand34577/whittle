@@ -20,6 +20,23 @@ export async function runInterference() {
   }
 }
 
+/** Ask OpenCascade whether every body is a valid solid (rebuilds only warn when a result looks broken). */
+export async function runGeometryCheck() {
+  const { doc } = useApp.getState();
+  try {
+    const r = await getKernel().inspect(doc, "validity");
+    if (r.kind !== "validity") return;
+    if (!r.items.length) return toast("info", "There are no bodies to check.");
+    const bad = r.items.filter((i) => !i.valid);
+    if (!bad.length) return toast("ok", `All ${r.items.length} bod${r.items.length > 1 ? "ies are" : "y is"} valid.`);
+    const names = bad.map((i) => doc.bodies[i.bodyId]?.name ?? "Body").join(", ");
+    useApp.setState({ selection: bad.map((i) => ({ kind: "body" as const, bodyId: i.bodyId })) });
+    toast("warn", `Not a valid solid: ${names} (selected). Booleans, fillets and export may misbehave; undo the last steps or simplify the sketch behind it.`);
+  } catch (e) {
+    toast("warn", "The check couldn't run: " + (e instanceof Error ? e.message : String(e)));
+  }
+}
+
 export function clearInterference() {
   useApp.setState({ interference: [] });
 }

@@ -9,11 +9,11 @@ import sansUrl from "@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-nor
 import boldUrl from "@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-700-normal.woff?url";
 import { loadFont, setOC } from "replicad";
 import gcsWasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
-import { Builder } from "./build";
+import { Builder, isValidShape } from "./build";
 import { initSolver } from "./solver";
 import { exportShapes } from "./exporters";
 import { interference, radii } from "./inspect";
-import type { KernelRequest, KernelResponse } from "./protocol";
+import type { InspectResult, KernelRequest, KernelResponse } from "./protocol";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -87,7 +87,12 @@ async function handle(req: KernelRequest) {
     } else if (req.type === "inspect") {
       await builder.prepareImports(req.doc);
       const shapes = builder.shapes(req.doc);
-      const result = req.kind === "interference" ? { kind: "interference" as const, items: interference(shapes) } : { kind: "radii" as const, items: radii(shapes) };
+      const result: InspectResult =
+        req.kind === "interference"
+          ? { kind: "interference", items: interference(shapes) }
+          : req.kind === "validity"
+            ? { kind: "validity", items: [...shapes].map(([bodyId, s]) => ({ bodyId, valid: isValidShape(s) })) }
+            : { kind: "radii", items: radii(shapes) };
       post({ type: "inspect", seq: req.seq, result });
     } else {
       await builder.prepareImports(req.doc);

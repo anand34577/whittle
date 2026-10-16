@@ -165,7 +165,6 @@ function touchCount(hole: [number, number][], outer: [number, number][], tol: nu
 }
 
 /** Warning for the last built sketch, if any (holes that would split it). */
-export let sketchWarning: string | undefined;
 
 /** Groups of shape numbers whose (slightly grown) bounding boxes chain together. */
 function clusters(outlines: [number, number][][]): number[][] {
@@ -205,7 +204,7 @@ function joinDrawings(parts: Drawing[]): Drawing {
 }
 
 /** The fused outlines of one cluster with its holes (and gear bores) cut out; null when the cluster has no outline. */
-function clusterDrawing(resolved: ResolvedEntity[], outlines: [number, number][][], isHole: boolean[], idx: number[]): Drawing | null {
+function clusterDrawing(resolved: ResolvedEntity[], outlines: [number, number][][], isHole: boolean[], idx: number[], notes: SketchNotes): Drawing | null {
   let result = null as Drawing | null;
   for (const i of idx) {
     if (isHole[i]) continue;
@@ -217,7 +216,7 @@ function clusterDrawing(resolved: ResolvedEntity[], outlines: [number, number][]
   for (const i of holes) {
     const container = idx.find((j) => j !== i && !isHole[j] && polygonInside(outlines[i]!, outlines[j]!));
     if (container !== undefined && touchCount(outlines[i]!, outlines[container]!, 1e-3) >= 2) {
-      sketchWarning = "A hole touches its outline in two places, which would split the shape in two. Make the hole slightly smaller (or the outline larger).";
+      notes.warning = "A hole touches its outline in two places, which would split the shape in two. Make the hole slightly smaller (or the outline larger).";
     }
   }
   // The common case of one outline with many separate holes inside it is built as one face with inner loops;
@@ -246,8 +245,12 @@ function clusterDrawing(resolved: ResolvedEntity[], outlines: [number, number][]
 }
 
 /** Build the 2D profile of a sketch: outer shapes fused, inner shapes become holes. */
-export function sketchDrawing(f: SketchFeature, ev: Evaluator): Drawing | null {
-  sketchWarning = undefined;
+/** Something worth telling the person that building a sketch's outline found. */
+export interface SketchNotes {
+  warning?: string;
+}
+
+export function sketchDrawing(f: SketchFeature, ev: Evaluator, notes: SketchNotes = {}): Drawing | null {
   const resolved: ResolvedEntity[] = [];
   for (const e of f.entities) {
     try {
@@ -274,7 +277,7 @@ export function sketchDrawing(f: SketchFeature, ev: Evaluator): Drawing | null {
   if (!isHole.includes(false)) throw new FeatureError("Every shape in this sketch is a hole. Add an outer shape.");
   // Shapes whose bounding boxes don't meet can't affect each other, so each cluster is combined on its own (the
   // boolean cost grows steeply with the number of shapes in one go) and the clusters are then placed side by side.
-  const parts = clusters(outlines).map((idx) => clusterDrawing(resolved, outlines, isHole, idx)).filter((d): d is Drawing => d !== null);
+  const parts = clusters(outlines).map((idx) => clusterDrawing(resolved, outlines, isHole, idx, notes)).filter((d): d is Drawing => d !== null);
   if (parts.length === 1) return parts[0]!;
   return joinDrawings(parts);
 }

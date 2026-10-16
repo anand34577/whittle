@@ -50,7 +50,7 @@ import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type Construct
 import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, availableConstraints, constrainSelection, deleteSketchSelection, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { intersectIntoSketch } from "./sectionCurves";
-import { clearInterference, colorByComponent, makeComponent, runInterference, runMinRadius, toggleGround } from "./inspect";
+import { clearInterference, colorByComponent, makeComponent, runGeometryCheck, runInterference, runMinRadius, toggleGround } from "./inspect";
 import { THEMES } from "./prefs";
 import {
   type AppState,
@@ -262,6 +262,7 @@ export const COMMANDS: Command[] = [
     on: (s) => s.view.analysis === "access",
     run: () => setView({ analysis: get().view.analysis === "access" ? null : "access" }),
   },
+  { id: "check-geometry", label: "Check geometry", group: "Inspect", icon: "combine", keywords: "validity valid solid check errors broken repair healthy", hint: "Ask the geometry engine whether every body is a valid solid", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 0, run: () => void runGeometryCheck() },
   { id: "interference", label: "Interference", group: "Inspect", icon: "combine", keywords: "collision overlap clash intersect bodies check fit", hint: "Find bodies that overlap and mark where", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: () => void runInterference() },
   { id: "clear-interference", label: "Clear interference marks", group: "Inspect", icon: "close", keywords: "remove red boxes overlap", when: (s) => s.interference.length > 0, run: clearInterference },
   { id: "min-radius", label: "Minimum radius check", short: "Min radius", group: "Inspect", icon: "measure", keywords: "cutter endmill tool radius inside corner machining cnc tight", hint: "Select inside corners a cutter of a given size can't reach", when: NEEDS_BODY, run: () => void runMinRadius() },

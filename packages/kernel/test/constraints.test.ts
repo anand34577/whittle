@@ -23,6 +23,7 @@ import {
   migrate,
   newDocument,
   resolveGeometry,
+  SCHEMA_VERSION,
   trimGeometry,
 } from "@whittle/core";
 import { Builder } from "../src/build";
@@ -251,7 +252,7 @@ describe("constraint solving", () => {
 
   it("keeps old files and plain shape sketches working", () => {
     const doc = migrate({ schema: 1, name: "Old", units: "mm", parameters: [], features: [], bodies: {}, rollback: null });
-    expect(doc.schema).toBe(2);
+    expect(doc.schema).toBe(SCHEMA_VERSION);
     const { sk } = setup();
     expect(expandSketch(sk)).toBe(sk);
     expect(solveSketch(sk, createEvaluator([], "mm"))).toBeUndefined();

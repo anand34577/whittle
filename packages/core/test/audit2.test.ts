@@ -109,3 +109,21 @@ describe("version", () => {
     }
   });
 });
+
+describe("embedded files", () => {
+  it("are stored as raw bytes in the container and come back identical", () => {
+    const doc = newDocument("T");
+    const data = btoa(String.fromCharCode(...Array.from({ length: 5000 }, (_, i) => (i * 7) % 256)));
+    doc.features.push({ id: "i1", type: "import", name: "Imported", format: "step", fileName: "a.step", data, scale: "1" } as Feature);
+    const bytes = serializeDocument(doc);
+    expect(JSON.stringify(deserializeDocument(bytes))).toContain(data);
+    expect(deserializeDocument(bytes).features[0]).toMatchObject({ data });
+    // the document.json inside no longer carries the base64
+    expect(new TextDecoder("latin1").decode(bytes)).not.toContain(data.slice(100, 200));
+  });
+  it("a damaged embedded file is kept as it is", () => {
+    const doc = newDocument("T");
+    doc.features.push({ id: "i1", type: "import", name: "Imported", format: "step", fileName: "a.step", data: "!!!", scale: "1" } as Feature);
+    expect(deserializeDocument(serializeDocument(doc)).features[0]).toMatchObject({ data: "!!!" });
+  });
+});

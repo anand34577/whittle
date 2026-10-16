@@ -51,7 +51,7 @@ While a fillet/chamfer/shell is being edited, the kernel also returns the bodies
 
 ## File format (.whittle)
 
-A ZIP container holding `manifest.json`, `document.json` (the source of truth) and an optional `thumbnail.png`. `migrate()` upgrades older schemas and refuses newer ones with a clear message.
+A ZIP container holding `manifest.json`, `document.json` (the source of truth), an optional `thumbnail.png`, and `imports/<id>.bin` for each embedded STEP/STL file (raw bytes; in memory they are base64 in the document). `migrate()` upgrades older schemas and refuses newer ones with a clear message.
 
 ## Swappable kernel
 

@@ -19,7 +19,7 @@ import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeeping
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
 
-import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchWarning } from "./shared";
+import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath } from "./shared";
 export * from "./shared";
 
 interface SketchBuilt {
@@ -503,8 +503,9 @@ export class Builder {
           solution = solveSketch(f, ev);
           if (solution) source = expandSketch(f, solution);
           if (solution?.message) warning ??= solution.message;
-          drawing = sketchDrawing(source, ev);
-          warning ??= sketchWarning;
+          const notes: { warning?: string } = {};
+          drawing = sketchDrawing(source, ev, notes);
+          warning ??= notes.warning;
         } catch (e) {
           error = describeError(f, e);
         }
