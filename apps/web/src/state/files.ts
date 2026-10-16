@@ -156,8 +156,10 @@ export function loadDocument(doc: WhittleDocument, fileName: string | null) {
 }
 
 /** Load a template or recovered work, asking first if the current design has unsaved changes. */
-export async function loadDocumentConfirm(doc: WhittleDocument, fileName: string | null) {
-  if (await confirmDiscard()) loadDocument(doc, fileName);
+export async function loadDocumentConfirm(doc: WhittleDocument, fileName: string | null, unsaved = false) {
+  if (!(await confirmDiscard())) return;
+  loadDocument(doc, fileName);
+  if (unsaved) useApp.setState({ dirty: true }); // recovered work has not been saved to a file
 }
 
 /** Open: on the server this shows your designs; elsewhere it picks a file. */
@@ -281,7 +283,10 @@ export async function saveDesign(saveAs = false): Promise<boolean> {
       if (doc.id) void addLocalVersion({ docId: doc.id, name: doc.name, at: Date.now(), bytes }).catch(() => {});
     }
     // Edits made while the save was in flight stay unsaved.
-    if (useApp.getState().doc === doc) useApp.setState({ dirty: false });
+    if (useApp.getState().doc === doc) {
+      useApp.setState({ dirty: false });
+      clearAutosave(); // the saved file is now the safe copy
+    }
     useApp.setState({ fileName: label });
     toast("ok", "Saved");
     return true;
@@ -482,6 +487,14 @@ export function readAutosave(): { doc: WhittleDocument; fileName: string | null;
     return { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at };
   } catch {
     return null;
+  }
+}
+
+function clearAutosave() {
+  try {
+    localStorage.removeItem(AUTOSAVE_KEY);
+  } catch {
+    /* storage may be unavailable */
   }
 }
 

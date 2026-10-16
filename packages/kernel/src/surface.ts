@@ -7,7 +7,6 @@ import {
   type Wire,
   Vector,
   assembleWire,
-  basicFaceExtrusion,
   cast,
   downcast,
   getOC,

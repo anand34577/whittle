@@ -598,7 +598,7 @@ export function Welcome() {
             </span>
           </button>
           {recovered && (
-            <button className="start-card start-card--recover" onClick={() => void loadDocumentConfirm(recovered.doc, recovered.fileName)}>
+            <button className="start-card start-card--recover" onClick={() => void loadDocumentConfirm(recovered.doc, recovered.fileName, true)}>
               <Icon name="undo" />
               <span>
                 <b>Continue where you left off</b>

@@ -70,17 +70,11 @@ export interface ToolDef {
 }
 
 const num = { type: ["number", "string"], description: "A number (millimetres / degrees) or a formula using parameters, e.g. \"width / 2\"" };
-const point = { type: "array", items: num, minItems: 2, maxItems: 2 };
 
 const FACE_SELECTOR = {
   type: "string",
   enum: ["top", "bottom", "front", "back", "left", "right"],
   description: "A flat face by direction: top (+Z), bottom (-Z), front (-Y), back (+Y), left (-X), right (+X). The outermost such face is used.",
-};
-const EDGE_SELECTOR = {
-  type: "string",
-  enum: ["all", "top", "bottom", "vertical", "circular", "outer-top"],
-  description: "Which edges: all; top / bottom (edges on the highest / lowest faces); vertical (parallel to Z); circular (arcs and circles).",
 };
 
 export const DESIGN_TOOLS: ToolDef[] = [

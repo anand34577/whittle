@@ -161,7 +161,6 @@ export class SketchController {
   private snap: SnapInfo | null = null;
   private guides: [Vec2, Vec2][] = [];
   private typed: { a?: number; b?: number } = {};
-  private downAt: Vec2 | null = null;
   /** Where the button went down on screen (pixels): tells a click from a drag without grid snapping in the way. */
   private downScreen: Vec2 | null = null;
   private dragging: { id: Id; last: Vec2; moved: boolean; geom?: Id[] } | null = null;
@@ -192,7 +191,6 @@ export class SketchController {
     this.arcMode = false;
     this.arcEnd = null;
     this.typed = {};
-    this.downAt = null;
     this.downScreen = null;
     this.dragging = null;
     this.publish();
@@ -805,7 +803,6 @@ export class SketchController {
     }
 
     if (e.type === "down") {
-      this.downAt = this.cursor;
       this.downScreen = e.screen;
       if (this.tool === "text") {
         // One click places the text; the panel then asks what it says.
@@ -850,7 +847,6 @@ export class SketchController {
         const moved = Math.hypot(d[0] - e.screen[0], d[1] - e.screen[1]) > 6;
         if (moved) this.commitTwoPoint(this.cursor);
       }
-      this.downAt = null;
       this.downScreen = null;
     }
     this.publish();

@@ -203,7 +203,7 @@ interface Step {
 }
 
 /** Order the selected lines and arcs into chains by their shared points. */
-function chains(sk: Geo, segs: (Line | Arc)[]): { steps: Step[]; closed: boolean }[] | string {
+function chains(_sk: Geo, segs: (Line | Arc)[]): { steps: Step[]; closed: boolean }[] | string {
   const at = new Map<Id, (Line | Arc)[]>();
   for (const s of segs) for (const p of [s.a, s.b]) at.set(p, [...(at.get(p) ?? []), s]);
   for (const list of at.values()) if (list.length > 2) return "Offset can't follow a corner where more than two lines or arcs meet.";
