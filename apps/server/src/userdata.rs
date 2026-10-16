@@ -56,11 +56,15 @@ pub async fn list(State(s): State<Shared>, CurrentUser(u): CurrentUser, Query(q)
     Ok(Json(out))
 }
 
+/// The saved JSON value, or `null` when nothing is saved under that key.
 pub async fn get(State(s): State<Shared>, CurrentUser(u): CurrentUser, Path(key): Path<String>) -> ApiResult<Response> {
     checked(&key)?;
     let row = sqlx::query("SELECT value FROM user_data WHERE user_id = $1 AND key = $2").bind(&u.id).bind(&key).fetch_optional(&s.db).await?;
-    let Some(row) = row else { return Err(ApiError::not_found()) };
-    let value: String = row.try_get("value")?;
+    // Nothing saved yet is an ordinary answer (JSON null), not an error the browser would log.
+    let value: String = match row {
+        Some(row) => row.try_get("value")?,
+        None => "null".to_owned(),
+    };
     Ok(([(header::CONTENT_TYPE, "application/json")], value).into_response())
 }
 

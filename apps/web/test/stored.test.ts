@@ -19,7 +19,7 @@ function fakeServer() {
       data.delete(key);
       return new Response(null, { status: 204 });
     }
-    return data.has(key) ? new Response(data.get(key), { status: 200 }) : new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+    return data.has(key) ? new Response(data.get(key), { status: 200 }) : new Response("null", { status: 200 });
   });
 }
 

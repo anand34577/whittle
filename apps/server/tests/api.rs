@@ -572,14 +572,15 @@ async fn personal_data_is_kept_per_person_on_the_server() {
     let bob_cookie = session(&login);
 
     let none = call(&app, Method::GET, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
-    assert_eq!(none.status, StatusCode::NOT_FOUND);
+    assert_eq!(none.status, StatusCode::OK);
+    assert!(none.json().is_null());
     let put = call(&app, Method::PUT, "/api/me/data/ai", Some(&ada), Some(Body::from(r#"{"providers":[{"key":"sk-test"}]}"#)), true, &[]).await;
     assert_eq!(put.status, StatusCode::NO_CONTENT);
     let got = call(&app, Method::GET, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
     assert_eq!(got.json()["providers"][0]["key"], "sk-test");
     // Someone else cannot see it, and bad keys and bodies are refused.
     let other = call(&app, Method::GET, "/api/me/data/ai", Some(&bob_cookie), None, false, &[]).await;
-    assert_eq!(other.status, StatusCode::NOT_FOUND);
+    assert!(other.json().is_null());
     let bad_key = call(&app, Method::PUT, "/api/me/data/a%20b", Some(&ada), Some(Body::from("{}")), true, &[]).await;
     assert_eq!(bad_key.status, StatusCode::BAD_REQUEST);
     let bad_body = call(&app, Method::PUT, "/api/me/data/ai", Some(&ada), Some(Body::from("not json")), true, &[]).await;
@@ -589,5 +590,5 @@ async fn personal_data_is_kept_per_person_on_the_server() {
     let del = call(&app, Method::DELETE, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
     assert_eq!(del.status, StatusCode::NO_CONTENT);
     let gone = call(&app, Method::GET, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
-    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+    assert!(gone.json().is_null());
 }
