@@ -88,7 +88,7 @@ async function handle(req: KernelRequest) {
       const r = builder.regen(req.doc, req.quality, req.pickBefore);
       builder.onProgress = null;
       const transfer: Transferable[] = [];
-      for (const b of [...r.bodies, ...(r.pickBodies ?? [])]) {
+      for (const b of [...r.bodies, ...(r.pickBodies ?? []), ...(r.ghost ? [r.ghost] : [])]) {
         transfer.push(b.positions.buffer, b.normals.buffer, b.indices.buffer, b.faceRanges.buffer, b.edgePositions.buffer, b.edgeRanges.buffer);
       }
       for (const s of r.sketches) if (s.fill) transfer.push(s.fill.buffer);

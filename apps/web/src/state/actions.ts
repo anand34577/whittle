@@ -579,6 +579,14 @@ function snapPoint(p: Pick & { at?: Vec3 }): Vec3 | null {
 }
 
 /** Press/Pull: starts with any flat faces already selected. */
+/** Q: one tool that does the right thing for what is selected (profile: extrude, edge: fillet, face: push or pull). */
+export function startPressPull() {
+  const sel = get().selection;
+  if (sel.some((p) => p.kind === "edge")) return startEdgeFeature("fillet");
+  if (sel.some((p) => p.kind === "sketch")) return startExtrude();
+  startOffsetFace();
+}
+
 export function startOffsetFace() {
   const faces = get()
     .selection.map((p) => faceRefFromPick(p))

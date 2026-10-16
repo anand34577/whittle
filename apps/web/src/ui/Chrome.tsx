@@ -182,7 +182,7 @@ function GroupMenu({ label, ids, asTool }: { label: string; ids: string[]; asToo
   );
 }
 
-function Group({ label, ids, more, activeId }: { label: string; ids: string[]; more?: string[]; activeId?: string }) {
+function Group({ label, ids, more, menu, activeId }: { label: string; ids: string[]; more?: string[]; menu?: string[]; activeId?: string }) {
   // No visible tools: the whole group is one button that opens its list.
   if (!ids.length && more) {
     return (
@@ -198,7 +198,7 @@ function Group({ label, ids, more, activeId }: { label: string; ids: string[]; m
           <ToolButton key={id} c={commandById(id)} active={id === activeId} />
         ))}
       </div>
-      {more ? <GroupMenu label={label} ids={[...ids, ...more]} /> : <span className="toolgroup__label">{label}</span>}
+      {more ? <GroupMenu label={label} ids={menu ?? [...ids, ...more]} /> : <span className="toolgroup__label">{label}</span>}
     </div>
   );
 }
@@ -238,7 +238,7 @@ export function Toolbar() {
           <span className="pill pill--accent">Sketch</span>
         </div>
         <div className="toolbar__scroll" onWheel={wheelX}>
-        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic", "tool-cspline", "tool-earc", "tool-tan2c", "tool-tan3c"]} activeId={active} />
+        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic", "tool-cspline", "tool-earc", "tool-tan2c", "tool-tan3c"]} menu={["#Lines", "tool-line", "tool-path", "#Rectangles", "tool-rect", "tool-crect", "tool-rect3", "#Circles & ellipses", "tool-circle", "tool-circle2", "tool-circle3", "tool-tan2c", "tool-tan3c", "tool-ellipse", "#Polygons", "tool-polygon", "tool-polygonc", "tool-polygone", "#Arcs & curves", "tool-carc", "tool-tarc", "tool-earc", "tool-conic", "tool-cspline", "#Slots", "tool-slot"]} activeId={active} />
         <Group label="Insert" ids={[]} more={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg", "import-dxf", "calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} />
         <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-stretch", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
         <Group
@@ -414,6 +414,68 @@ export function CommandPalette() {
             </li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+/** Where the pointer last was, so the quick box can open under it. */
+const pointer = { x: 400, y: 300 };
+if (typeof window !== "undefined") window.addEventListener("pointermove", (e) => ((pointer.x = e.clientX), (pointer.y = e.clientY)), { passive: true });
+
+/** Space: the tools that fit what you're doing, and search, in a small box at the cursor. */
+export function QuickBox() {
+  const state = useApp();
+  const [q, setQ] = useState("");
+  const close = () => useApp.setState({ panel: null });
+  const kinds = new Set(state.selection.map((p) => p.kind));
+  const ids =
+    state.mode.kind === "sketch"
+      ? ["tool-line", "tool-rect", "tool-circle", "tool-polygon", "tool-slot", "tool-select", "tool-trim", "tool-dimension", "tool-sfillet", "construction", "finish-sketch"]
+      : kinds.has("edge")
+        ? ["fillet", "chamfer", "measure", "hide"]
+        : kinds.has("face")
+          ? ["sketch", "press-pull", "hole", "fillet", "shell", "measure"]
+          : kinds.has("sketch")
+            ? ["extrude", "revolve", "loft", "sweep"]
+            : ["sketch", "extrude", "revolve", "fillet", "shell", "hole", "box", "cylinder", "press-pull"];
+  const context = ids.map(commandById).filter((c) => isAvailable(c, state));
+  const found = q.trim() ? COMMANDS.map((c) => ({ c, s: score(c, q) })).filter((x) => x.s > 0 && isAvailable(x.c, state)).sort((a, b) => b.s - a.s).slice(0, 6).map((x) => x.c) : context;
+  const run = (c: Command | undefined) => {
+    if (!c) return;
+    close();
+    setTimeout(c.run, 0);
+  };
+  return (
+    <div className="scrim scrim--clear" onMouseDown={close}>
+      <div
+        className="quick"
+        role="dialog"
+        aria-label="Quick tools"
+        style={{ left: Math.min(pointer.x, window.innerWidth - 300), top: Math.min(pointer.y, window.innerHeight - 320) }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <input
+          autoFocus
+          className="quick__search"
+          placeholder="Search, or pick a tool"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Escape" || (e.key === " " && !q)) close();
+            else if (e.key === "Enter") run(found[0]);
+          }}
+        />
+        <div className="quick__grid">
+          {found.map((c) => (
+            <button key={c.id} className="quick__btn" onClick={() => run(c)} title={`${c.label}${c.keys ? `  (${c.keys})` : ""}${c.hint ? " · " + c.hint : ""}`}>
+              <Icon name={c.icon ?? "more"} size={20} />
+              <span>{c.short ?? c.label}</span>
+            </button>
+          ))}
+          {found.length === 0 && <span className="muted">No matching command</span>}
+        </div>
       </div>
     </div>
   );

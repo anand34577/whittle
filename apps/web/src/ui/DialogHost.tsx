@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { type ConfirmRequest, type PromptRequest, closeDialog, useDialogs } from "../state/dialogs";
 import { Icon } from "./icons";
+import { GUIDES, GuideCard } from "./toolGuides";
 
 function ConfirmView({ req }: { req: ConfirmRequest }) {
   const ok = useRef<HTMLButtonElement>(null);
@@ -143,13 +144,15 @@ export function DialogHost() {
  * never shows. Placed above the element, flipped below near the top edge.
  */
 export function TooltipLayer() {
-  const [tip, setTip] = useState<{ text: string; x: number; y: number; below: boolean } | null>(null);
+  const [tip, setTip] = useState<{ text: string; x: number; y: number; below: boolean; guide?: string } | null>(null);
+  const deepTimer = useRef<number | undefined>(undefined);
   const timer = useRef<number | undefined>(undefined);
   const current = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const hide = () => {
       window.clearTimeout(timer.current);
+      window.clearTimeout(deepTimer.current);
       // Put a borrowed title back: the browser only shows its own tooltip on a
       // sustained hover, so restoring it once the pointer has left is safe.
       const el = current.current;
@@ -183,7 +186,11 @@ export function TooltipLayer() {
         if (current.current !== el || !el.isConnected) return;
         const r = el.getBoundingClientRect();
         const below = r.top < 64;
-        setTip({ text, x: r.left + r.width / 2, y: below ? r.bottom + 8 : r.top - 8, below });
+        const pos = { text, x: r.left + r.width / 2, y: below ? r.bottom + 8 : r.top - 8, below };
+        setTip(pos);
+        // Keep hovering and a tool's tooltip grows into a picture and the steps.
+        const id = el.getAttribute("data-tour") ?? "";
+        if (GUIDES[id]) deepTimer.current = window.setTimeout(() => current.current === el && setTip({ ...pos, guide: id }), 1100);
       }, 450);
     };
     window.addEventListener("pointerover", over, true);
@@ -222,6 +229,7 @@ export function TooltipLayer() {
       {rest.map((line, i) => (
         <span key={i}>{line}</span>
       ))}
+      {tip.guide && GUIDES[tip.guide] && <GuideCard guide={GUIDES[tip.guide]!} />}
     </div>
   );
 }

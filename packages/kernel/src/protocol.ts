@@ -92,6 +92,8 @@ export interface RegenResult {
   status: FeatureStatus[];
   /** Bodies as they were just before pickBefore (for picking while a feature previews). */
   pickBodies?: BodyResult[];
+  /** What the feature being edited cuts away, for a translucent red preview. */
+  ghost?: BodyResult;
   ms: number;
   /** Number of features recomputed (the rest came from cache). */
   rebuilt: number;

@@ -304,7 +304,6 @@ function EntityEditor({ e }: { e: SketchEntity }) {
           <ExprInput
             label="Diameter"
             kind="length"
-            autoFocus
             value={diameterOf(e.r)}
             onChange={(v) => v !== diameterOf(e.r) && set("Diameter", (d) => void ((d as typeof e).r = PLAIN_NUM.test(v) ? trim(parseFloat(v) / 2, 6) : `(${v}) / 2`))}
           />

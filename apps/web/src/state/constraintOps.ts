@@ -194,10 +194,11 @@ function checkValue(type: ConstraintType, text: string): string | null {
 }
 
 /** Add a constraint to the selection (asking for the value of a dimension). Returns an error message, if any. */
-export async function constrainSelection(type: ConstraintType, value?: string): Promise<string | undefined> {
+export async function constrainSelection(type: ConstraintType, value?: string, at?: [number, number]): Promise<string | undefined> {
   const refs = sketchSelection();
   if (DIMENSIONS.includes(type) && value === undefined) {
     const v = await promptDialog({
+      at,
       title: CONSTRAINT_LABELS[type],
       label: type === "angle" ? "Angle (degrees)" : "Value",
       message: "A number or a formula using parameters, e.g. width / 2.",
@@ -213,23 +214,56 @@ export async function constrainSelection(type: ConstraintType, value?: string): 
     if (bad) return bad;
   }
   let error: string | undefined;
+  let added: Id | undefined;
+  // First dimension on a sketch drawn at a very different size: scale it all, so one number doesn't turn the rest inside out.
+  const o = openSketch();
+  let scale = 1;
+  if (o && value !== undefined && (type === "distance" || type === "radius") && !(o.sk.constraints ?? []).some((c) => DIMENSIONS.includes(c.type))) {
+    const want = documentEvaluator(useApp.getState().doc).eval(value, "length");
+    const have = measureDimension(o.sk, type, refs, o.sol);
+    if (want.ok && have > 1e-9 && want.value > 0 && (want.value / have > 2.5 || want.value / have < 0.4)) scale = want.value / have;
+  }
   geoMutate(CONSTRAINT_LABELS[type], (sk) => {
+    if (scale !== 1) scaleGeometry(sk, (sk.geometry ?? []).map((g) => g.id), scale, [0, 0]);
     const r = addConstraint(sk, type, refs, value);
     if ("error" in r) error = r.error;
+    else added = r.id;
   });
   if (error) toast("info", error);
-  else useApp.setState({ sketchSel: [] });
+  else {
+    useApp.setState({ sketchSel: [] });
+    if (scale !== 1) toast("info", "The whole sketch was scaled to fit your first dimension.");
+    if (added && DIMENSIONS.includes(type)) void keepOrReference(added);
+  }
   return error;
 }
 
+/** A dimension that over-constrains the sketch becomes a reference (driven) one, shown in brackets, instead of a conflict. */
+async function keepOrReference(id: Id) {
+  const ok = await new Promise<boolean>((resolve) => {
+    const done = () => (unsub(), clearTimeout(timer), resolve(useApp.getState().builtDoc === useApp.getState().doc));
+    const unsub = useApp.subscribe((st) => st.builtDoc === st.doc && done());
+    const timer = setTimeout(done, 5000);
+    if (useApp.getState().builtDoc === useApp.getState().doc) done();
+  });
+  const sol = openSketch()?.sol;
+  if (!ok || !sol || sol.state !== "over" || !sol.bad.includes(id)) return;
+  geoMutate("Reference dimension", (sk) => {
+    const c = sk.constraints?.find((x) => x.id === id);
+    if (c) c.driven = true;
+  });
+  toast("info", "The sketch already fixes that, so it was added as a reference dimension (in brackets). It measures; it doesn't drive.");
+}
+
 /** Change a dimension's value. */
-export async function editDimension(id: Id) {
+export async function editDimension(id: Id, at?: [number, number]) {
   const c = openSketch()?.sk.constraints?.find((x) => x.id === id);
   if (!c || c.value === undefined) return;
   const v = await promptDialog({
+    at,
     title: `Edit ${CONSTRAINT_LABELS[c.type].toLowerCase()}`,
     label: c.type === "angle" ? "Angle (degrees)" : "Value",
-    initial: c.value,
+    initial: c.driven ? measuredText(c.type, c.refs) : c.value,
     unit: c.type === "angle" ? "°" : useApp.getState().doc.units,
     validate: (t) => checkValue(c.type, t),
   });
@@ -239,7 +273,8 @@ export async function editDimension(id: Id) {
 export function setDimension(id: Id, value: string) {
   geoMutate("Edit dimension", (sk) => {
     const c = sk.constraints?.find((x) => x.id === id);
-    if (c) c.value = value;
+    // Typing a value into a reference dimension makes it drive the sketch.
+    if (c) (c.value = value), delete c.driven;
   });
 }
 
@@ -345,7 +380,7 @@ export function makeConstrainable(id: Id | null = useApp.getState().selectedEnti
  * length. Click a point (or Shift+click a line) to start a pair, then the second
  * item: two points or a point and a line give a distance, two lines an angle.
  */
-export async function dimensionPick(id: Id, additive: boolean) {
+export async function dimensionPick(id: Id, additive: boolean, at?: [number, number]) {
   const o = openSketch();
   if (!o) return;
   const kind = geomType(o.sk, id);
@@ -359,12 +394,12 @@ export async function dimensionPick(id: Id, additive: boolean) {
       useApp.setState({ sketchSel: [] });
       return;
     }
-    await constrainSelection(type);
+    await constrainSelection(type, undefined, at);
     return;
   }
   useApp.setState({ sketchSel: [id], selectedEntity: null });
-  if (kind === "circle" || kind === "arc") await constrainSelection("radius");
-  else if (kind === "line" && !additive && id !== "xaxis" && id !== "yaxis") await constrainSelection("distance");
+  if (kind === "circle" || kind === "arc") await constrainSelection("radius", undefined, at);
+  else if (kind === "line" && !additive && id !== "xaxis" && id !== "yaxis") await constrainSelection("distance", undefined, at);
 }
 
 /**
@@ -416,11 +451,12 @@ export function addFreePoint(p: Vec2) {
 let lastCorner = "2";
 
 /** Fillet or chamfer the corner at a point where two lines meet. */
-export async function cornerAt(id: Id, kind: "fillet" | "chamfer") {
+export async function cornerAt(id: Id, kind: "fillet" | "chamfer", at?: [number, number]) {
   const o = openSketch();
   if (!o) return;
   const chamfer = kind === "chamfer";
   const text = await promptDialog({
+    at,
     title: chamfer ? "Chamfer corner" : "Fillet corner",
     label: chamfer ? "Distance from the corner" : "Radius",
     message: "A number or a formula using parameters.",

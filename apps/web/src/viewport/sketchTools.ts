@@ -113,6 +113,10 @@ export interface SketchUIState {
   dims: DimField[];
   hoverEntity: Id | null;
   cursor: Vec2 | null;
+  /** What a click here would lock in (shown beside the cursor before the click). */
+  hint: string | null;
+  /** Rubber-band selection: drag right for window (fully inside), left for crossing (touching). */
+  box: { a: Vec2; b: Vec2; crossing: boolean } | null;
   step: number; // 0 = waiting for first point
 }
 
@@ -141,11 +145,13 @@ export interface SketchEnv {
   /** The Project tool: pick the model under this window position and copy it into the sketch. */
   project(client: Vec2): void;
   /** The Dimension tool picked this geometry (`additive`: start a pair instead of measuring one item). */
-  dimension(id: Id, additive: boolean): void;
+  dimension(id: Id, additive: boolean, at?: Vec2): void;
   /** Fillet or chamfer the corner at this point. */
-  corner(id: Id, kind: "fillet" | "chamfer"): void;
+  corner(id: Id, kind: "fillet" | "chamfer", at?: Vec2): void;
   trim(id: Id, p: Vec2): void;
   extend(id: Id, p: Vec2): void;
+  /** Turn a plain shape into constraint geometry so Dimension, Fillet, Trim and Extend can use it. */
+  convert(id: Id): void;
   /** Select geometry (null clears); `additive` adds to / removes from the selection. */
   selectGeom(id: Id | null, additive: boolean): void;
   selectedGeom(): Id[];
@@ -169,6 +175,8 @@ export class SketchController {
   /** Tangent-circle tools: the curves picked so far. */
   private tanRefs: Id[] = [];
   private hoverEntity: Id | null = null;
+  private erasing = false;
+  private box: { a: Vec2; b: Vec2; additive: boolean } | null = null;
   private resolvedCache: ResolvedEntity[] = [];
   /** Outline/path tools: "arc" points (parallel to `points`), arc mode, and an arc's end awaiting its middle. */
   private arcFlags: boolean[] = [];
@@ -532,6 +540,20 @@ export class SketchController {
     }
   }
 
+  /** Feedforward badge: the rule a click would apply (snap target, or a straight horizontal/vertical run). */
+  private hint(): string | null {
+    const s = this.snap;
+    if (!s || !this.cursor || this.tool === "select" || this.tool === "dimension") return null;
+    const label = { end: "Endpoint", mid: "Midpoint", center: "Center", origin: "Origin", align: "Aligned" }[s.kind as string];
+    const a = this.points[this.points.length - 1];
+    if (a && s.kind !== "free") {
+      const tol = 1e-6;
+      if (Math.abs(this.cursor[1] - a[1]) < tol && Math.abs(this.cursor[0] - a[0]) > tol) return "Horizontal";
+      if (Math.abs(this.cursor[0] - a[0]) < tol && Math.abs(this.cursor[1] - a[1]) > tol) return "Vertical";
+    }
+    return label ?? null;
+  }
+
   private publish() {
     this.env.emit({
       preview: this.previewShapes(),
@@ -540,6 +562,8 @@ export class SketchController {
       dims: this.dims(),
       hoverEntity: this.hoverEntity,
       cursor: this.cursor,
+      hint: this.hint(),
+      box: this.box ? { ...this.box, crossing: this.box.b[0] < this.box.a[0] } : null,
       step: this.points.length,
     });
   }
@@ -757,8 +781,13 @@ export class SketchController {
       this.cursor = e.p;
       this.snap = null;
       const hit = this.geomAt(e.p, true);
-      this.hoverEntity = hit;
-      if (e.type === "down" && hit) this.env[this.tool](hit, e.p);
+      const plain = hit ? null : this.entityAt(e.p);
+      this.hoverEntity = hit ?? plain;
+      // Press and drag across curves to erase them (or, with Shift, to extend them).
+      if (e.type === "down") this.erasing = true;
+      if (e.type === "up") this.erasing = false;
+      if (hit && (e.type === "down" || (e.type === "move" && this.erasing))) this.env[e.shift ? (this.tool === "trim" ? "extend" : "trim") : this.tool](hit, e.p);
+      else if (e.type === "down" && plain) this.env.convert(plain);
       this.publish();
       return;
     }
@@ -773,8 +802,12 @@ export class SketchController {
       this.cursor = e.p;
       this.snap = null;
       const hit = this.geomAt(e.p);
-      this.hoverEntity = hit;
-      if (e.type === "down" && hit) this.env.dimension(hit, e.shift);
+      const plain = hit ? null : this.entityAt(e.p);
+      this.hoverEntity = hit ?? plain;
+      if (e.type === "down") {
+        if (hit) this.env.dimension(hit, e.shift, e.screen);
+        else if (plain) this.env.convert(plain);
+      }
       this.publish();
       return;
     }
@@ -783,8 +816,12 @@ export class SketchController {
       this.snap = null;
       const hit = this.geomAt(e.p);
       const corner = hit && this.env.geometry().some((g) => g.id === hit && g.type === "point") ? hit : null;
-      this.hoverEntity = corner;
-      if (e.type === "down" && corner) this.env.corner(corner, this.tool === "sfillet" ? "fillet" : "chamfer");
+      const plain = hit ? null : this.entityAt(e.p);
+      this.hoverEntity = corner ?? plain;
+      if (e.type === "down") {
+        if (corner) this.env.corner(corner, this.tool === "sfillet" ? "fillet" : "chamfer", e.screen);
+        else if (plain) this.env.convert(plain);
+      }
       this.publish();
       return;
     }
@@ -874,6 +911,8 @@ export class SketchController {
           this.dragging.last = p;
           this.dragging.moved = true;
         }
+      } else if (this.box) {
+        this.box.b = e.p;
       } else {
         this.resolvedCache = [];
         this.hoverEntity = this.geomAt(e.p) ?? this.entityAt(e.p);
@@ -896,12 +935,39 @@ export class SketchController {
       if (hit) {
         const s = this.snapPoint(e.p, true);
         this.dragging = { id: hit, last: s.p, moved: false };
-      }
+      } else this.box = { a: e.p, b: e.p, additive: e.shift };
     } else if (e.type === "up") {
+      if (this.box) this.finishBox(this.box);
+      this.box = null;
       this.dragging = null;
       this.resolvedCache = [];
     }
     this.publish();
+  }
+
+  /** Select the constraint geometry inside (window) or touching (crossing) the dragged rectangle. */
+  private finishBox(box: { a: Vec2; b: Vec2; additive: boolean }) {
+    const px = this.env.pixelSize();
+    if (Math.hypot(box.b[0] - box.a[0], box.b[1] - box.a[1]) < 4 * px) return;
+    const crossing = box.b[0] < box.a[0];
+    const [x0, x1] = [Math.min(box.a[0], box.b[0]), Math.max(box.a[0], box.b[0])];
+    const [y0, y1] = [Math.min(box.a[1], box.b[1]), Math.max(box.a[1], box.b[1])];
+    const inside = (p: Vec2) => p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1;
+    const ids: Id[] = [];
+    for (const g of this.env.geometry()) {
+      if (g.type === "point") {
+        if (inside(g.p)) ids.push(g.id);
+        continue;
+      }
+      const outline = geomOutline(g, 48);
+      const dense: Vec2[] = [];
+      for (let i = 0; i + 1 < outline.length; i++) for (let t = 0; t < 16; t++) dense.push([outline[i]![0] + ((outline[i + 1]![0] - outline[i]![0]) * t) / 16, outline[i]![1] + ((outline[i + 1]![1] - outline[i]![1]) * t) / 16]);
+      if (outline.length) dense.push(outline[outline.length - 1]!);
+      if (crossing ? dense.some(inside) : dense.length > 0 && dense.every(inside)) ids.push(g.id);
+    }
+    if (!box.additive) this.env.selectGeom(null, false);
+    this.env.select(null);
+    for (const id of ids) if (!this.env.selectedGeom().includes(id)) this.env.selectGeom(id, true);
   }
 
   /** Keyboard while sketching. Returns true when handled. */

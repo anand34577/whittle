@@ -212,6 +212,8 @@ export interface SketchConstraint {
   type: ConstraintType;
   refs: Id[];
   value?: Expr;
+  /** A reference dimension: it shows the measured value but doesn't drive the sketch (added when a normal one would over-constrain it). */
+  driven?: boolean;
 }
 
 /* ───────────────────────────── Features ───────────────────────────── */

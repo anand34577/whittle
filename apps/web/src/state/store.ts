@@ -16,6 +16,7 @@ import {
   type Vec3,
   type WhittleDocument,
   History,
+  activeEnd,
   createsBody,
   dependents,
   reorderProblem,
@@ -67,6 +68,8 @@ export interface Session {
   isNew: boolean;
   base: WhittleDocument;
   label: string;
+  /** Editing an early step rolled the timeline back to it; finishing puts the marker back. */
+  isolated?: boolean;
   /** Step-by-step undo inside the session (e.g. each shape drawn in a sketch). */
   stack: { doc: WhittleDocument; key?: string; at: number }[];
 }
@@ -115,7 +118,7 @@ export interface AppState {
   measure: Pick[];
   /** Open radial (marking) menu, in viewport pixels. */
   radial: { x: number; y: number } | null;
-  panel: "palette" | "params" | "export" | "welcome" | "shortcuts" | "parts" | "versions" | "account" | "users" | "settings" | null;
+  panel: "palette" | "quick" | "params" | "export" | "welcome" | "shortcuts" | "parts" | "versions" | "account" | "users" | "settings" | null;
   /** The AI assistant panel (stays open alongside dialogs). */
   assistant: boolean;
   /** Desktop app, self-hosted server or plain browser (see platform.ts). */
@@ -126,6 +129,8 @@ export interface AppState {
   viewRequest: { kind: "home" | "fit" | "normal"; at: number } | null;
   /** Frame the model once the next rebuild arrives (after inserting things). */
   fitOnRegen: boolean;
+  /** What a click selects in the model: anything, or only bodies, faces or edges. */
+  pickPriority: "all" | "body" | "face" | "edge";
 }
 
 export const history = new History<WhittleDocument>();
@@ -164,6 +169,7 @@ export const useApp = create<AppState>(() => ({
   toasts: [],
   viewRequest: null,
   fitOnRegen: false,
+  pickPriority: "all",
 }));
 
 const set = useApp.setState;
@@ -299,7 +305,15 @@ export function editFeature(id: Id) {
   const f = findFeature(get().doc, id);
   if (!f) return;
   if (f.type === "sketch") return enterSketch(id, false);
-  set({ session: { featureId: id, isNew: false, base: get().doc, label: `Edit ${f.name}`, stack: [] }, selection: [] });
+  const base = get().doc;
+  const index = base.features.findIndex((x) => x.id === id);
+  // Like Fusion: editing an early step shows the model as it was then, so later steps neither hide it nor slow the edit.
+  const isolated = index >= 0 && index < activeEnd(base) - 1;
+  set({
+    session: { featureId: id, isNew: false, base, label: `Edit ${f.name}`, stack: [], isolated },
+    doc: isolated ? produce(base, (d) => void (d.rollback = index + 1)) : base,
+    selection: [],
+  });
   void doc;
 }
 
@@ -307,7 +321,16 @@ export function commitSession() {
   const { session, doc } = get();
   if (!session) return;
   set({ session: null });
+  if (session.isolated) {
+    // Marker back where it was; nothing edited means nothing to record.
+    if (session.stack.length === 0) return set({ doc: session.base });
+    return commitFinal(session, produce(doc, (d) => void (d.rollback = session.base.rollback)));
+  }
   if (doc === session.base) return;
+  commitFinal(session, doc);
+}
+
+function commitFinal(session: Session, doc: WhittleDocument) {
   // Record the whole session as one undo step, from the pre-session state.
   set({ doc: session.base });
   const next = history.apply(session.base, session.label, () => doc as Draft<WhittleDocument>);
