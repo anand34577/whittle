@@ -4,6 +4,7 @@ import { PRESETS, type ProviderConfig, activeProvider, askAssistant, clearConver
 import { confirmDialog } from "../state/dialogs";
 import { uid } from "@whittle/core";
 import { useApp } from "../state/store";
+import { Spinner } from "./feedback";
 import { Select, TextField } from "./controls";
 import { Icon } from "./icons";
 import { openSettings } from "./settingsTab";
@@ -126,7 +127,7 @@ export function AssistantPanel() {
             ),
           )
         )}
-        {busy && <div className="aithinking" aria-live="polite">Working…</div>}
+        {busy && <div className="aithinking" aria-live="polite"><Spinner /> Working…</div>}
       </div>
       <form
         className="assistant__compose"

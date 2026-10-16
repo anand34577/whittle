@@ -1,0 +1,154 @@
+/* Progress feedback: spinners, progress bars, the activity strip and the engine-loading card. */
+
+.spinner {
+  --size: 14px;
+  display: inline-block;
+  flex: none;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 22%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+.spinner--lg {
+  --size: 28px;
+  border-width: 3px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+[data-motion="reduced"] .spinner {
+  animation-duration: 2.4s;
+}
+
+.progress {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-3);
+}
+.progress__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease-out;
+}
+.progress--indeterminate .progress__fill {
+  width: 38%;
+  transition: none;
+  animation: slide 1.1s ease-in-out infinite;
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(270%);
+  }
+}
+
+/* A button that is waiting on something */
+.btn.is-loading {
+  position: relative;
+  cursor: progress;
+}
+.btn .spinner {
+  margin-right: 8px;
+}
+.btn.is-loading::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  vertical-align: -2px;
+  animation: spin 0.7s linear infinite;
+}
+
+/* The strip along the top of the status bar while something is saving, opening or exporting */
+.busyline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.busyline__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.busyline .progress {
+  width: 96px;
+  flex: none;
+}
+.statusbar {
+  position: relative;
+}
+.statusbar__strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 2px;
+}
+.statusbar__strip .progress {
+  height: 2px;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Rebuild chip over the 3D view */
+.viewport__chip {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  background: color-mix(in oklch, var(--bg-1) 94%, transparent);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(6px);
+  animation: fade 0.18s ease-out;
+}
+.viewport__chip {
+  left: 12px;
+  top: 14px;
+  z-index: 5;
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--r-3);
+}
+.viewport__chip .progress {
+  width: 84px;
+}
+
+/* Lists that are still loading */
+.skeleton {
+  border-radius: var(--r-3);
+  background: linear-gradient(90deg, var(--bg-2), var(--bg-3), var(--bg-2));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+.loading-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-3);
+  padding: var(--sp-3) 0;
+}

@@ -30,7 +30,7 @@ function schedule() {
     scheduled = false;
     const { doc, session } = useApp.getState();
     pending++;
-    useApp.setState({ regenBusy: true });
+    useApp.setState({ regenBusy: true, regenProgress: null });
     try {
       const result = await kernel!.regen(doc, session ? "preview" : "final", pickBeforeFor());
       if (result) useApp.setState({ regen: result, builtDoc: doc, kernelError: null });
@@ -40,7 +40,7 @@ function schedule() {
       useApp.setState({ kernelError: message === "Cancelled." ? null : message });
     } finally {
       pending--;
-      if (pending === 0) useApp.setState({ regenBusy: false });
+      if (pending === 0) useApp.setState({ regenBusy: false, regenProgress: null });
     }
   });
 }
@@ -48,6 +48,7 @@ function schedule() {
 export function startKernel() {
   if (kernel) return;
   kernel = new WorkerKernel();
+  kernel.onProgress = (done, total) => useApp.setState({ regenProgress: { done, total } });
   kernel.ready
     .then(() => {
       useApp.setState({ kernelReady: true });

@@ -33,6 +33,8 @@ import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/View
 import { Icon } from "./icons";
 import { ViewCube } from "./ViewCube";
 import { Slider } from "./controls";
+import { RebuildChip } from "./Activity";
+import { ProgressBar } from "./feedback";
 
 /** Lets App.tsx route key presses to the sketch controller first. */
 export const sketchKeys: { handle: ((e: KeyboardEvent) => boolean) | null; typeDigit: ((key: string) => boolean) | null } = {
@@ -759,10 +761,13 @@ export function ViewportView() {
             <span />
           </div>
           <p>Warming up the geometry engine</p>
+          <p className="muted small">The first start takes a few seconds.</p>
+          <ProgressBar label="Loading the geometry engine" />
         </div>
       )}
 
-      {regenBusy && kernelReady && <div className="viewport__busy" aria-live="polite" title="Rebuilding" />}
+      {regenBusy && kernelReady && <div className="viewport__busy" aria-hidden="true" />}
+      <RebuildChip />
 
       {mode.kind === "pickPlane" && (
         <div className="viewport__banner">

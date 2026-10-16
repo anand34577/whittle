@@ -1,4 +1,5 @@
 /** High-level commands used by the toolbar, shortcuts, palette and context bar. */
+import { startTask } from "./tasks";
 import {
   CONSTRUCT_MODES,
   CURVE_SOURCES,
@@ -298,10 +299,24 @@ export async function importFile(file: File) {
   const format = ext === "stl" ? "stl" : ext === "step" || ext === "stp" ? "step" : ext === "whittle" ? "whittle" : null;
   if (!format) return toast("warn", "Only STEP (.step, .stp), STL and Whittle (.whittle) files can be inserted.");
   if (file.size > 40 * 1024 * 1024) return toast("warn", "That file is larger than 40 MB. Try a simplified version.");
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  const f = makeImport(get().doc, file.name, format, btoa(bin));
+  // Reading and encoding a big file takes a moment: show how far along it is, and let the window breathe meanwhile.
+  const task = startTask(`Reading ${file.name}…`, 0);
+  let data: string;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let bin = "";
+    for (let i = 0, n = 0; i < bytes.length; i += 0x8000, n++) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      if (n % 32 === 31) {
+        task.update(i / bytes.length);
+        await new Promise((r) => setTimeout(r));
+      }
+    }
+    data = btoa(bin);
+  } finally {
+    task.done();
+  }
+  const f = makeImport(get().doc, file.name, format, data);
   f.name = file.name.replace(/\.[^.]+$/, "");
   beginNewFeature(f, `Import ${file.name}`);
   commitSession();

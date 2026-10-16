@@ -3,12 +3,13 @@ import { LENGTH_TO_MM, type Id, documentEvaluator, formatQuantity } from "@whitt
 import { matchFace } from "./actions";
 import { promptDialog } from "./dialogs";
 import { getKernel } from "./kernel";
+import { withTask } from "./tasks";
 import { mutate, toast, useApp } from "./store";
 
 export async function runInterference() {
   const { doc } = useApp.getState();
   try {
-    const r = await getKernel().inspect(doc, "interference");
+    const r = await withTask("Checking for overlaps…", () => getKernel().inspect(doc, "interference"));
     if (r.kind !== "interference") return;
     useApp.setState({ interference: r.items });
     if (!r.items.length) return toast("ok", "No bodies overlap.");
@@ -24,7 +25,7 @@ export async function runInterference() {
 export async function runGeometryCheck() {
   const { doc } = useApp.getState();
   try {
-    const r = await getKernel().inspect(doc, "validity");
+    const r = await withTask("Checking the geometry…", () => getKernel().inspect(doc, "validity"));
     if (r.kind !== "validity") return;
     if (!r.items.length) return toast("info", "There are no bodies to check.");
     const bad = r.items.filter((i) => !i.valid);
@@ -59,7 +60,7 @@ export async function runMinRadius() {
   if (v === null) return;
   const cutter = documentEvaluator(doc).eval(v, "length");
   if (!cutter.ok) return;
-  const r = await getKernel().inspect(doc, "radii");
+  const r = await withTask("Measuring inside corners…", () => getKernel().inspect(doc, "radii"));
   if (r.kind !== "radii") return;
   const bodies = useApp.getState().regen?.bodies ?? [];
   const tight = r.items.filter((i) => i.concave && i.radius < cutter.value / 2 - 1e-6);

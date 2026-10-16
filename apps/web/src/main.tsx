@@ -10,6 +10,7 @@ import "./styles/app.css";
 import "./styles/enhance.css";
 import "./styles/platform.css";
 import "./styles/controls.css";
+import "./styles/feedback.css";
 import "./styles/themes.css";
 import { App } from "./App";
 import { ErrorBoundary } from "./ui/ErrorBoundary";

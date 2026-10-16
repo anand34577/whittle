@@ -36,6 +36,7 @@ import { Icon } from "./icons";
 import { Checkbox, Select } from "./controls";
 import { ProfilePicker } from "./Settings";
 import { Modal } from "./Modal";
+import { Spinner } from "./feedback";
 export { Modal };
 import type { ExportFormat } from "@whittle/kernel";
 
@@ -479,7 +480,7 @@ function ServerLibrary() {
         )}
       </div>
       {error && <p className="note note--error">{error}</p>}
-      {list === null && !error && <p className="muted small">Loading…</p>}
+      {list === null && !error && <p className="loading-line"><Spinner /> Loading…</p>}
       {list?.length === 0 && <p className="muted small">Nothing saved yet. Designs you save appear here, with their full version history.</p>}
       <div className="lib-grid">
         {shown.map((d) => (
@@ -668,7 +669,7 @@ export function VersionsDialog() {
       <div className="modal__body">
         <p className="modal__lede">Every save keeps a version {where}. Restoring makes an old version current; the one it replaces stays in the list.</p>
         {error && <p className="note note--error">{error}</p>}
-        {list === undefined && !error && <p className="muted">Loading…</p>}
+        {list === undefined && !error && <p className="loading-line"><Spinner /> Loading…</p>}
         {list === null && <p className="muted">Save this design first. After that, every save is kept here.</p>}
         {list && list.length === 0 && <p className="muted">No earlier versions yet. They appear after you save again.</p>}
         {list && list.length > 0 && (

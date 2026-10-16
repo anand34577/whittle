@@ -23,6 +23,8 @@ export class WorkerKernel implements KernelHost {
   /** Import file contents the current engine already holds, so they aren't copied over again on every rebuild. */
   private sentImports = new Map<Id, string>();
   ready!: Promise<number>;
+  /** Progress of the rebuild in flight: timeline steps finished out of the total. */
+  onProgress: ((done: number, total: number) => void) | null = null;
 
   constructor() {
     this.spawn();
@@ -43,6 +45,7 @@ export class WorkerKernel implements KernelHost {
     mine.onmessage = (ev: MessageEvent<KernelResponse>) => {
       const msg = ev.data;
       if (msg.type === "ready") return onReady(msg.ms);
+      if (msg.type === "progress") return void (this.pending.has(msg.seq) && this.onProgress?.(msg.done, msg.total));
       if (msg.type === "error" && msg.seq === -1) return onFail(new Error(msg.message));
       const seq = msg.type === "regen" ? msg.result.seq : msg.seq;
       const p = this.pending.get(seq);

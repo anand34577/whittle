@@ -1061,9 +1061,11 @@ textarea::placeholder {
   border-top: 1px solid var(--line-soft);
 }
 .aithinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--text-3);
   font-size: var(--fs-sm);
-  animation: pulse 0.9s infinite alternate;
 }
 .assistant__compose {
   display: flex;

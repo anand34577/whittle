@@ -91,6 +91,8 @@ export interface AppState {
   /** The document `regen` was built from (so callers can wait for a specific change). */
   builtDoc: WhittleDocument | null;
   regenBusy: boolean;
+  /** Timeline steps finished in the rebuild under way (null when none is running). */
+  regenProgress: { done: number; total: number } | null;
   kernelReady: boolean;
   kernelError: string | null;
 
@@ -138,6 +140,7 @@ export const useApp = create<AppState>(() => ({
   regen: null,
   builtDoc: null,
   regenBusy: false,
+  regenProgress: null,
   kernelReady: false,
   kernelError: null,
   mode: { kind: "model" },

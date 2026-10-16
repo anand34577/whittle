@@ -130,6 +130,8 @@ export type KernelRequest =
 export type KernelResponse =
   | { type: "ready"; ms: number }
   | { type: "regen"; result: RegenResult }
+  /** A long rebuild is under way: `done` of `total` timeline steps are finished. */
+  | { type: "progress"; seq: number; done: number; total: number }
   | { type: "export"; seq: number; data: Uint8Array; mime: string; ext: string }
   | { type: "inspect"; seq: number; result: InspectResult }
   | { type: "error"; seq: number; message: string };

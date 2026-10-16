@@ -315,6 +315,8 @@ export class Builder {
   private curDoc: WhittleDocument | null = null;
   /** The snapshots of the walk in progress (one per feature built so far), for feature patterns. */
   private walkSnaps: Snapshot[] = [];
+  /** Told after every timeline step of a rebuild (done so far, total), so the interface can show progress. */
+  onProgress: ((done: number, total: number) => void) | null = null;
 
   /**
    * Repeat earlier features: whatever each one added to or cut from a body is copied by
@@ -398,6 +400,7 @@ export class Builder {
         snap = this.step(f, prev, ev, key);
       }
       nextCache.push(snap);
+      this.onProgress?.(i + 1, end);
       // A step that lost its body because an earlier step failed should say which one.
       const failedBefore = statuses.findLast((x) => x.state === "error");
       const failedName = failedBefore && doc.features.find((x) => x.id === failedBefore.id)?.name;

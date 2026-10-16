@@ -20,6 +20,7 @@ import {
 import type { ExportFormat } from "@whittle/kernel";
 import { importFile } from "./actions";
 import { placeImage } from "./refImage";
+import { startTask, withTask } from "./tasks";
 import { deleteStored, listStored, readStored, writeStored } from "./stored";
 import { getKernel } from "./kernel";
 import { addLocalVersion, listLocalVersions } from "./localHistory";
@@ -189,7 +190,7 @@ export async function openFromComputer() {
     } else {
       file = await pickFileFallback(FILE_EXTENSION + ",.json");
     }
-    const doc = deserializeDocument(new Uint8Array(await file.arrayBuffer()));
+    const doc = await withTask("Opening the file…", async () => deserializeDocument(new Uint8Array(await file.arrayBuffer())));
     show(doc, file.name, h ? { kind: "handle", handle: h } : { kind: "none" });
     toast("ok", `Opened ${file.name}`);
   } catch (e) {
@@ -214,9 +215,11 @@ export async function openPath(path: string, confirm = true) {
 export async function openServerDesign(id: string) {
   if (!(await confirmDiscard())) return;
   try {
-    const res = await api(`/designs/${encodeURIComponent(id)}`);
+    const { res, doc } = await withTask("Opening the design…", async () => {
+      const res = await api(`/designs/${encodeURIComponent(id)}`);
+      return { res, doc: deserializeDocument(new Uint8Array(await res.arrayBuffer())) };
+    });
     const version = Number(res.headers.get("x-whittle-version") ?? "1");
-    const doc = deserializeDocument(new Uint8Array(await res.arrayBuffer()));
     show(doc, doc.name, { kind: "server", id, version });
   } catch (e) {
     toast("error", errText(e, "Couldn't open that design."));
@@ -252,6 +255,7 @@ export async function saveDesign(saveAs = false): Promise<boolean> {
   if (saving) return false;
   commitSession();
   saving = true;
+  const task = startTask("Saving…");
   try {
     const { doc } = useApp.getState();
     const bytes = serializeDocument(doc, thumbnail());
@@ -296,6 +300,7 @@ export async function saveDesign(saveAs = false): Promise<boolean> {
     return false;
   } finally {
     saving = false;
+    task.done();
   }
 }
 
@@ -359,7 +364,7 @@ export async function exportDesign(format: ExportFormat, bodyId?: string) {
   commitSession();
   const { doc } = useApp.getState();
   try {
-    const file = await getKernel().export(doc, format, bodyId ? [bodyId] : undefined);
+    const file = await withTask(`Exporting ${format.toUpperCase()}…`, () => getKernel().export(doc, format, bodyId ? [bodyId] : undefined));
     const name = bodyId ? `${safeName(doc.name)} - ${safeName(doc.bodies[bodyId]?.name ?? "body")}` : safeName(doc.name);
     if (await saveBytes(file.data, `${name}.${file.ext}`, file.mime, EXPORT_FILTERS[file.ext]!)) toast("ok", `Exported ${format.toUpperCase()}`);
   } catch (e) {
@@ -435,6 +440,7 @@ async function versionBytes(item: VersionItem): Promise<Uint8Array> {
 /** Make an old version the current one (the version it replaces stays in the history). */
 export async function restoreVersion(item: VersionItem) {
   if (!(await confirmDiscard())) return;
+  const task = startTask("Restoring the version…");
   try {
     if (location.kind === "server") {
       const loc = location;
@@ -453,6 +459,8 @@ export async function restoreVersion(item: VersionItem) {
     else toast("info", "Version loaded. Save to keep it.");
   } catch (e) {
     toast("error", errText(e, "Couldn't restore that version."));
+  } finally {
+    task.done();
   }
 }
 

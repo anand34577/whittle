@@ -77,7 +77,16 @@ async function handle(req: KernelRequest) {
     if (req.type === "regen") {
       await builder.prepareImports(req.doc);
       if (req.seq < latestRegen) return;
+      // Report how far a long rebuild has got (at most every 100 ms; the main thread keeps running meanwhile).
+      let lastReport = 0;
+      builder.onProgress = (done, total) => {
+        const now = performance.now();
+        if (done < total && now - lastReport < 100) return;
+        lastReport = now;
+        post({ type: "progress", seq: req.seq, done, total });
+      };
       const r = builder.regen(req.doc, req.quality, req.pickBefore);
+      builder.onProgress = null;
       const transfer: Transferable[] = [];
       for (const b of [...r.bodies, ...(r.pickBodies ?? [])]) {
         transfer.push(b.positions.buffer, b.normals.buffer, b.indices.buffer, b.faceRanges.buffer, b.edgePositions.buffer, b.edgeRanges.buffer);
