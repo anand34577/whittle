@@ -6,6 +6,11 @@ let kernel: WorkerKernel | null = null;
 let scheduled = false;
 let pending = 0;
 
+/** Stop a long rebuild (the engine restarts, and the design rebuilds from scratch on the next change). */
+export function stopRebuild() {
+  kernel?.cancel();
+}
+
 export function getKernel(): WorkerKernel {
   if (!kernel) throw new Error("Kernel not started");
   return kernel;
@@ -30,7 +35,9 @@ function schedule() {
       const result = await kernel!.regen(doc, session ? "preview" : "final", pickBeforeFor());
       if (result) useApp.setState({ regen: result, builtDoc: doc, kernelError: null });
     } catch (e) {
-      useApp.setState({ kernelError: e instanceof Error ? e.message : String(e) });
+      const message = e instanceof Error ? e.message : String(e);
+      // A rebuild the person stopped is not an error.
+      useApp.setState({ kernelError: message === "Cancelled." ? null : message });
     } finally {
       pending--;
       if (pending === 0) useApp.setState({ regenBusy: false });

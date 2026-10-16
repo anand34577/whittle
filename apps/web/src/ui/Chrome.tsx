@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable } from "../state/commands";
 import { aiAvailable } from "../state/platform";
 import { hintFor } from "../state/hints";
+import { stopRebuild } from "../state/kernel";
 import { history, mutate, setTheme, useApp } from "../state/store";
 import { AccountButton } from "./Account";
 import { type Profile, THEMES } from "../state/prefs";
@@ -302,6 +303,11 @@ export function StatusBar() {
           <span className={`status-dot ${state.regenBusy ? "status-dot--busy" : "status-dot--ok"}`}>
             {state.regenBusy ? "Building" : r ? `Built in ${Math.max(1, Math.round(r.ms))} ms` : "Ready"}
           </span>
+        )}
+        {state.regenBusy && state.kernelReady && !state.kernelError && (
+          <button className="link" onClick={stopRebuild} title="Stop the rebuild (it restarts the engine)">
+            Stop
+          </button>
         )}
         <span className="mono">{state.doc.units}</span>
       </span>
