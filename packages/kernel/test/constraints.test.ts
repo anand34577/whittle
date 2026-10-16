@@ -133,6 +133,19 @@ describe("constraint solving", () => {
     expect(sol.message).toMatch(/Horizontal.*Vertical/);
   });
 
+  it("a reference (driven) dimension measures without constraining", () => {
+    const { sk } = setup();
+    const line = addLine(sk, [0, 0], [10, 0]);
+    ok(addConstraint(sk, "horizontal", [line]));
+    ok(addConstraint(sk, "distance", [line], "25"));
+    const extra = ok(addConstraint(sk, "distance", [line], "30"));
+    expect(solveSketch(sk, createEvaluator([], "mm"))!.state).toBe("over");
+    sk.constraints!.find((c) => c.id === extra)!.driven = true;
+    const sol = solveSketch(sk, createEvaluator([], "mm"))!;
+    expect(sol.state).not.toBe("over");
+    expect(sol.bad).toEqual([]);
+  });
+
   it("reports a bad dimension formula as a readable sketch error", () => {
     const { doc, sk } = setup();
     rectangle(sk, "nope * 2", "20");

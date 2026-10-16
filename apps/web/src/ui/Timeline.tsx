@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { Feature } from "@whittle/core";
-import { activeEnd } from "@whittle/core";
+import { activeEnd, dependents, featureInputs, reorderProblem } from "@whittle/core";
 import { confirmDeleteFeature, editFeature, moveFeature, mutate, updateFeature, useApp } from "../state/store";
 import { Icon } from "./icons";
 import { FEATURE_ICONS } from "./PropertiesPanel";
@@ -22,6 +22,9 @@ export function Timeline() {
   const regen = useApp((s) => s.regen);
   const session = useApp((s) => s.session);
   const selection = useApp((s) => s.selection);
+  const hover = useApp((s) => s.hover);
+  // The step under the pointer: its parents and children are marked, and its geometry glows in the model.
+  const [hot, setHot] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const [dragStep, setDragStep] = useState<{ from: number; over: number } | null>(null);
@@ -55,6 +58,16 @@ export function Timeline() {
     session?.featureId === f.id || selection.some((p) => (p.kind === "sketch" && p.sketchId === f.id) || ((p.kind === "body" || p.kind === "face" || p.kind === "edge") && p.bodyId === f.id));
 
   const markerAt = drag ?? end;
+  const hotFeature = doc.features.find((x) => x.id === hot);
+  const parents = new Set(hotFeature ? featureInputs(hotFeature) : []);
+  const children = new Set(hotFeature ? dependents(doc, hotFeature.id).map((x) => x.id) : []);
+  // Hovering geometry in the model lights the step that made it.
+  const hovered = hover && (hover.kind === "sketch" ? hover.sketchId : "bodyId" in hover ? hover.bodyId : null);
+  const glow = (f: Feature) => {
+    const target = f.type === "sketch" ? { kind: "sketch" as const, sketchId: f.id } : doc.bodies[f.id] ? { kind: "body" as const, bodyId: f.id } : null;
+    const body = featureInputs(f).find((i) => doc.bodies[i]);
+    useApp.setState({ hover: target ?? (body ? { kind: "body", bodyId: body } : null) });
+  };
 
   return (
     <div className="timeline" aria-label="Timeline">
@@ -91,6 +104,7 @@ export function Timeline() {
                 onDragOver={(e) => {
                   if (!dragStep) return;
                   e.preventDefault();
+                  e.dataTransfer.dropEffect = reorderProblem(doc, dragStep.from, i) ? "none" : "move";
                   if (dragStep.over !== i) setDragStep({ ...dragStep, over: i });
                 }}
                 onDrop={(e) => {
@@ -99,7 +113,9 @@ export function Timeline() {
                   setDragStep(null);
                 }}
                 onDragEnd={() => setDragStep(null)}
-                className={`step step--${state} ${isSelected(f) ? "is-selected" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? "is-drop-before" : ""}`}
+                className={`step step--${state} ${isSelected(f) ? "is-selected" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? (reorderProblem(doc, dragStep.from, i) ? "is-drop-blocked" : "is-drop-before") : ""} ${parents.has(f.id) ? "is-parent" : ""} ${children.has(f.id) ? "is-child" : ""} ${hovered === f.id ? "is-hovered" : ""}`}
+                onPointerEnter={() => (setHot(f.id), glow(f))}
+                onPointerLeave={() => (setHot(null), useApp.setState({ hover: null }))}
                 title={`${f.name}${st?.message ? "\n" + st.message : ""}\nDouble-click to edit · drag to reorder`}
                 onClick={() =>
                   useApp.setState({

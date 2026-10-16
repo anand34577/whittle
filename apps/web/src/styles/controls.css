@@ -529,9 +529,8 @@ textarea::placeholder {
   color: var(--text-1);
 }
 .tabs__tab.is-on {
-  background: var(--bg-3);
+  background: var(--accent-soft);
   color: var(--text-1);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 .field--stack {
   grid-template-columns: 1fr;
@@ -781,7 +780,6 @@ textarea::placeholder {
   flex-wrap: wrap;
   /* Room for the selection ring, which sits outside the dot and would be clipped by the pane. */
   padding: 6px;
-  margin: -6px;
 }
 .accentdot {
   width: 28px;

@@ -15,6 +15,7 @@ import {
   entityLoops,
   geomOutline,
   isSketchConsumed,
+  measureDimension,
   geomType,
   pointAt,
   resolveEntity,
@@ -22,7 +23,7 @@ import {
   trim,
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace } from "../state/actions";
-import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure } from "../state/measure";
@@ -32,8 +33,11 @@ import { type SketchUIState, SketchController } from "../viewport/sketchTools";
 import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/Viewport";
 import { Icon } from "./icons";
 import { ViewCube } from "./ViewCube";
+import { DragHandles } from "./DragHandle";
 import { Slider } from "./controls";
 import { RebuildChip } from "./Activity";
+import { InlinePrompt } from "./InlinePrompt";
+import { MissingRefs } from "./MissingRefs";
 import { ProgressBar } from "./feedback";
 
 /** Lets App.tsx route key presses to the sketch controller first. */
@@ -62,10 +66,11 @@ interface ConstraintMark {
   at: Vec2;
   text: string;
   dim: boolean;
+  driven?: boolean;
 }
 
 /** Where to label each constraint on the canvas: dimensions show their value, relations a glyph on each thing they relate. */
-function constraintMarks(sk: SketchFeature, sol?: SketchSolution): ConstraintMark[] {
+function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, units: keyof typeof LENGTH_TO_MM): ConstraintMark[] {
   const geo = new Map(resolveGeometry(sk, sol).map((g) => [g.id, g]));
   const mid = (a: Vec2, b: Vec2): Vec2 => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   // ponytail: the axes get no label of their own; a dimension to one sits at the other end.
@@ -84,7 +89,9 @@ function constraintMarks(sk: SketchFeature, sol?: SketchSolution): ConstraintMar
       const pts = c.refs.map(anchor).filter((p): p is Vec2 => !!p);
       if (!pts.length) continue;
       const prefix = c.type === "radius" ? "R" : c.type === "angle" ? "∠" : "";
-      out.push({ key: c.id, id: c.id, at: pts.length > 1 ? mid(pts[0]!, pts[1]!) : pts[0]!, text: prefix + c.value, dim: true });
+      // A reference dimension reads out what the sketch measures, in brackets.
+      const measured = c.driven ? trim(c.type === "angle" ? (measureDimension(sk, c.type, c.refs, sol) * 180) / Math.PI : measureDimension(sk, c.type, c.refs, sol) / LENGTH_TO_MM[units], 3) : null;
+      out.push({ key: c.id, id: c.id, at: pts.length > 1 ? mid(pts[0]!, pts[1]!) : pts[0]!, text: measured !== null ? `(${prefix}${measured})` : prefix + c.value, dim: true, driven: !!c.driven });
       continue;
     }
     const glyph = GLYPHS[c.type];
@@ -206,6 +213,20 @@ function DockButton({ id, label }: { id: string; label?: string }) {
   );
 }
 
+/** Selection priority: which kind of thing a click picks (Fusion's Selection Priority). */
+function PriorityPicker() {
+  const p = useApp((s) => s.pickPriority);
+  return (
+    <div className="dock__group prio" role="radiogroup" aria-label="What a click selects">
+      {([["all", "Any"], ["body", "Body"], ["face", "Face"], ["edge", "Edge"]] as const).map(([id, label]) => (
+        <button key={id} role="radio" aria-checked={p === id} className={`prio__btn ${p === id ? "is-on" : ""}`} title={`Select: ${label}`} onClick={() => useApp.setState({ pickPriority: id })}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** The floating view dock: display style, inspection tools and capture. */
 function ViewDock() {
   return (
@@ -216,6 +237,7 @@ function ViewDock() {
         <DockButton id="display-wire" />
         <DockButton id="display-xray" />
       </div>
+      <PriorityPicker />
       <div className="dock__group">
         <DockButton id="measure" label="Measure" />
         <DockButton id="section" label="Section" />
@@ -316,6 +338,7 @@ export function ViewportView() {
   const radial = useApp((s) => s.radial);
   const selectedEntity = useApp((s) => s.selectedEntity);
   const sketchSel = useApp((s) => s.sketchSel);
+  const priority = useApp((s) => s.pickPriority);
   const viewRequest = useApp((s) => s.viewRequest);
   const regenBusy = useApp((s) => s.regenBusy);
   const kernelReady = useApp((s) => s.kernelReady);
@@ -341,10 +364,9 @@ export function ViewportView() {
           sketchMutate("Add shape", (s) => {
             s.entities.push(e);
           });
-          if (select) {
-            setSketchTool("select");
-            useApp.setState({ selectedEntity: e.id });
-          } else useApp.setState({ selectedEntity: null });
+          if (select) setSketchTool("select");
+          // The shape just drawn is the selected one, so the panel shows its properties.
+          useApp.setState({ selectedEntity: e.id, sketchSel: [] });
         },
         select: (id) => useApp.setState({ selectedEntity: id }),
         selected: () => useApp.getState().selectedEntity,
@@ -397,6 +419,10 @@ export function ViewportView() {
         },
         trim: trimAt,
         extend: extendAt,
+        convert: (id) => {
+          makeConstrainable(id);
+          toast("info", "Converted to lines and arcs. Click again to use it.");
+        },
         selectGeom: (id, additive) => {
           const cur = useApp.getState().sketchSel;
           if (!id) return useApp.setState({ sketchSel: additive ? cur : [] });
@@ -417,6 +443,12 @@ export function ViewportView() {
       onClick: (p, additive) => {
         useApp.setState({ radial: null });
         handlePick(p, additive);
+      },
+      onBoxSelect: (picks, additive) => {
+        if (useApp.getState().mode.kind !== "model") return;
+        useApp.setState({ radial: null });
+        if (!additive) handlePick(null, false);
+        for (const p of picks) handlePick(p, true);
       },
       onDoubleClick: (p) => {
         if (p?.kind === "sketch") editFeature(p.sketchId);
@@ -470,7 +502,8 @@ export function ViewportView() {
 
   useEffect(() => {
     vp?.setPickBodies(regen?.pickBodies);
-  }, [vp, regen]);
+    vp?.setGhost(session ? regen?.ghost : undefined);
+  }, [vp, regen, session]);
 
   // Initial framing once the first model arrives; re-frame after inserting parts.
   const framed = useRef(false);
@@ -509,9 +542,10 @@ export function ViewportView() {
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
     else if (f?.type === "loft") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
+    else if (mode.kind === "model" && priority !== "all") filter = { faces: priority === "face", edges: priority === "edge", planes: false, sketches: priority === "body" };
     vp.setPickFilter(filter);
     vp.setPlanesVisible(mode.kind === "pickPlane");
-  }, [vp, mode, session, sessionFeature]);
+  }, [vp, mode, session, sessionFeature, priority]);
 
   // Sketch editing frame.
   const pendingNormal = useRef(false);
@@ -768,6 +802,8 @@ export function ViewportView() {
 
       {regenBusy && kernelReady && <div className="viewport__busy" aria-hidden="true" />}
       <RebuildChip />
+      <InlinePrompt />
+      {session && mode.kind === "model" && <MissingRefs vp={vp} feature={sessionFeature} regen={regen} />}
 
       {mode.kind === "pickPlane" && (
         <div className="viewport__banner">
@@ -827,6 +863,23 @@ export function ViewportView() {
         </div>
       )}
 
+      {mode.kind === "model" && (session || view.section) && (
+        <DragHandles vp={vp} feature={session ? sessionFeature : undefined} regen={regen} units={doc.units} section={view.section} setSection={(offset) => view.section && setView({ section: { ...view.section, offset } })} />
+      )}
+
+      {frame && vp && sketchUI?.box && (() => {
+        const a = vp.sketchToScreen(sketchUI.box.a, frame);
+        const b = vp.sketchToScreen(sketchUI.box.b, frame);
+        if (!a || !b) return null;
+        return <div className={`selbox ${sketchUI.box.crossing ? "is-crossing" : ""}`} style={{ left: Math.min(a[0], b[0]), top: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]) }} aria-hidden="true" />;
+      })()}
+
+      {snapScreen && sketchUI?.hint && (
+        <div className="snap-badge" style={{ left: snapScreen[0] + 14, top: snapScreen[1] + 14 }} aria-hidden="true">
+          {sketchUI.hint}
+        </div>
+      )}
+
       {snapScreen && sketchUI?.snap && sketchUI.snap.kind !== "free" && (
         <div className={`snap snap--${sketchUI.snap.kind}`} style={{ left: snapScreen[0], top: snapScreen[1] }} aria-hidden="true" />
       )}
@@ -840,7 +893,7 @@ export function ViewportView() {
           const bad = new Set(frame.solution?.bad);
           // Glyphs that land on the same spot line up side by side.
           const taken = new Map<string, number>();
-          return constraintMarks(sk, frame.solution).map((m) => {
+          return constraintMarks(sk, frame.solution, doc.units).map((m) => {
             const pos = vp.sketchToScreen(m.at, frame);
             if (!pos) return null;
             const spot = `${m.dim}:${Math.round(pos[0] / 6)}:${Math.round(pos[1] / 6)}`;
@@ -851,7 +904,7 @@ export function ViewportView() {
             return (
               <button
                 key={m.key}
-                className={`cmark ${m.dim ? "cmark--dim mono" : "cmark--glyph"} ${sketchSel.includes(m.id) ? "is-selected" : ""} ${bad.has(m.id) ? "is-bad" : ""}`}
+                className={`cmark ${m.dim ? "cmark--dim mono" : "cmark--glyph"} ${m.driven ? "cmark--driven" : ""} ${sketchSel.includes(m.id) ? "is-selected" : ""} ${bad.has(m.id) ? "is-bad" : ""}`}
                 style={{ left: pos[0] + n * (m.dim ? 0 : 20), top: pos[1] + n * (m.dim ? 22 : 0) }}
                 data-constraint={m.id}
                 aria-label={`${CONSTRAINT_LABELS[c.type]}${c.value !== undefined ? ` ${c.value}` : ""}`}
@@ -861,7 +914,7 @@ export function ViewportView() {
                   const cur = useApp.getState().sketchSel;
                   useApp.setState({ sketchSel: e.shiftKey ? (cur.includes(m.id) ? cur.filter((x) => x !== m.id) : [...cur, m.id]) : [m.id], selectedEntity: null });
                 }}
-                onDoubleClick={() => m.dim && void editDimension(m.id)}
+                onDoubleClick={() => m.dim && void editDimension(m.id, [pos[0], pos[1]])}
               >
                 {m.text}
                 {unit && <small>{unit}</small>}

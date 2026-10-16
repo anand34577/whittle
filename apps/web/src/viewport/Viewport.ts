@@ -62,6 +62,8 @@ export interface ViewportCallbacks {
   onCamera(): void;
   /** Right-click without dragging: open the radial menu. */
   onContext(p: Pick | null, screen: Vec2): void;
+  /** Rubber-band selection finished: what was inside (drag right) or touched (drag left). */
+  onBoxSelect?(picks: Pick[], additive: boolean): void;
 }
 
 interface BodyView {
@@ -826,6 +828,29 @@ export class Viewport {
     this.invalidate();
   }
 
+  private ghost: THREE.Mesh | null = null;
+
+  /** A translucent red volume: what the feature being edited is cutting away. */
+  setGhost(b: BodyResult | undefined) {
+    if (this.ghost) {
+      this.overlay.remove(this.ghost);
+      this.disposeObject(this.ghost);
+      this.ghost = null;
+    }
+    if (b) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(b.positions, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(b.normals, 3));
+      geo.setIndex(new THREE.BufferAttribute(b.indices, 1));
+      const mat = new THREE.MeshBasicMaterial({ color: "#e5484d", transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+      this.ghost = new THREE.Mesh(geo, mat);
+      this.ghost.raycast = () => {};
+      this.ghost.renderOrder = 5;
+      this.overlay.add(this.ghost);
+    }
+    this.invalidate();
+  }
+
   /** Bodies used for picking while a feature previews (shown as an edge overlay only). */
   setPickBodies(list: BodyResult[] | undefined) {
     for (const v of this.pickBodies) this.dropView(v, this.overlay);
@@ -1238,8 +1263,61 @@ export class Viewport {
     if (!this.sketchFrame) return false;
     const p = this.sketchPoint(e);
     if (!p) return false;
-    this.cb.onSketchPointer({ type, p, button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey, screen: this.screen(e), client: [e.clientX, e.clientY] });
+    this.cb.onSketchPointer({ type, p, button: e.button, shift: e.shiftKey, alt: e.altKey || e.ctrlKey || e.metaKey, ctrl: e.ctrlKey || e.metaKey, screen: this.screen(e), client: [e.clientX, e.clientY] });
     return true;
+  }
+
+  private box: { client: Vec2; screen: Vec2; el: HTMLDivElement | null } | null = null;
+
+  /** Faces (or, when only edges may be picked, edges) inside / touching the screen rectangle. Alt selects through to hidden ones. */
+  private boxSelect(a: Vec2, b: Vec2, through: boolean): Pick[] {
+    const crossing = b[0] < a[0];
+    const [x0, x1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])];
+    const [y0, y1] = [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+    const inside = (w: Vec3) => {
+      const p = this.worldToScreen(w);
+      return p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1;
+    };
+    const views = [...this.bodies.values()].filter((v) => v.visible);
+    const meshes = views.map((v) => v.mesh);
+    const tol = this.orbit.distance * 0.004;
+    const visible = (w: Vec3) => {
+      if (through) return true;
+      const p = this.worldToScreen(w);
+      this.raycaster.setFromCamera(new THREE.Vector2((p[0] / this.size.x) * 2 - 1, -((p[1] / this.size.y) * 2 - 1)), this.camera);
+      const hit = this.raycaster.intersectObjects(meshes, false)[0];
+      const dist = new THREE.Vector3(...w).sub(this.raycaster.ray.origin).dot(this.raycaster.ray.direction);
+      return !hit || hit.distance >= dist - tol;
+    };
+    const edgePoints = (v: BodyView, ei: number): Vec3[] => {
+      const pos = v.data.edgePositions;
+      const s0 = v.data.edgeRanges[ei * 2]!;
+      const c = v.data.edgeRanges[ei * 2 + 1]!;
+      const out: Vec3[] = [];
+      for (let k = s0; k + 1 < s0 + c; k++) {
+        const p: Vec3 = [pos[k * 3]!, pos[k * 3 + 1]!, pos[k * 3 + 2]!];
+        const q: Vec3 = [pos[k * 3 + 3]!, pos[k * 3 + 4]!, pos[k * 3 + 5]!];
+        for (let t = 0; t < 6; t++) out.push([p[0] + ((q[0] - p[0]) * t) / 6, p[1] + ((q[1] - p[1]) * t) / 6, p[2] + ((q[2] - p[2]) * t) / 6]);
+      }
+      return out;
+    };
+    const hits = (pts: Vec3[]) => pts.length > 0 && (crossing ? pts.some(inside) : pts.every(inside));
+    const out: Pick[] = [];
+    for (const v of views) {
+      if (this.filter.faces) {
+        v.data.faces.forEach((f, fi) => {
+          const pts = (v.data.faceEdges[fi] ?? []).flatMap((ei) => edgePoints(v, ei));
+          if (!pts.length) pts.push(f.center);
+          if (hits(pts) && visible(f.center)) out.push({ kind: "face", bodyId: v.id, index: fi });
+        });
+      } else if (this.filter.edges) {
+        for (let ei = 0; ei < v.data.edgeRanges.length / 2; ei++) {
+          const pts = edgePoints(v, ei);
+          if (hits(pts) && visible(pts[Math.floor(pts.length / 2)]!)) out.push({ kind: "edge", bodyId: v.id, index: ei });
+        }
+      }
+    }
+    return out;
   }
 
   private onPointerDown = (e: PointerEvent) => {
@@ -1250,9 +1328,24 @@ export class Viewport {
     // Middle-button presses would otherwise start the browser's autoscroll.
     if (e.button === 1) e.preventDefault();
     this.drag = { x: e.clientX, y: e.clientY, button: e.button, moved: false, mode };
+    // Orbit around the point under the cursor (when there is one), so the model never swings away.
+    if (mode === "orbit" && !inSketch) {
+      const hit = this.pick(e);
+      const at = hit && "at" in hit ? hit.at : undefined;
+      if (at) {
+        const dir = new THREE.Vector3().subVectors(this.orbit.target, this.camera.position).normalize();
+        const dist = new THREE.Vector3(...at).sub(this.camera.position).dot(dir);
+        if (dist > 0.5) {
+          this.orbit.target.copy(this.camera.position).addScaledVector(dir, dist);
+          this.orbit.distance = dist;
+        }
+      }
+    }
     this.cb.onContext(null, [-1, -1]);
     this.anim = null;
     if (inSketch && e.button === 0) this.sketchEvent("down", e);
+    // Left-drag on empty space (where the navigation style leaves it free) rubber-bands a selection.
+    if (!inSketch && e.button === 0 && mode === "none") this.box = { client: [e.clientX, e.clientY], screen: this.screen(e), el: null };
   };
 
   private onPointerMove = (e: PointerEvent) => {
@@ -1282,6 +1375,19 @@ export class Viewport {
         return;
       }
     }
+    if (this.box && d?.moved) {
+      if (!this.box.el) {
+        const el = document.createElement("div");
+        el.className = "selbox";
+        this.container.appendChild(el);
+        this.box.el = el;
+      }
+      const r = this.container.getBoundingClientRect();
+      const [x0, y0] = this.box.client;
+      this.box.el.classList.toggle("is-crossing", e.clientX < x0);
+      Object.assign(this.box.el.style, { left: Math.min(x0, e.clientX) - r.left + "px", top: Math.min(y0, e.clientY) - r.top + "px", width: Math.abs(e.clientX - x0) + "px", height: Math.abs(e.clientY - y0) + "px" });
+      return;
+    }
     if (this.sketchFrame) {
       this.sketchEvent("move", e);
       return;
@@ -1305,6 +1411,13 @@ export class Viewport {
     if (!d) return;
     if (d.button === 2 && !d.moved) {
       this.cb.onContext(this.sketchFrame ? null : this.pick(e), this.screen(e));
+      return;
+    }
+    const box = this.box;
+    this.box = null;
+    box?.el?.remove();
+    if (box?.el && d.moved) {
+      this.cb.onBoxSelect?.(this.boxSelect(box.screen, this.screen(e), e.altKey), e.shiftKey || e.ctrlKey || e.metaKey);
       return;
     }
     if (this.sketchFrame) {

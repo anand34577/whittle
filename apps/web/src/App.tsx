@@ -6,7 +6,7 @@ import { startKernel } from "./state/kernel";
 import { forgetUserSettings, loadUserSettings } from "./state/userSettings";
 import { cancelSession, commitSession, finishSketch, setSketchTool, toast, useApp } from "./state/store";
 import { Browser } from "./ui/Browser";
-import { CommandPalette, StatusBar, TitleBar, Toasts, Toolbar } from "./ui/Chrome";
+import { CommandPalette, QuickBox, StatusBar, TitleBar, Toasts, Toolbar } from "./ui/Chrome";
 import { AccountDialog, SignIn, UsersDialog } from "./ui/Account";
 import { Coach, ExportDialog, ParamsDialog, ShortcutsDialog, VersionsDialog, Welcome } from "./ui/Dialogs";
 import { DialogHost, TooltipLayer } from "./ui/DialogHost";
@@ -34,6 +34,12 @@ function onKey(e: KeyboardEvent) {
     return;
   }
   if (document.querySelector(".scrim--dialog")) return;
+  // Space: tools and search right at the cursor, for what you are doing now.
+  if (e.key === " " && !mod && !e.altKey && !isTyping(e) && !s.panel && !s.session) {
+    e.preventDefault();
+    useApp.setState({ panel: "quick" });
+    return;
+  }
   // Escape closes the open panel even when focus isn't inside it.
   if (s.panel && e.key === "Escape" && !isTyping(e)) {
     useApp.setState({ panel: null });
@@ -162,6 +168,7 @@ export function App() {
       <Coach />
       <Toasts />
       {panel === "palette" && <CommandPalette />}
+      {panel === "quick" && <QuickBox />}
       {panel === "params" && <ParamsDialog />}
       {panel === "export" && <ExportDialog />}
       {panel === "welcome" && platformReady && !signedOut && <Welcome />}

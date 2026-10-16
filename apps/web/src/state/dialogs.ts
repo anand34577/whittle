@@ -62,8 +62,21 @@ export function confirmDialog(opts: { title: string; message: string; confirmLab
   );
 }
 
-/** Ask for a value. Resolves null when cancelled. */
+/** Where on the canvas a value is asked for in place, instead of in a dialog (set by the viewport). */
+export interface InlinePromptRequest {
+  at: [number, number];
+  title: string;
+  label: string;
+  initial: string;
+  unit?: string;
+  validate?: (v: string) => string | null;
+  resolve: (v: string | null) => void;
+}
+export const inlinePromptHost: { show: ((r: InlinePromptRequest) => void) | null } = { show: null };
+
+/** Ask for a value. Resolves null when cancelled. With `at` (canvas pixels) the box opens right there. */
 export function promptDialog(opts: {
+  at?: [number, number];
   title: string;
   label: string;
   message?: string;
@@ -75,6 +88,10 @@ export function promptDialog(opts: {
   validate?: (v: string) => string | null;
   choices?: { label: string; value: string }[];
 }): Promise<string | null> {
+  if (opts.at && inlinePromptHost.show) {
+    const show = inlinePromptHost.show;
+    return new Promise((resolve) => show({ at: opts.at!, title: opts.title, label: opts.label, initial: opts.initial ?? "", unit: opts.unit, validate: opts.validate, resolve }));
+  }
   return new Promise((resolve) =>
     open({
       kind: "prompt",

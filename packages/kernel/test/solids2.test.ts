@@ -306,6 +306,28 @@ describe("silhouette split, branching pipes and derived designs", () => {
   });
 });
 
+describe("a fillet that lost one of its edges", () => {
+  it("rounds the edges it still finds and turns yellow instead of failing", async () => {
+    const { makeFillet } = await import("@whittle/core");
+    const doc = newDocument();
+    const b = prim(doc, "box", { width: "20", depth: "20", height: "20" });
+    const body = regen(doc).bodies[0]!;
+    const e = body.edges.find((x) => Math.abs(x.tangent[2]) > 0.99)!;
+    const f = push(doc, makeFillet(doc) as import("@whittle/core").FilletFeature);
+    f.radius = "3";
+    f.edges = [
+      { bodyId: b.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length },
+      { bodyId: b.id, mid: [500, 500, 500], tangent: [0.577, 0.577, 0.577], curve: "CIRCLE", length: 5 },
+    ];
+    const r = regen(doc);
+    expect(status(r, f.id).state).toBe("warning");
+    expect(status(r, f.id).message).toMatch(/1 of the 2/);
+    expect(vol(r)).toBeLessThan(8000);
+    f.edges = [f.edges[1]!];
+    expect(status(regen(doc), f.id).state).toBe("error");
+  });
+});
+
 describe("delete a fillet or chamfer", () => {
   it("restores a sharp convex edge and an inside corner", async () => {
     const { makeFillet, makeChamfer } = await import("@whittle/core");

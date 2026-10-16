@@ -426,7 +426,6 @@ kbd {
 .tool.is-active {
   background: var(--accent-soft);
   color: var(--accent);
-  box-shadow: inset 0 -2px 0 var(--accent);
 }
 .tool__label {
   font-size: var(--fs-xs);
@@ -959,14 +958,14 @@ kbd {
 .note--error {
   background: var(--danger-soft);
   color: var(--text-1);
-  box-shadow: inset 2px 0 0 var(--danger);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--danger) 45%, transparent);
 }
 .note--error svg {
   color: var(--danger);
 }
 .note--warning {
   background: color-mix(in oklch, var(--warn) 14%, transparent);
-  box-shadow: inset 2px 0 0 var(--warn);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--warn) 45%, transparent);
 }
 .note--warning svg {
   color: var(--warn);
@@ -1020,6 +1019,7 @@ kbd {
 }
 
 .swatches {
+  padding: 4px;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -1181,7 +1181,7 @@ kbd {
 .seg__btn.is-on {
   background: var(--bg-3);
   color: var(--text-1);
-  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 .toggle {
@@ -1474,13 +1474,13 @@ kbd {
   animation: rise var(--dur) var(--ease);
 }
 .toast--ok {
-  box-shadow: var(--shadow-pop), inset 2px 0 0 var(--ok);
+  box-shadow: var(--shadow-pop), inset 0 0 0 1px color-mix(in oklch, var(--ok) 50%, transparent);
 }
 .toast--warn {
-  box-shadow: var(--shadow-pop), inset 2px 0 0 var(--warn);
+  box-shadow: var(--shadow-pop), inset 0 0 0 1px color-mix(in oklch, var(--warn) 50%, transparent);
 }
 .toast--error {
-  box-shadow: var(--shadow-pop), inset 2px 0 0 var(--danger);
+  box-shadow: var(--shadow-pop), inset 0 0 0 1px color-mix(in oklch, var(--danger) 50%, transparent);
 }
 @keyframes rise {
   from {
@@ -1551,9 +1551,8 @@ kbd {
   color: var(--text-2);
 }
 .palette__item.is-on {
-  background: var(--bg-3);
+  background: var(--accent-soft);
   color: var(--text-1);
-  box-shadow: inset 2px 0 0 var(--accent);
 }
 .palette__label {
   font-weight: 500;
@@ -1728,7 +1727,14 @@ kbd {
   grid-template-columns: 250px 1fr;
   gap: 24px;
   padding: 4px 20px 22px;
+  overflow: hidden;
+  min-height: 0;
+}
+/* Start stays put; only the designs/templates column scrolls. */
+.welcome__right {
   overflow: auto;
+  min-height: 0;
+  padding-right: 4px;
 }
 .welcome__start {
   display: flex;
@@ -1914,6 +1920,10 @@ kbd {
   }
   .welcome {
     grid-template-columns: 1fr;
+    overflow: auto;
+  }
+  .welcome__right {
+    overflow: visible;
   }
 }
 

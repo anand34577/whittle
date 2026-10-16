@@ -40,7 +40,12 @@ interface Snapshot {
   bodies: Map<Id, Shape3D>;
   sketches: Map<Id, SketchBuilt>;
   status: FeatureStatus;
+  /** The shape a cut or intersect removed with, kept for the feature being edited (shown as a red ghost). */
+  ghost?: Shape3D;
 }
+
+/** Filled by applyOp for a cut, so the editor can show what is being removed. */
+const ghostSink: { tool: Shape3D | null } = { tool: null };
 
 function bboxOverlap(a: Shape3D, b: Shape3D): boolean {
   const [a0, a1] = a.boundingBox.bounds;
@@ -99,6 +104,7 @@ export function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, tar
 }
 
 function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
+  if (op === "cut") ghostSink.tool = tool;
   if (op === "new") {
     bodies.set(featureId, tool);
     return;
@@ -264,8 +270,11 @@ export class Builder {
     }
   }
 
+  private ghostFeature: Id | undefined;
+
   regen(doc: WhittleDocument, quality: "preview" | "final", pickBefore?: Id): Omit<RegenResult, "seq"> {
     const t0 = performance.now();
+    this.ghostFeature = pickBefore;
     const { prev, statuses, rebuilt, end } = this.walk(doc);
 
     const bodies: BodyResult[] = [];
@@ -301,8 +310,18 @@ export class Builder {
         }
       }
     }
+    let ghost: BodyResult | undefined;
+    const gi = pickBefore ? doc.features.findIndex((f) => f.id === pickBefore) : -1;
+    const gs = gi >= 0 ? this.cache[gi]?.ghost : undefined;
+    if (gs) {
+      try {
+        ghost = this.mesh("ghost", gs, "preview");
+      } catch {
+        /* no ghost */
+      }
+    }
     for (const s of statuses) if (CELL_INFO.has(s.id)) s.cells = CELL_INFO.get(s.id);
-    return { bodies, sketches, planes, status: statuses, pickBodies, ms: performance.now() - t0, rebuilt };
+    return { bodies, sketches, planes, status: statuses, pickBodies, ghost, ms: performance.now() - t0, rebuilt };
   }
 
   /** The final body shapes of the active timeline (for export). */
@@ -393,7 +412,8 @@ export class Builder {
       const key = hashKey(prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)) + (f.type === "joint" ? compSig : ""));
       const cached = this.cache[i];
       let snap: Snapshot;
-      if (cached && cached.key === key) {
+      const needGhost = f.id === this.ghostFeature && (f as { op?: string }).op === "cut" && !cached?.ghost;
+      if (cached && cached.key === key && !needGhost) {
         snap = cached;
       } else {
         rebuilt++;
@@ -425,6 +445,7 @@ export class Builder {
     if (f.suppressed) {
       return { key, bodies, sketches, status: { id: f.id, state: "suppressed" } };
     }
+    ghostSink.tool = null;
     try {
       const warning = this.apply(f, bodies, sketches, ev);
       return {
@@ -432,6 +453,7 @@ export class Builder {
         bodies,
         sketches,
         status: { id: f.id, state: warning ? "warning" : "ok", message: warning, ms: performance.now() - t },
+        ghost: f.id === this.ghostFeature ? ghostSink.tool ?? undefined : undefined,
       };
     } catch (e) {
       const fix = e instanceof FeatureError ? e.fix : undefined;
@@ -730,15 +752,22 @@ export class Builder {
         if (value <= 0) throw new FeatureError("The size must be greater than zero.");
         let warning: string | undefined;
         const byBody = new Map<Id, Edge[]>();
+        let missing = 0;
         for (const ref of f.edges) {
           const body = bodyForRefs(bodies, ref.bodyId);
           const res = resolveEdge(body, ref);
-          if (!res) throw new FeatureError("One of the selected edges no longer exists. Edit the feature to re-pick it.");
+          // A lost edge doesn't stop the rest: the others are still done and the step turns yellow until it is re-picked.
+          if (!res) {
+            missing++;
+            continue;
+          }
           if (res.uncertain) warning = "Some edges moved after an upstream change. Please check the selection.";
           const list = byBody.get(ref.bodyId) ?? [];
           list.push(res.item);
           byBody.set(ref.bodyId, list);
         }
+        if (byBody.size === 0) throw new FeatureError(f.edges.length > 1 ? "The selected edges no longer exist. Edit the feature to re-pick them." : "The selected edge no longer exists. Edit the feature to re-pick it.");
+        if (missing) warning = `${missing} of the ${f.edges.length} selected edges no longer exist after an upstream change, so they were skipped. Edit the feature to re-pick them.`;
         const end = f.type === "fillet" && f.radius2 ? ev.num(f.radius2, "length", "End radius") : null;
         if (end !== null && end <= 0) throw new FeatureError("The end radius must be greater than zero.");
         const ratio = end !== null ? end / value : 1;

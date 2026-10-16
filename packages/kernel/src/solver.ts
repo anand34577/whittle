@@ -71,6 +71,7 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
     }
   };
   for (const c of sk.constraints ?? []) {
+    if (c.driven) continue;
     const [r0, r1] = c.refs as [Id, Id];
     const k0 = kind(r0);
     const k1 = r1 === undefined ? undefined : kind(r1);
