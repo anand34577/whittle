@@ -466,6 +466,20 @@ function copyBody(b: BodyResult, id: Id): BodyResult {
   };
 }
 
+/** A 53-bit string hash (cyrb53) plus the length: rebuild keys stay small however long the timeline grows. */
+function hashKey(s: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + "." + s.length.toString(36);
+}
+
 export class Builder {
   private cache: Snapshot[] = [];
   /** Meshes by shape: a body that didn't change since the last rebuild isn't meshed again. */
@@ -491,6 +505,15 @@ export class Builder {
       const key = importKey(f);
       if (this.imports.has(key) || this.importErrors.has(key)) continue;
       try {
+        // Decoding is inside the try: a damaged file fails its own feature, not every rebuild of the design.
+        let bin: string;
+        try {
+          bin = atob(f.data);
+        } catch {
+          throw new Error("The file embedded in this design is damaged.");
+        }
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes]);
         if (f.format === "whittle") {
           const sub = deserializeDocument(bytes);
           const nested = new Builder();
@@ -512,15 +535,6 @@ export class Builder {
     const bodies: BodyResult[] = [];
     for (const [id, shape] of prev.bodies) {
       try {
-        // Decoding is inside the try: a damaged file fails its own feature, not every rebuild of the design.
-        let bin: string;
-        try {
-          bin = atob(f.data);
-        } catch {
-          throw new Error("The file embedded in this design is damaged.");
-        }
-        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-        const blob = new Blob([bytes]);
         bodies.push(this.mesh(id, shape, quality));
       } catch (e) {
         statuses.push({ id, state: "error", message: "This body couldn't be displayed: " + String(e) });
@@ -626,7 +640,7 @@ export class Builder {
     const statuses: FeatureStatus[] = [];
 
     let prev: Snapshot = {
-      key: paramSig,
+      key: hashKey(paramSig),
       bodies: new Map(),
       sketches: new Map(),
       status: { id: "", state: "ok" },
@@ -637,7 +651,8 @@ export class Builder {
 
     for (let i = 0; i < end; i++) {
       const f = doc.features[i]!;
-      const key = prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)) + (f.type === "joint" ? compSig : ""); // reference images aren't geometry
+      // Reference images aren't geometry. The key chains every step before this one, so it is hashed to stay a fixed size.
+      const key = hashKey(prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)) + (f.type === "joint" ? compSig : ""));
       const cached = this.cache[i];
       let snap: Snapshot;
       if (cached && cached.key === key) {

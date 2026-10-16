@@ -55,3 +55,24 @@ describe("self-intersecting outlines", () => {
     expect(r.bodies[0]!.volume).toBeGreaterThan(0);
   });
 });
+
+describe("rebuild cache keys", () => {
+  it("stay a fixed size however long the timeline gets", () => {
+    const doc = newDocument();
+    for (let i = 0; i < 120; i++) {
+      const p = makePrimitive(doc, "box");
+      if (p.type === "primitive") p.position = [String(i * 50), "0", "0"];
+      doc.features.push(p);
+      doc.bodies[p.id] = { name: `B${i}`, color: "#ccc", visible: true };
+    }
+    const b = new Builder();
+    b.regen(doc, "preview");
+    const keys = (b as unknown as { cache: { key: string }[] }).cache.map((s) => s.key.length);
+    expect(Math.max(...keys)).toBeLessThan(200);
+    // ...and caching still works: nothing changed, nothing rebuilt; one edit rebuilds from there on.
+    expect(b.regen(doc, "preview").rebuilt).toBe(0);
+    const last = doc.features[119]!;
+    if (last.type === "primitive") last.width = "11";
+    expect(b.regen(doc, "preview").rebuilt).toBe(1);
+  });
+});
