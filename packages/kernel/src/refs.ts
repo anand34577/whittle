@@ -6,7 +6,8 @@
  * every rebuild:
  *
  *   1. keep candidates of the same surface/curve type and orientation;
- *   2. if exactly one remains it is the match, even if it moved;
+ *   2. if exactly one remains it is the match, even if it moved, unless its size changed
+ *      more than 4x or it moved more than 3x its own size (then it is flagged);
  *   3. otherwise take the closest one, and flag a warning when the choice is
  *      ambiguous so the user can confirm instead of getting a silent wrong pick.
  */
@@ -97,18 +98,28 @@ function pick<T>(
   scoreDistance: (i: number) => number,
   compatible: (i: number) => boolean,
   tolerance: number,
+  /** False when a lone candidate has changed too much to trust as the same thing. */
+  plausible: (i: number) => boolean = () => true,
 ): Resolved<T> | null {
   const ranked = items
     .map((item, i) => ({ item, i, d: scoreDistance(i), ok: compatible(i) }))
     .filter((r) => r.ok)
     .sort((a, b) => a.d - b.d);
   if (ranked.length === 0) return null;
-  if (ranked.length === 1) return { item: ranked[0]!.item, uncertain: false };
+  if (ranked.length === 1) return { item: ranked[0]!.item, uncertain: ranked[0]!.d > tolerance && !plausible(ranked[0]!.i) };
   const [best, second] = ranked;
   if (best!.d <= tolerance) return { item: best!.item, uncertain: false };
   // Two candidates nearly equally close: ambiguous.
   const uncertain = second!.d < best!.d * 2;
   return { item: best!.item, uncertain };
+}
+
+/** A lone same-kind candidate is trusted unless its size changed more than 4x or it moved more than 3x its own size. */
+function jumpOk(now: number, was: number, moved: number, size: number): boolean {
+  const lo = Math.min(now, was);
+  const hi = Math.max(now, was);
+  if (lo > 0 && hi / lo > 4) return false;
+  return moved <= 3 * size;
 }
 
 export function resolveFace(shape: Shape3D, ref: FaceRef, infos?: FaceInfo[]): Resolved<Face> | null {
@@ -119,6 +130,7 @@ export function resolveFace(shape: Shape3D, ref: FaceRef, infos?: FaceInfo[]): R
     (i) => dist(fi[i]!.center, ref.center),
     (i) => fi[i]!.surface === ref.surface && dot(fi[i]!.normal, ref.normal) > 0.999,
     1e-4,
+    (i) => jumpOk(fi[i]!.area, ref.area, dist(fi[i]!.center, ref.center), Math.sqrt(Math.max(ref.area, fi[i]!.area))),
   );
   if (strict) return strict;
   // Fall back to the closest roughly-aligned face, and flag it.
@@ -139,6 +151,7 @@ export function resolveEdge(shape: Shape3D, ref: EdgeRef, infos?: EdgeInfo[]): R
     (i) => dist(ei[i]!.mid, ref.mid),
     (i) => ei[i]!.curve === ref.curve && Math.abs(dot(ei[i]!.tangent, ref.tangent)) > 0.999,
     1e-4,
+    (i) => jumpOk(ei[i]!.length, ref.length, dist(ei[i]!.mid, ref.mid), Math.max(ref.length, ei[i]!.length)),
   );
   if (strict) return strict;
   const loose = pick(

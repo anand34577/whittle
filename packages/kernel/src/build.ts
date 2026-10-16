@@ -342,7 +342,35 @@ function safeVolume(s: Shape3D): number {
   }
 }
 
+/** True when OpenCascade's own checker accepts the shape (a malformed solid makes later booleans fail or lie). */
+export function isValidShape(shape: Shape3D): boolean {
+  const oc = getOC();
+  const a = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
+  try {
+    return a.IsValid();
+  } finally {
+    a.delete();
+  }
+}
+
+/**
+ * Combines a tool with the bodies. OpenCascade flags some sound shapes (a circle exactly tangent to an edge), so a doubtful
+ * tool is only reported when it also leaves a body that is invalid and has no positive volume (inside-out or empty).
+ */
 export function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
+  const doubtful = !isValidShape(tool);
+  const before = new Map(bodies);
+  const note = applyOpUnchecked(bodies, featureId, op, target, tool);
+  if (!doubtful) return note;
+  for (const [id, b] of bodies) {
+    if (before.get(id) !== b && !(safeVolume(b) > 0) && !isValidShape(b)) {
+      return "This step made a shape OpenCascade reports as invalid, and the result looks broken. Check the sketch or settings for overlapping or degenerate parts.";
+    }
+  }
+  return note;
+}
+
+function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
   if (op === "new") {
     bodies.set(featureId, tool);
     return;
@@ -466,10 +494,10 @@ function copyBody(b: BodyResult, id: Id): BodyResult {
   };
 }
 
-/** A 53-bit string hash (cyrb53) plus the length: rebuild keys stay small however long the timeline grows. */
-function hashKey(s: string): string {
-  let h1 = 0xdeadbeef;
-  let h2 = 0x41c6ce57;
+/** cyrb53: a 53-bit string hash; the seed makes independent variants. */
+function cyrb53(s: string, seed: number): number {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
   for (let i = 0; i < s.length; i++) {
     const ch = s.charCodeAt(i);
     h1 = Math.imul(h1 ^ ch, 2654435761);
@@ -477,7 +505,12 @@ function hashKey(s: string): string {
   }
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + "." + s.length.toString(36);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
+/** Two independent 53-bit hashes plus the length (about 2^-106 collision odds): keys stay small however long the timeline grows. */
+function hashKey(s: string): string {
+  return cyrb53(s, 0).toString(36) + cyrb53(s, 0x9e3779b9).toString(36) + "." + s.length.toString(36);
 }
 
 export class Builder {
