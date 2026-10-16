@@ -20,6 +20,8 @@ export class WorkerKernel implements KernelHost {
   private seq = 0;
   private pending = new Map<number, { resolve: (v: never) => void; reject: (e: Error) => void; regen: boolean; timer: ReturnType<typeof setTimeout> }>();
   private crashed = false;
+  /** Import file contents the current engine already holds, so they aren't copied over again on every rebuild. */
+  private sentImports = new Map<Id, string>();
   ready!: Promise<number>;
 
   constructor() {
@@ -28,6 +30,7 @@ export class WorkerKernel implements KernelHost {
 
   private spawn() {
     this.crashed = false;
+    this.sentImports.clear();
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module", name: "whittle-kernel" });
     let onReady!: (ms: number) => void;
     let onFail!: (e: Error) => void;
@@ -108,11 +111,34 @@ export class WorkerKernel implements KernelHost {
 
   private send<T>(req: KernelRequest, regen = false): Promise<T> {
     if (this.crashed) this.spawn();
+    if ("doc" in req) req = { ...req, doc: this.slim(req.doc) };
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => this.restart("This is taking too long, so the geometry engine was restarted. Try a simpler change."), REQUEST_TIMEOUT_MS);
       this.pending.set(req.seq, { resolve: resolve as (v: never) => void, reject, regen, timer });
       this.worker.postMessage(req);
     });
+  }
+
+  /**
+   * The document without the heavy parts the engine doesn't need to be sent again: reference pictures are never used by
+   * geometry, and an embedded file (up to tens of MB of base64) is sent only the first time.
+   */
+  private slim(doc: WhittleDocument): WhittleDocument {
+    let changed = false;
+    const features = doc.features.map((f) => {
+      if (f.type === "import") {
+        if (f.data && this.sentImports.get(f.id) === f.data) {
+          changed = true;
+          return { ...f, data: "" };
+        }
+        this.sentImports.set(f.id, f.data);
+      } else if (f.type === "sketch" && f.image?.src) {
+        changed = true;
+        return { ...f, image: { ...f.image, src: "" } };
+      }
+      return f;
+    });
+    return changed ? { ...doc, features } : doc;
   }
 
   dispose() {

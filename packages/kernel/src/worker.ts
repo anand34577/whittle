@@ -24,6 +24,16 @@ console.error = (...args: unknown[]) => console.debug("[kernel]", ...args);
 const post = (msg: KernelResponse, transfer: Transferable[] = []) => ctx.postMessage(msg, transfer);
 
 const builder = new Builder();
+/** Embedded file contents received earlier; the UI thread sends them only once (see WorkerKernel.slim). */
+const importData = new Map<string, string>();
+
+function restoreImports(doc: KernelRequest extends { doc: infer D } ? D : never) {
+  for (const f of doc.features) {
+    if (f.type !== "import") continue;
+    if (f.data) importData.set(f.id, f.data);
+    else f.data = importData.get(f.id) ?? "";
+  }
+}
 let latestRegen = 0;
 const queue: KernelRequest[] = [];
 let ready = false;
@@ -91,6 +101,7 @@ async function handle(req: KernelRequest) {
 
 ctx.onmessage = (ev: MessageEvent<KernelRequest>) => {
   const req = ev.data;
+  restoreImports(req.doc); // before the queue, so a dropped (superseded) request still records its files
   if (req.type === "regen") latestRegen = Math.max(latestRegen, req.seq);
   queue.push(req);
   // Let a burst of messages (e.g. dragging a value) coalesce before building.

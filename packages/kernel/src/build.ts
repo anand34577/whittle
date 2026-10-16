@@ -1651,8 +1651,15 @@ function offsetFaces(f: OffsetFaceFeature, bodies: Map<Id, Shape3D>, ev: Evaluat
   return warning;
 }
 
+const importKeys = new Map<Id, { data: string; key: string }>();
+
+/** Identifies an embedded file by its whole content (hashed once per distinct string, not on every rebuild). */
 function importKey(f: { id: Id; data: string }): string {
-  return `${f.id}:${f.data.length}:${f.data.slice(0, 64)}:${f.data.slice(-64)}`;
+  const known = importKeys.get(f.id);
+  if (known && known.data === f.data) return known.key;
+  const key = `${f.id}:${f.data.length}:${hashKey(f.data)}`;
+  importKeys.set(f.id, { data: f.data, key });
+  return key;
 }
 
 /** Triangulate a sketch's closed regions for the translucent profile fill. */

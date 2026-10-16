@@ -60,3 +60,20 @@ describe("WorkerKernel", () => {
     vi.useRealTimers();
   });
 });
+
+describe("what is sent to the engine", () => {
+  it("sends an embedded file once, and never the reference pictures", () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    const k = new WorkerKernel();
+    const doc = newDocument();
+    doc.features.push({ id: "i1", type: "import", format: "step", fileName: "a.step", data: "QUJD", scale: "1" } as never);
+    doc.features.push({ id: "s1", type: "sketch", image: { src: "data:image/png;base64,AAAA" } } as never);
+    void k.regen(doc);
+    void k.regen(doc);
+    const [a, b] = FakeWorker.all[0]!.posted as { doc: { features: { data?: string; image?: { src: string } }[] } }[];
+    expect(a!.doc.features[0]!.data).toBe("QUJD");
+    expect(b!.doc.features[0]!.data).toBe("");
+    expect(a!.doc.features[1]!.image!.src).toBe("");
+    expect(doc.features[0]).toMatchObject({ data: "QUJD" }); // the caller's document is untouched
+  });
+});

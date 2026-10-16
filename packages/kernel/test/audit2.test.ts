@@ -145,3 +145,17 @@ describe("sketches with many shapes", () => {
     expect(r.bodies[0]!.volume).toBeLessThan((150 * 150 - 40 * Math.PI * 16 * 0.5) * 5);
   });
 });
+
+describe("zero distance", () => {
+  it("a distance of zero is explained by the solver", async () => {
+    const { addConstraint, addLine, addPoint, createEvaluator } = await import("@whittle/core");
+    const { initSolver, solveSketch } = await import("../src/solver");
+    await initSolver();
+    const doc = newDocument();
+    const sk = makeSketch(doc, { kind: "origin", plane: "XY", offset: "0" }) as SketchFeature;
+    const line = addLine(sk, addPoint(sk, [0, 0]), addPoint(sk, [10, 0]));
+    if (typeof line !== "string") throw new Error("line");
+    addConstraint(sk, "distance", [line], "0");
+    expect(() => solveSketch(sk, createEvaluator([], "mm"))).toThrow(/zero/);
+  });
+});

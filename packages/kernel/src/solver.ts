@@ -161,6 +161,7 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
       case "distance": {
         const d = val(c, "length");
         if (d < 0) throw new Error(`${describeConstraint(c)}: a distance can't be negative`);
+        if (d === 0) throw new Error(`${describeConstraint(c)}: a distance of zero is not possible. Use a Coincident constraint instead.`);
         if (q === undefined) {
           const g = geomById(sk, p);
           if (g?.type === "line") add({ type: "p2p_distance", p1_id: g.a, p2_id: g.b, distance: d });
