@@ -12,6 +12,7 @@ import "./styles/platform.css";
 import "./styles/controls.css";
 import "./styles/themes.css";
 import { App } from "./App";
+import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { useApp } from "./state/store";
 import { designApi } from "./state/designApi";
 import { dimensionPick } from "./state/constraintOps";
@@ -23,6 +24,8 @@ import { handlePick } from "./state/actions";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
