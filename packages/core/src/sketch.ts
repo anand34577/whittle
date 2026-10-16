@@ -568,6 +568,39 @@ export function entitySnapPoints(r: ResolvedEntity): { p: Vec2; kind: "end" | "m
   return out;
 }
 
+/** Longest outline checked for self-crossing (the check compares every pair of edges). */
+const CROSSING_CHECK_LIMIT = 4000;
+
+/**
+ * True when two edges of a closed outline properly cross each other (a bow-tie). Edges that only
+ * touch, share a corner or overlap along a line don't count, so ordinary concave shapes pass.
+ * Outlines with more than CROSSING_CHECK_LIMIT points are not checked.
+ */
+export function crossesItself(pts: Vec2[]): boolean {
+  const n = pts.length;
+  if (n < 4 || n > CROSSING_CHECK_LIMIT) return false;
+  let span = 0;
+  for (const p of pts) span = Math.max(span, Math.abs(p[0]), Math.abs(p[1]));
+  const tol = 1e-9 * Math.max(span * span, 1e-12);
+  const side = (a: Vec2, b: Vec2, c: Vec2) => {
+    const o = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    return o > tol ? 1 : o < -tol ? -1 : 0;
+  };
+  for (let i = 0; i < n; i++) {
+    const a = pts[i]!;
+    const b = pts[(i + 1) % n]!;
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // the first and last edges meet at a corner
+      const c = pts[j]!;
+      const d = pts[(j + 1) % n]!;
+      if (Math.max(a[0], b[0]) < Math.min(c[0], d[0]) || Math.max(c[0], d[0]) < Math.min(a[0], b[0])) continue;
+      if (Math.max(a[1], b[1]) < Math.min(c[1], d[1]) || Math.max(c[1], d[1]) < Math.min(a[1], b[1])) continue;
+      if (side(a, b, c) * side(a, b, d) === -1 && side(c, d, a) * side(c, d, b) === -1) return true;
+    }
+  }
+  return false;
+}
+
 export function polygonArea(pts: Vec2[]): number {
   let a = 0;
   for (let i = 0; i < pts.length; i++) {

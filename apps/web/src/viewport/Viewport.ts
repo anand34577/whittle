@@ -176,7 +176,6 @@ export class Viewport {
   private planes = new THREE.Group();
   /** User-made construction planes: always shown faintly, pickable when choosing a sketch plane. */
   private cplanes = new THREE.Group();
-  private cplaneFrames: SketchFrame[] = [];
   private headlight = new THREE.DirectionalLight(0xffffff, 1.6);
   private hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
   private raycaster = new THREE.Raycaster();
@@ -254,7 +253,12 @@ export class Viewport {
     this.disposed = true;
     this.resizeObs.disconnect();
     cancelAnimationFrame(this.frame);
+    // Free everything on the graphics card, not just the renderer: bodies, overlays, and the lighting textures.
+    for (const child of [...this.scene.children]) this.disposeObject(child);
+    this.scene.environment?.dispose();
+    if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
   }
 
@@ -431,7 +435,6 @@ export class Viewport {
   }
 
   setConstructionPlanes(frames: SketchFrame[]) {
-    this.cplaneFrames = frames;
     this.clearGroup(this.cplanes);
     const s = Math.max(30, this.sceneRadius * 0.5);
     for (const f of frames) {

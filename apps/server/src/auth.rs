@@ -195,12 +195,22 @@ impl FromRequestParts<Shared> for AdminUser {
 /// The client's address when known (for rate limiting).
 pub struct ClientAddr(pub String);
 
-impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
+impl FromRequestParts<Shared> for ClientAddr {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        let ip = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip().to_string());
-        Ok(ClientAddr(ip.unwrap_or_else(|| "unknown".into())))
+    async fn from_request_parts(parts: &mut Parts, state: &Shared) -> Result<Self, Self::Rejection> {
+        let peer = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip().to_string());
+        // Behind a reverse proxy every request comes from the proxy's own address, so (only when the operator says the
+        // proxy is trusted) use the address the proxy appended last to X-Forwarded-For; earlier entries can be forged.
+        let forwarded = state
+            .config
+            .trust_proxy
+            .then(|| parts.headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()))
+            .flatten()
+            .and_then(|v| v.rsplit(',').next())
+            .map(|v| v.trim().to_owned())
+            .filter(|v| v.parse::<std::net::IpAddr>().is_ok());
+        Ok(ClientAddr(forwarded.or(peer).unwrap_or_else(|| "unknown".into())))
     }
 }
 
@@ -312,13 +322,25 @@ pub struct RegisterBody {
     password: String,
     display_name: Option<String>,
     email: Option<String>,
+    setup_token: Option<String>,
 }
+
+/// Held while the first-account check and the insert happen, so two simultaneous first sign-ups can't both become administrator.
+static REGISTER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn register(State(s): State<Shared>, headers: HeaderMap, Json(b): Json<RegisterBody>) -> ApiResult<Response> {
     if !s.config.auth_local {
         return Err(ApiError::bad_request("Accounts are managed by single sign-on on this server"));
     }
+    let _guard = REGISTER_LOCK.lock().await;
     let first = db::user_count(&s.db).await? == 0;
+    if first {
+        if let Some(want) = &s.config.setup_token {
+            if b.setup_token.as_deref().map(str::trim) != Some(want.as_str()) {
+                return Err(ApiError::new(StatusCode::FORBIDDEN, "Enter the setup token from the server's settings (WHITTLE_SETUP_TOKEN) to create the first account."));
+            }
+        }
+    }
     let (signup, require_email) = {
         let st = s.settings.read().await;
         (st.signup(&s.config), st.require_email())

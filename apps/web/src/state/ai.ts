@@ -15,6 +15,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { create } from "zustand";
 import { DESIGN_TOOLS, runDesignTool } from "./designApi";
+import { writeStored } from "./stored";
+import { toast } from "./store";
 
 export type ProviderKind = "anthropic" | "openai";
 
@@ -49,30 +51,17 @@ export const PRESETS: ProviderPreset[] = [
 
 /* ───────────────────────────── Settings ───────────────────────────── */
 
-const KEY = "whittle.ai";
-
-interface AiSettings {
+export interface AiSettings {
   providers: ProviderConfig[];
   active: string | null;
 }
 
-function load(): AiSettings {
-  try {
-    const s = JSON.parse(localStorage.getItem(KEY) ?? "null") as AiSettings | null;
-    if (s && Array.isArray(s.providers)) return s;
-  } catch {
-    /* defaults */
-  }
-  return { providers: [], active: null };
-}
+export const NO_AI_SETTINGS: AiSettings = { providers: [], active: null };
 
 export function saveAiSettings(s: AiSettings) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(s));
-  } catch {
-    /* not remembered */
-  }
   useAi.setState({ settings: s });
+  // Kept in the server's database (or, with no server, on this device) — never in the browser when a server is used.
+  void writeStored("ai", s, 500).catch(() => toast("warn", "Couldn't save the assistant settings. They will be lost when you close this page."));
 }
 
 /* ───────────────────────────── Conversation ───────────────────────────── */
@@ -90,7 +79,7 @@ interface AiState {
   abort: AbortController | null;
 }
 
-export const useAi = create<AiState>(() => ({ settings: load(), items: [], busy: false, abort: null }));
+export const useAi = create<AiState>(() => ({ settings: NO_AI_SETTINGS, items: [], busy: false, abort: null }));
 
 export function activeProvider(): ProviderConfig | undefined {
   const { settings } = useAi.getState();

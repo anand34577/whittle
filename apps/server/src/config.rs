@@ -37,6 +37,10 @@ pub struct Config {
     pub smtp: crate::settings::SmtpSettings,
     /// Allow the in-app AI assistant (browsers may then connect to AI providers).
     pub ai: bool,
+    /// Behind a reverse proxy you control: read the client address from X-Forwarded-For (WHITTLE_TRUST_PROXY).
+    pub trust_proxy: bool,
+    /// If set, the very first account (the administrator) must present it when registering (WHITTLE_SETUP_TOKEN).
+    pub setup_token: Option<String>,
 }
 
 /// `sqlite:<path>` is the one URL form that works for relative, Unix and Windows paths (spaces included).
@@ -106,7 +110,7 @@ impl Config {
                     .filter(|s| *s != "openid")
                     .map(str::to_owned)
                     .collect(),
-                auto_create: env_bool("WHITTLE_OIDC_AUTO_CREATE", true)?,
+                auto_create: env_bool("WHITTLE_OIDC_AUTO_CREATE", false)?,
             })
         } else {
             None
@@ -129,6 +133,8 @@ impl Config {
             session_days: env_num("WHITTLE_SESSION_DAYS", 30)?.max(1),
             smtp: crate::settings::SmtpSettings::from_env()?,
             ai: env_bool("WHITTLE_AI", true)?,
+            trust_proxy: env_bool("WHITTLE_TRUST_PROXY", false)?,
+            setup_token: env("WHITTLE_SETUP_TOKEN"),
         })
     }
 
@@ -151,6 +157,8 @@ impl Config {
             session_days: 30,
             smtp: crate::settings::SmtpSettings::default(),
             ai: true,
+            trust_proxy: false,
+            setup_token: None,
         }
     }
 }

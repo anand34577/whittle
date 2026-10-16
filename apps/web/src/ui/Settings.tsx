@@ -6,11 +6,11 @@ import { setPrefs, useApp } from "../state/store";
 import { APP_VERSION } from "@whittle/core";
 import { AssistantSettings } from "./Assistant";
 import { Select, Slider, Switch, Tabs } from "./controls";
-import { Modal } from "./Dialogs";
+import { Modal } from "./Modal";
+import { type Tab, takeStartTab } from "./settingsTab";
 import { Icon } from "./icons";
 import { MATERIALS } from "./PropertiesPanel";
 
-type Tab = "appearance" | "workspace" | "navigation" | "assistant" | "about";
 
 const UNITS: { value: LengthUnit; label: string; hint: string }[] = [
   { value: "mm", label: "Millimetres", hint: "Most CAD, 3D printing and engineering" },
@@ -176,7 +176,7 @@ function About() {
         <dt>Your data</dt>
         <dd>{platform.kind === "server" ? "Stored on your server" : platform.kind === "desktop" ? "Files on this computer" : "Files you save, plus versions in this browser"}</dd>
         <dt>Settings</dt>
-        <dd>Kept on this device</dd>
+        <dd>{platform.kind === "server" ? "Kept in your account on the server" : "Kept on this device"}</dd>
         <dt>License</dt>
         <dd>MPL-2.0</dd>
       </dl>
@@ -192,18 +192,9 @@ function About() {
   );
 }
 
-/** Open Settings at a given tab. */
-export function openSettings(tab: Tab = "appearance") {
-  startTab = tab;
-  useApp.setState({ panel: "settings" });
-}
-let startTab: Tab = "appearance";
-
 export function SettingsDialog() {
   const [tab, setTab] = useState<Tab>(() => {
-    const t = startTab;
-    startTab = "appearance";
-    return t;
+    return takeStartTab();
   });
   return (
     <Modal title="Settings" wide>

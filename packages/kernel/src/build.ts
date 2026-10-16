@@ -8,65 +8,9 @@
  * friendly message (and, where possible, a one-click fix) and later features
  * keep building on the last good state.
  */
-import {
-  type BodyOp,
-  type Evaluator,
-  type FaceRef,
-  type Feature,
-  type HoleFeature,
-  type Id,
-  type ResolvedEntity,
-  type SketchFeature,
-  type SketchSolution,
-  type Vec3,
-  type WhittleDocument,
-  activeEnd,
-  createEvaluator,
-  deserializeDocument,
-  entityOutline,
-  expandSketch,
-  frameAxes,
-  planeOrigin,
-  polygonInside,
-  chainSegments,
-  polylinePath,
-  splineBeziers,
-  resolveEntity,
-  thickenPath,
-} from "@whittle/core";
-import {
-  type Drawing,
-  type Edge,
-  type Face,
-  Plane,
-  type Shape3D,
-  type Wire,
-  asDir,
-  basicFaceExtrusion,
-  cast,
-  downcast,
-  draw,
-  genericSweep,
-  getOC,
-  makeHelix,
-  makeOffset,
-  makePln,
-  drawCircle,
-  drawEllipse,
-  drawPointsInterpolation,
-  drawRoundedRectangle,
-  drawText,
-  importSTEP,
-  iterTopo,
-  loft,
-  makeBox,
-  makeCompound,
-  makeCylinder,
-  makeSphere,
-  measureArea,
-  measureShapeVolumeProperties,
-} from "replicad";
-import type { BodyResult, FeatureFix, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
+import { type BodyOp, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, entityOutline, expandSketch, frameAxes, planeOrigin, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
+import { Drawing, type Edge, type Face, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
+import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
 import { constructFrame } from "./construct";
@@ -74,6 +18,9 @@ import { surfaceTool, prismSurface, revolveSurface } from "./surface";
 import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
+
+import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath } from "./shared";
+export * from "./shared";
 
 interface SketchBuilt {
   frame: SketchFrame;
@@ -95,223 +42,11 @@ interface Snapshot {
   status: FeatureStatus;
 }
 
-/** Errors that carry a user-facing message (and optional fix). */
-export class FeatureError extends Error {
-  constructor(
-    message: string,
-    public readonly fix?: FeatureFix,
-    public readonly warning = false,
-  ) {
-    super(message);
-  }
-}
-
-const FRIENDLY: Record<string, string> = {
-  extrude: "The extrusion couldn't be built. Check that the sketch profile is closed and doesn't cross itself.",
-  revolve: "The revolve couldn't be built. The profile must not cross the axis it spins around.",
-  fillet: "The fillet couldn't be built. The radius is probably too large for the selected edges.",
-  chamfer: "The chamfer couldn't be built. The distance is probably too large for the selected edges.",
-  shell: "The shell couldn't be built. Try a smaller wall thickness, or pick different faces to open.",
-  primitive: "The shape couldn't be built. Check that all sizes are greater than zero.",
-  mirror: "The mirror couldn't be built.",
-  pattern: "The pattern couldn't be built. Copies that don't touch can't be merged into one body.",
-  sketch: "Two shapes in this sketch overlap in a way that can't be combined (often edges that only just touch). Nudge one of them slightly.",
-  hole: "The holes couldn't be cut. Check that they sit on the face.",
-  loft: "The loft couldn't be built. Profiles should face the same way and not cross each other.",
-  move: "The body couldn't be moved.",
-  combine: "The bodies couldn't be combined. Check that they touch or overlap.",
-  import: "The file couldn't be imported. It may be damaged or use an unsupported variant.",
-  sweep: "The sweep couldn't be built. Make the profile smaller than the tightest bend of the path, and place it at the path's start.",
-  coil: "The coil couldn't be built. The section is probably too large for the pitch (turns would overlap).",
-  split: "The body couldn't be split there. Move the plane so it crosses the body.",
-  offset: "The body couldn't be offset by that much. Try a smaller distance; very small details limit how far a body can shrink.",
-  scale: "The body couldn't be scaled.",
-  draft: "The draft couldn't be applied. Only flat, cylindrical or conical faces can be drafted, and the angle must be small enough.",
-};
-
-function describeError(f: Feature, e: unknown): string {
-  if (e instanceof FeatureError) return e.message;
-  if (
-    e instanceof Error &&
-    e.message &&
-    !/^\d+$/.test(e.message) &&
-    !/BRep|Standard_|StdFail|gp_|Cannot read|undefined|null|Bug in|Failed to|weird|algo/i.test(e.message)
-  ) {
-    return e.message;
-  }
-  return FRIENDLY[f.type] ?? "This feature couldn't be built.";
-}
-
-export function planeFromFrame(f: SketchFrame): Plane {
-  return new Plane(f.origin, f.xDir, f.normal);
-}
-
-const ORIGIN_FRAMES: Record<string, { xDir: Vec3; yDir: Vec3; normal: Vec3 }> = {
-  XY: { xDir: [1, 0, 0], yDir: [0, 1, 0], normal: [0, 0, 1] },
-  XZ: { xDir: [1, 0, 0], yDir: [0, 0, 1], normal: [0, -1, 0] },
-  YZ: { xDir: [0, 1, 0], yDir: [0, 0, 1], normal: [1, 0, 0] },
-};
-
-export const deg = (rad: number) => (rad * 180) / Math.PI;
-
-export function polyDrawing(pts: [number, number][]): Drawing {
-  if (pts.length < 3) throw new FeatureError("A closed shape needs at least three points");
-  let pen = draw(pts[0]);
-  for (const p of pts.slice(1)) pen = pen.lineTo(p);
-  return pen.close();
-}
-
-/** Lines, three-point arcs and splines through the points (closed or open). */
-function penPath(pts: [number, number][], arcs: boolean[], closed: boolean, splines: boolean[] = []): Drawing {
-  let pen = draw(pts[0]);
-  for (const s of chainSegments(pts, arcs, closed, splines)) {
-    if (s.kind === "arc") pen = pen.threePointsArcTo(s.b, s.mid);
-    else if (s.kind === "spline" && s.through.length >= 3) for (const b of splineBeziers(s.through)) pen = pen.cubicBezierCurveTo(b.end, b.c1, b.c2);
-    else {
-      const to = s.kind === "line" ? s.b : s.through[s.through.length - 1]!;
-      // The closing line back to the start is what close() draws.
-      if (!(closed && to === pts[0])) pen = pen.lineTo(to);
-    }
-  }
-  return closed ? pen.close() : pen.done();
-}
-
-function entityDrawing(r: ResolvedEntity): Drawing {
-  switch (r.type) {
-    case "rect": {
-      const d = drawRoundedRectangle(r.w, r.h, r.corner > 0 ? r.corner : 0).translate(r.x + r.w / 2, r.y + r.h / 2);
-      return r.angle ? d.rotate(deg(r.angle), [r.x + r.w / 2, r.y + r.h / 2]) : d;
-    }
-    case "circle":
-      return drawCircle(r.r).translate(r.cx, r.cy);
-    case "ellipse": {
-      const major = Math.max(r.rx, r.ry);
-      const minor = Math.min(r.rx, r.ry);
-      const base = major - minor < 1e-6 ? drawCircle(major) : drawEllipse(major, minor);
-      const turn = deg(r.angle) + (r.ry > r.rx ? 90 : 0);
-      return (turn ? base.rotate(turn) : base).translate(r.cx, r.cy);
-    }
-    case "polygon":
-    case "gear":
-      return polyDrawing(entityOutline(r));
-    case "polyline": {
-      if (r.ctrl && r.points.length >= 3) return drawPointsInterpolation(entityOutline(r), {}, { closeShape: !r.open });
-      if (r.smooth && r.points.length >= 3) return drawPointsInterpolation(r.points, {}, { closeShape: true });
-      const d = r.arcs.some(Boolean) || r.splines.some(Boolean) ? penPath(r.points, r.arcs, true, r.splines) : polyDrawing(r.points);
-      if (r.corner > 0) {
-        try {
-          return d.fillet(r.corner);
-        } catch {
-          throw new FeatureError("The corner radius is too large for this outline.");
-        }
-      }
-      return d;
-    }
-    case "text": {
-      let d: Drawing;
-      try {
-        // drawText negates startX, so draw at the origin and place it ourselves.
-        d = drawText(r.text, { startX: 0, startY: 0, fontSize: r.size, fontFamily: r.bold ? "bold" : "sans" }).translate(r.x, r.y);
-      } catch {
-        throw new FeatureError("The text font isn't loaded yet. Try again in a moment.");
-      }
-      return r.angle ? d.rotate(deg(r.angle), [r.x, r.y]) : d;
-    }
-    case "slot": {
-      const c = Math.cos(r.angle);
-      const s = Math.sin(r.angle);
-      const half = r.length / 2;
-      const rad = r.width / 2;
-      const P = (x: number, y: number): [number, number] => [r.cx + x * c - y * s, r.cy + x * s + y * c];
-      if (half <= 1e-9) return drawCircle(rad).translate(r.cx, r.cy);
-      return draw(P(-half, -rad))
-        .lineTo(P(half, -rad))
-        .threePointsArcTo(P(half, rad), P(half + rad, 0))
-        .lineTo(P(-half, rad))
-        .threePointsArcTo(P(-half, -rad), P(-half - rad, 0))
-        .close();
-    }
-  }
-}
-
-/** Number of separate places where a hole's outline touches its container. */
-function touchCount(hole: [number, number][], outer: [number, number][], tol: number): number {
-  const near = hole.map(([x, y]) => {
-    let best = Infinity;
-    for (let i = 0, j = outer.length - 1; i < outer.length; j = i++) {
-      const [ax, ay] = outer[j]!;
-      const [bx, by] = outer[i]!;
-      const dx = bx - ax;
-      const dy = by - ay;
-      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
-      best = Math.min(best, Math.hypot(ax + dx * t - x, ay + dy * t - y));
-    }
-    return best <= tol;
-  });
-  let runs = 0;
-  near.forEach((n, i) => n && !near[(i - 1 + near.length) % near.length] && runs++);
-  return runs === 0 && near.every(Boolean) ? 1 : runs;
-}
-
-/** Warning for the last built sketch, if any (holes that would split it). */
-let sketchWarning: string | undefined;
-
-/** Build the 2D profile of a sketch: outer shapes fused, inner shapes become holes. */
-export function sketchDrawing(f: SketchFeature, ev: Evaluator): Drawing | null {
-  sketchWarning = undefined;
-  const resolved: ResolvedEntity[] = [];
-  for (const e of f.entities) {
-    try {
-      const r = resolveEntity(e, ev);
-      // Open paths guide sweeps; they never enclose material.
-      if (!r.construction && !(r.type === "polyline" && r.open)) resolved.push(r);
-    } catch (err) {
-      throw new FeatureError(err instanceof Error ? err.message : String(err));
-    }
-  }
-  if (resolved.length === 0) return null;
-  const outlines = resolved.map((r) => entityOutline(r, 48));
-  const isHole = resolved.map((r, i) => {
-    if (r.mode === "subtract") return true;
-    if (r.mode === "add") return false;
-    return resolved.some((_, j) => j !== i && polygonInside(outlines[i]!, outlines[j]!) && !polygonInside(outlines[j]!, outlines[i]!));
-  });
-  let result = null as Drawing | null;
-  resolved.forEach((r, i) => {
-    if (isHole[i]) return;
-    const d = entityDrawing(r);
-    result = result ? result.fuse(d) : d;
-  });
-  if (!result) throw new FeatureError("Every shape in this sketch is a hole. Add an outer shape.");
-  resolved.forEach((r, i) => {
-    if (!isHole[i]) return;
-    const container = resolved.findIndex((_, j) => j !== i && !isHole[j] && polygonInside(outlines[i]!, outlines[j]!));
-    if (container >= 0 && touchCount(outlines[i]!, outlines[container]!, 1e-3) >= 2) {
-      sketchWarning = "A hole touches its outline in two places, which would split the shape in two. Make the hole slightly smaller (or the outline larger).";
-    }
-    result = result!.cut(entityDrawing(r));
-  });
-  // Gear bores are always holes in their own gear.
-  for (const r of resolved) {
-    if (r.type === "gear" && r.bore > 0) result = result!.cut(drawCircle(r.bore / 2).translate(r.cx, r.cy));
-  }
-  return result;
-}
-
 function bboxOverlap(a: Shape3D, b: Shape3D): boolean {
   const [a0, a1] = a.boundingBox.bounds;
   const [b0, b1] = b.boundingBox.bounds;
   const eps = 1e-6;
   return a0[0] <= b1[0] + eps && b0[0] <= a1[0] + eps && a0[1] <= b1[1] + eps && b0[1] <= a1[1] + eps && a0[2] <= b1[2] + eps && b0[2] <= a1[2] + eps;
-}
-
-/** Merge coplanar faces / collinear edges left over by booleans. */
-export function clean(s: Shape3D): Shape3D {
-  try {
-    return s.simplify();
-  } catch {
-    return s;
-  }
 }
 
 export function lastBody(bodies: Map<Id, Shape3D>): Id | undefined {
@@ -335,7 +70,35 @@ function safeVolume(s: Shape3D): number {
   }
 }
 
+/** True when OpenCascade's own checker accepts the shape (a malformed solid makes later booleans fail or lie). */
+export function isValidShape(shape: Shape3D): boolean {
+  const oc = getOC();
+  const a = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
+  try {
+    return a.IsValid();
+  } finally {
+    a.delete();
+  }
+}
+
+/**
+ * Combines a tool with the bodies. OpenCascade flags some sound shapes (a circle exactly tangent to an edge), so a doubtful
+ * tool is only reported when it also leaves a body that is invalid and has no positive volume (inside-out or empty).
+ */
 export function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
+  const doubtful = !isValidShape(tool);
+  const before = new Map(bodies);
+  const note = applyOpUnchecked(bodies, featureId, op, target, tool);
+  if (!doubtful) return note;
+  for (const [id, b] of bodies) {
+    if (before.get(id) !== b && !(safeVolume(b) > 0) && !isValidShape(b)) {
+      return "This step made a shape OpenCascade reports as invalid, and the result looks broken. Check the sketch or settings for overlapping or degenerate parts.";
+    }
+  }
+  return note;
+}
+
+function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
   if (op === "new") {
     bodies.set(featureId, tool);
     return;
@@ -408,12 +171,6 @@ function planeFrame(id: Id, plane: PlaneRef, bodies: Map<Id, Shape3D>, sketches:
   };
 }
 
-export function bodyForRefs(bodies: Map<Id, Shape3D>, bodyId: Id): Shape3D {
-  const b = bodies.get(bodyId);
-  if (!b) throw new FeatureError("The body this feature was applied to no longer exists. Re-pick the edges or faces.");
-  return b;
-}
-
 /** A solid of revolution around +Z from z=0 to z=h, radius r1 at the bottom and r2 at the top. */
 function frustumZ(r1: number, r2: number, h: number): Shape3D {
   const pts: [number, number][] = [[0, 0], [r1, 0]];
@@ -424,25 +181,6 @@ function frustumZ(r1: number, r2: number, h: number): Shape3D {
 
 function torusZ(major: number, minor: number): Shape3D {
   return drawCircle(minor).translate(major, 0).sketchOnPlane("XZ").revolve([0, 0, 1]) as Shape3D;
-}
-
-/** Rotate a shape built along +Z so that +Z points along `dir`, then move it to `at`. */
-export function orient(s: Shape3D, dir: Vec3, at: Vec3): Shape3D {
-  const d = norm(dir);
-  const c = dot([0, 0, 1], d);
-  let out = s;
-  if (c < 1 - 1e-9) {
-    const axis: Vec3 = c < -1 + 1e-9 ? [1, 0, 0] : norm(cross([0, 0, 1], d));
-    out = out.rotate(deg(Math.acos(Math.max(-1, Math.min(1, c)))), [0, 0, 0], axis);
-  }
-  return out.translate(at);
-}
-
-export const AXES: Record<"x" | "y" | "z", Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
-
-export function boxCenter(s: Shape3D): Vec3 {
-  const [a, b] = s.boundingBox.bounds;
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
 }
 
 /** Fresh copies of a cached mesh (the worker transfers, and so detaches, what it sends). */
@@ -457,6 +195,25 @@ function copyBody(b: BodyResult, id: Id): BodyResult {
     edgePositions: b.edgePositions.slice(),
     edgeRanges: b.edgeRanges.slice(),
   };
+}
+
+/** cyrb53: a 53-bit string hash; the seed makes independent variants. */
+function cyrb53(s: string, seed: number): number {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
+/** Two independent 53-bit hashes plus the length (about 2^-106 collision odds): keys stay small however long the timeline grows. */
+function hashKey(s: string): string {
+  return cyrb53(s, 0).toString(36) + cyrb53(s, 0x9e3779b9).toString(36) + "." + s.length.toString(36);
 }
 
 export class Builder {
@@ -483,9 +240,16 @@ export class Builder {
       if (f.type !== "import") continue;
       const key = importKey(f);
       if (this.imports.has(key) || this.importErrors.has(key)) continue;
-      const bytes = Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes]);
       try {
+        // Decoding is inside the try: a damaged file fails its own feature, not every rebuild of the design.
+        let bin: string;
+        try {
+          bin = atob(f.data);
+        } catch {
+          throw new Error("The file embedded in this design is damaged.");
+        }
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes]);
         if (f.format === "whittle") {
           const sub = deserializeDocument(bytes);
           const nested = new Builder();
@@ -551,6 +315,8 @@ export class Builder {
   private curDoc: WhittleDocument | null = null;
   /** The snapshots of the walk in progress (one per feature built so far), for feature patterns. */
   private walkSnaps: Snapshot[] = [];
+  /** Told after every timeline step of a rebuild (done so far, total), so the interface can show progress. */
+  onProgress: ((done: number, total: number) => void) | null = null;
 
   /**
    * Repeat earlier features: whatever each one added to or cut from a body is copied by
@@ -612,7 +378,7 @@ export class Builder {
     const statuses: FeatureStatus[] = [];
 
     let prev: Snapshot = {
-      key: paramSig,
+      key: hashKey(paramSig),
       bodies: new Map(),
       sketches: new Map(),
       status: { id: "", state: "ok" },
@@ -623,7 +389,8 @@ export class Builder {
 
     for (let i = 0; i < end; i++) {
       const f = doc.features[i]!;
-      const key = prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)) + (f.type === "joint" ? compSig : ""); // reference images aren't geometry
+      // Reference images aren't geometry. The key chains every step before this one, so it is hashed to stay a fixed size.
+      const key = hashKey(prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)) + (f.type === "joint" ? compSig : ""));
       const cached = this.cache[i];
       let snap: Snapshot;
       if (cached && cached.key === key) {
@@ -633,7 +400,15 @@ export class Builder {
         snap = this.step(f, prev, ev, key);
       }
       nextCache.push(snap);
-      statuses.push(snap.status);
+      this.onProgress?.(i + 1, end);
+      // A step that lost its body because an earlier step failed should say which one.
+      const failedBefore = statuses.findLast((x) => x.state === "error");
+      const failedName = failedBefore && doc.features.find((x) => x.id === failedBefore.id)?.name;
+      statuses.push(
+        snap.status.state === "error" && failedName && snap.status.message?.startsWith("The body this feature was applied to no longer exists")
+          ? { ...snap.status, message: `${snap.status.message} It is probably because "${failedName}" failed above.` }
+          : snap.status,
+      );
       prev = snap;
     }
     for (let i = end; i < doc.features.length; i++) {
@@ -731,8 +506,9 @@ export class Builder {
           solution = solveSketch(f, ev);
           if (solution) source = expandSketch(f, solution);
           if (solution?.message) warning ??= solution.message;
-          drawing = sketchDrawing(source, ev);
-          warning ??= sketchWarning;
+          const notes: { warning?: string } = {};
+          drawing = sketchDrawing(source, ev, notes);
+          warning ??= notes.warning;
         } catch (e) {
           error = describeError(f, e);
         }
@@ -1257,7 +1033,6 @@ function rotateAbout(v: Vec3, k: Vec3, a: number): Vec3 {
   return norm([v[0] * c + kv[0] * s + k[0] * d, v[1] * c + kv[1] * s + k[1] * d, v[2] * c + kv[2] * s + k[2] * d]);
 }
 
-export type AnySketch = { wire?: Wire; outerSketch?: { wire: Wire }; innerSketches?: { wire: Wire }[]; sketches?: AnySketch[] };
 
 /** Outer and inner wires of every region of a placed sketch. */
 export function regions(s: AnySketch): { outer: Wire; inner: Wire[] }[] {
@@ -1312,25 +1087,6 @@ function taperedExtrude(drawing: Drawing, frame: SketchFrame, dist: number, angl
     out = out ? out.fuse(solid) : solid;
   });
   return out!;
-}
-
-/** The path a sweep follows: the sketch's first open line, else its first outline. */
-export function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator): Wire {
-  const open = f.entities.find((e) => e.type === "polyline" && e.open);
-  const e = open ?? f.entities.find((x) => !x.construction);
-  if (!e) throw new FeatureError("The path sketch is empty. Draw a path (open line) or a shape in it.", undefined, true);
-  const r = resolveEntity(e, ev);
-  let d: Drawing;
-  if (r.type === "polyline" && r.open) {
-    if (r.points.length < 2) throw new FeatureError("The path needs at least two points.");
-    if (r.ctrl && r.points.length >= 3) d = drawPointsInterpolation(entityOutline(r), {}, { closeShape: false });
-    else if (r.smooth && r.points.length >= 3) d = drawPointsInterpolation(r.points, {}, { closeShape: false });
-    else d = penPath(r.points, r.arcs, false, r.splines);
-  } else d = entityDrawing(r);
-  const placed = d.sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch;
-  const w = placed.wire ?? placed.outerSketch?.wire ?? placed.sketches?.[0]?.wire;
-  if (!w) throw new FeatureError("The path couldn't be read.");
-  return w;
 }
 
 /** Every open line in a path sketch (a branching pipe follows them all); a lone outline counts as one path. */
@@ -1522,8 +1278,15 @@ function offsetFaces(f: OffsetFaceFeature, bodies: Map<Id, Shape3D>, ev: Evaluat
   return warning;
 }
 
+const importKeys = new Map<Id, { data: string; key: string }>();
+
+/** Identifies an embedded file by its whole content (hashed once per distinct string, not on every rebuild). */
 function importKey(f: { id: Id; data: string }): string {
-  return `${f.id}:${f.data.length}:${f.data.slice(0, 64)}:${f.data.slice(-64)}`;
+  const known = importKeys.get(f.id);
+  if (known && known.data === f.data) return known.key;
+  const key = `${f.id}:${f.data.length}:${hashKey(f.data)}`;
+  importKeys.set(f.id, { data: f.data, key });
+  return key;
 }
 
 /** Triangulate a sketch's closed regions for the translucent profile fill. */
@@ -1572,12 +1335,6 @@ function largestWorking(start: number, attempt: (v: number) => unknown): number 
   }
   const v = Math.floor(good * 0.98 * 100) / 100;
   return v > 0 ? v : null;
-}
-
-/** Does this shape contain a closed solid (rather than being only surfaces)? */
-export function hasSolid(shape: Shape3D): boolean {
-  for (const _ of iterTopo((shape as unknown as { wrapped: never }).wrapped, "solid")) return true;
-  return false;
 }
 
 function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyResult {

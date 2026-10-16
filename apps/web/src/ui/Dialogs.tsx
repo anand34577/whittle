@@ -35,33 +35,11 @@ import { TEMPLATES } from "../state/templates";
 import { Icon } from "./icons";
 import { Checkbox, Select } from "./controls";
 import { ProfilePicker } from "./Settings";
+import { Modal } from "./Modal";
+import { Spinner } from "./feedback";
+export { Modal };
 import type { ExportFormat } from "@whittle/kernel";
 
-export function Modal({ title, children, wide, onClose }: { title: string; children: React.ReactNode; wide?: boolean; onClose?: () => void }) {
-  const close = onClose ?? (() => useApp.setState({ panel: null }));
-  return (
-    <div className="scrim" onMouseDown={close}>
-      <div
-        className={`modal ${wide ? "modal--wide" : ""}`}
-        role="dialog"
-        aria-label={title}
-        onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") close();
-          e.stopPropagation();
-        }}
-      >
-        <header className="modal__head">
-          <h2>{title}</h2>
-          <button className="iconbtn" onClick={close} aria-label="Close">
-            <Icon name="close" size={18} />
-          </button>
-        </header>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 /* ───────────────────────────── Parameters ───────────────────────────── */
 
@@ -502,7 +480,7 @@ function ServerLibrary() {
         )}
       </div>
       {error && <p className="note note--error">{error}</p>}
-      {list === null && !error && <p className="muted small">Loading…</p>}
+      {list === null && !error && <p className="loading-line"><Spinner /> Loading…</p>}
       {list?.length === 0 && <p className="muted small">Nothing saved yet. Designs you save appear here, with their full version history.</p>}
       <div className="lib-grid">
         {shown.map((d) => (
@@ -559,7 +537,12 @@ function RecentLibrary() {
 }
 
 export function Welcome() {
-  const recovered = useMemo(() => readAutosave(), []);
+  const [recovered, setRecovered] = useState<Awaited<ReturnType<typeof readAutosave>>>(null);
+  const who = useApp((s) => (s.platform.kind === "server" ? (s.platform.user?.id ?? "-") : s.platform.kind));
+  const ready = useApp((s) => s.platformReady);
+  useEffect(() => {
+    if (ready) void readAutosave().then(setRecovered);
+  }, [ready, who]);
   const platform = useApp((s) => s.platform.kind);
   const profile = useApp((s) => s.prefs.profile);
   const [asked, setAsked] = useState(false);
@@ -598,7 +581,7 @@ export function Welcome() {
             </span>
           </button>
           {recovered && (
-            <button className="start-card start-card--recover" onClick={() => void loadDocumentConfirm(recovered.doc, recovered.fileName)}>
+            <button className="start-card start-card--recover" onClick={() => void loadDocumentConfirm(recovered.doc, recovered.fileName, true)}>
               <Icon name="undo" />
               <span>
                 <b>Continue where you left off</b>
@@ -686,7 +669,7 @@ export function VersionsDialog() {
       <div className="modal__body">
         <p className="modal__lede">Every save keeps a version {where}. Restoring makes an old version current; the one it replaces stays in the list.</p>
         {error && <p className="note note--error">{error}</p>}
-        {list === undefined && !error && <p className="muted">Loading…</p>}
+        {list === undefined && !error && <p className="loading-line"><Spinner /> Loading…</p>}
         {list === null && <p className="muted">Save this design first. After that, every save is kept here.</p>}
         {list && list.length === 0 && <p className="muted">No earlier versions yet. They appear after you save again.</p>}
         {list && list.length > 0 && (

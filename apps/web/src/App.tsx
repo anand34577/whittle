@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { commandById, commandForKey, isAvailable } from "./state/commands";
 import { openDroppedFile, startAutosave, startDesktop } from "./state/files";
-import { apiHooks, detectPlatform } from "./state/platform";
+import { aiAvailable, apiHooks, detectPlatform } from "./state/platform";
 import { startKernel } from "./state/kernel";
+import { forgetUserSettings, loadUserSettings } from "./state/userSettings";
 import { cancelSession, commitSession, finishSketch, setSketchTool, toast, useApp } from "./state/store";
 import { Browser } from "./ui/Browser";
 import { CommandPalette, StatusBar, TitleBar, Toasts, Toolbar } from "./ui/Chrome";
@@ -106,11 +107,13 @@ export function App() {
       const p = useApp.getState().platform;
       if (p.kind === "server" && p.user) {
         useApp.setState({ platform: { ...p, user: null } });
+        forgetUserSettings();
         toast("warn", "Your session ended. Sign in again; your open design is still here.");
       }
     };
     void detectPlatform().then(async (platform) => {
       useApp.setState({ platform, platformReady: true });
+      void loadUserSettings();
       if (platform.kind === "desktop") await startDesktop();
       const err = new URLSearchParams(window.location.search).get("login_error");
       if (err) {
@@ -169,7 +172,7 @@ export function App() {
       {panel === "shortcuts" && <ShortcutsDialog />}
       {panel === "parts" && <PartsDialog />}
       {panel === "settings" && <SettingsDialog />}
-      {assistant && !signedOut && (platform.kind !== "server" || platform.config.ai !== false) && <AssistantPanel />}
+      {assistant && !signedOut && aiAvailable(platform) && <AssistantPanel />}
       <DialogHost />
       <TooltipLayer />
     </div>

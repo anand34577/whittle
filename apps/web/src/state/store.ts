@@ -26,7 +26,7 @@ import {
 } from "@whittle/core";
 import type { RegenResult } from "@whittle/kernel";
 import { type Platform, ask } from "./platform";
-import { type Prefs, type ThemeId, type ThemePref, applyPrefs, loadPrefs, resolveTheme, savePrefs } from "./prefs";
+import { type Prefs, type ThemeId, type ThemePref, applyPrefs, loadPrefs, normalizePrefs, resolveTheme, savePrefs } from "./prefs";
 
 /** `at` is the world point that was clicked (used by holes and measuring). */
 export type Pick =
@@ -91,6 +91,8 @@ export interface AppState {
   /** The document `regen` was built from (so callers can wait for a specific change). */
   builtDoc: WhittleDocument | null;
   regenBusy: boolean;
+  /** Timeline steps finished in the rebuild under way (null when none is running). */
+  regenProgress: { done: number; total: number } | null;
   kernelReady: boolean;
   kernelError: string | null;
 
@@ -138,6 +140,7 @@ export const useApp = create<AppState>(() => ({
   regen: null,
   builtDoc: null,
   regenBusy: false,
+  regenProgress: null,
   kernelReady: false,
   kernelError: null,
   mode: { kind: "model" },
@@ -169,7 +172,6 @@ const get = useApp.getState;
 /* ───────────────────────────── Document edits ───────────────────────────── */
 
 function touch(d: Draft<WhittleDocument>) {
-  d.modifiedAt = new Date().toISOString();
   syncBodies(d);
 }
 
@@ -479,6 +481,14 @@ export function toast(kind: Toast["kind"], text: string, action?: Toast["action"
   const id = ++toastId;
   set({ toasts: [...get().toasts.slice(-3), { id, kind, text, action }] });
   setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), action ? 7000 : 3200);
+}
+
+/** Use preferences loaded from the person's saved settings (they are not saved again). */
+export function applyLoadedPrefs(saved: Partial<Prefs>) {
+  const prefs = normalizePrefs(saved);
+  const theme = resolveTheme(prefs.theme);
+  applyPrefs(prefs, theme);
+  set({ prefs, theme });
 }
 
 export function setTheme(theme: ThemePref) {

@@ -8,7 +8,9 @@ import { confirmDialog, promptDialog } from "../state/dialogs";
 import { toast, useApp } from "../state/store";
 import { NumberField, Popover, Select, Switch, Tabs, TextField } from "./controls";
 import { Modal, ago } from "./Dialogs";
+import { forgetUserSettings, loadUserSettings } from "../state/userSettings";
 import { Icon, type IconName } from "./icons";
+import { Spinner } from "./feedback";
 
 /** Update who is signed in, and re-read the server's settings (sign-up closes after the first account). */
 async function setUser(user: ServerUser | null) {
@@ -21,6 +23,8 @@ async function setUser(user: ServerUser | null) {
     config = { ...config, needsSetup: false, signup: false };
   }
   useApp.setState({ platform: { ...p, user, config } });
+  if (user) void loadUserSettings();
+  else forgetUserSettings();
 }
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -62,6 +66,7 @@ export function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (!cfg) return null;
@@ -78,7 +83,7 @@ export function SignIn() {
     setBusy(true);
     setError(null);
     try {
-      if (view === "register") await done(await apiJson<ServerUser>("/auth/register", { method: "POST", json: { username, password, displayName, email } }));
+      if (view === "register") await done(await apiJson<ServerUser>("/auth/register", { method: "POST", json: { username, password, displayName, email, setupToken: setupToken || undefined } }));
       else if (view === "signin") await done(await apiJson<ServerUser>("/auth/login", { method: "POST", json: { username, password } }));
       else if (view === "forgot") {
         await apiJson("/auth/forgot", { method: "POST", json: { login: username } });
@@ -133,6 +138,7 @@ export function SignIn() {
                 <>
                   <TextField label="Email" icon="mail" type="email" autoComplete="email" value={email} onChange={setEmail} required={cfg.requireEmail} hint="For password resets and notices" />
                   <TextField label="Your name" autoComplete="name" value={displayName} onChange={setDisplayName} placeholder="Optional" />
+                  {cfg.needsSetupToken && <TextField label="Setup token" icon="key" value={setupToken} onChange={setSetupToken} required hint="WHITTLE_SETUP_TOKEN from the server settings" />}
                 </>
               )}
               {view !== "forgot" && (
@@ -154,8 +160,8 @@ export function SignIn() {
                   <Icon name="error" size={16} /> {error}
                 </p>
               )}
-              <button className="btn btn--accent btn--wide" type="submit" disabled={busy}>
-                {busy ? "One moment…" : { register: "Create account", signin: "Sign in", forgot: "Email me a link", reset: "Set password and sign in", sent: "" }[view]}
+              <button className={`btn btn--accent btn--wide${busy ? " is-loading" : ""}`} type="submit" disabled={busy}>
+                {busy ? "Working…" : { register: "Create account", signin: "Sign in", forgot: "Email me a link", reset: "Set password and sign in", sent: "" }[view]}
               </button>
               <div className="signin__links">
                 {view === "signin" && cfg.passwordReset && (
@@ -266,7 +272,7 @@ export function AccountDialog() {
               <h3 className="eyebrow">Profile</h3>
               <TextField label="Name" value={name} onChange={setName} autoComplete="name" required />
               <TextField label="Email" type="email" icon="mail" value={email} onChange={setEmail} autoComplete="email" required={cfg.requireEmail} />
-              <button className="btn btn--small" type="submit" disabled={busy || (name === u.displayName && email === (u.email ?? ""))}>
+              <button className={`btn btn--small${busy ? " is-loading" : ""}`} type="submit" disabled={busy || (name === u.displayName && email === (u.email ?? ""))}>
                 Save profile
               </button>
             </form>
@@ -290,7 +296,7 @@ export function AccountDialog() {
                 <h3 className="eyebrow">{u.hasPassword ? "Change password" : "Set a password"}</h3>
                 {u.hasPassword && <TextField label="Current password" type="password" autoComplete="current-password" value={current} onChange={setCurrent} required />}
                 <TextField label="New password" type="password" autoComplete="new-password" minLength={8} value={next} onChange={setNext} hint="8 characters or more" required />
-                <button className="btn btn--small" type="submit" disabled={busy}>
+                <button className={`btn btn--small${busy ? " is-loading" : ""}`} type="submit" disabled={busy}>
                   {u.hasPassword ? "Change password" : "Set password"}
                 </button>
               </form>
@@ -371,7 +377,7 @@ interface OverviewData {
 function Overview() {
   const [o, setO] = useState<OverviewData | null>(null);
   useEffect(() => void apiJson<OverviewData>("/admin/overview").then(setO).catch((e) => toast("error", msg(e))), []);
-  if (!o) return <p className="muted">Loading…</p>;
+  if (!o) return <p className="loading-line"><Spinner /> Loading…</p>;
   const up = o.uptimeSecs > 86400 ? `${Math.floor(o.uptimeSecs / 86400)} days` : o.uptimeSecs > 3600 ? `${Math.floor(o.uptimeSecs / 3600)} hours` : `${Math.max(1, Math.floor(o.uptimeSecs / 60))} min`;
   const tiles: [string, string, IconName][] = [
     ["People", `${o.users}`, "users"],
@@ -530,7 +536,7 @@ function People() {
           <Icon name="plus" size={15} /> Add person
         </button>
       </div>
-      {users === null && <p className="muted">Loading…</p>}
+      {users === null && <p className="loading-line"><Spinner /> Loading…</p>}
       <div className="userlist" role="table" aria-label="People">
         {shown.map((u) => (
           <div key={u.id} className={`userrow ${u.disabled ? "is-disabled" : ""}`} role="row">
@@ -626,7 +632,7 @@ function AddUser({ cfg, onDone }: { cfg: ServerConfig; onDone: () => void }) {
       )}
       <Switch label="Administrator" hint="Can manage people and server settings" checked={d.isAdmin} onChange={(v) => setD({ ...d, isAdmin: v })} />
       <div className="btnrow">
-        <button className="btn btn--accent" type="submit" disabled={busy}>
+        <button className={`btn btn--accent${busy ? " is-loading" : ""}`} type="submit" disabled={busy}>
           {d.invite ? "Send invitation" : "Add person"}
         </button>
         <button className="btn btn--ghost" type="button" onClick={onDone}>
@@ -689,7 +695,7 @@ function UserSheet({ sheet, users, cfg, onDone }: { sheet: { kind: "merge" | "de
           </dd>
         </dl>
         <div className="btnrow">
-          <button className="btn btn--accent" type="submit" disabled={busy || Object.keys(changed).length === 0}>
+          <button className={`btn btn--accent${busy ? " is-loading" : ""}`} type="submit" disabled={busy || Object.keys(changed).length === 0}>
             Save
           </button>
           <button className="btn btn--ghost" type="button" onClick={onDone}>
@@ -805,7 +811,7 @@ function ServerSettingsPane() {
       .catch((e) => toast("error", msg(e)));
     setTestTo(me?.email ?? "");
   }, [me?.email]);
-  if (!s) return <p className="muted">Loading…</p>;
+  if (!s) return <p className="loading-line"><Spinner /> Loading…</p>;
   const smtpBody = () => ({ ...s.smtp, ...(password !== null ? { password } : {}) });
   const save = async (patch: Partial<SettingsData> | { smtp: unknown }, done = "Settings saved") => {
     setBusy(true);
@@ -886,7 +892,7 @@ function ServerSettingsPane() {
           <Switch label="Accept self-signed certificates" hint="For internal mail servers without a public certificate" checked={s.smtp.acceptInvalidCerts} onChange={(v) => smtp({ acceptInvalidCerts: v })} />
         )}
         <div className="btnrow">
-          <button className="btn btn--accent btn--small" type="submit" disabled={busy}>
+          <button className={`btn btn--accent btn--small${busy ? " is-loading" : ""}`} type="submit" disabled={busy}>
             Save email settings
           </button>
         </div>
@@ -956,7 +962,7 @@ const ACTIONS: Record<string, string> = {
 function Activity() {
   const [log, setLog] = useState<AuditEntry[] | null>(null);
   useEffect(() => void apiJson<AuditEntry[]>("/admin/audit?limit=300").then(setLog).catch((e) => toast("error", msg(e))), []);
-  if (!log) return <p className="muted">Loading…</p>;
+  if (!log) return <p className="loading-line"><Spinner /> Loading…</p>;
   if (log.length === 0) return <p className="muted">Nothing has happened yet.</p>;
   return (
     <ol className="activity">

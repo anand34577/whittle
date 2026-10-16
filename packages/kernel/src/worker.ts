@@ -9,21 +9,32 @@ import sansUrl from "@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-nor
 import boldUrl from "@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-700-normal.woff?url";
 import { loadFont, setOC } from "replicad";
 import gcsWasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
-import { Builder } from "./build";
+import { Builder, isValidShape } from "./build";
 import { initSolver } from "./solver";
 import { exportShapes } from "./exporters";
 import { interference, radii } from "./inspect";
-import type { KernelRequest, KernelResponse } from "./protocol";
+import type { InspectResult, KernelRequest, KernelResponse } from "./protocol";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 // The geometry library prints internal debug dumps when an operation fails.
 // Failures already reach the user as friendly feature messages, so keep the
-// console for real problems.
-console.error = (...args: unknown[]) => console.debug("[kernel]", ...args);
+// console for real problems (an actual Error object still goes to the console).
+const realError = console.error.bind(console);
+console.error = (...args: unknown[]) => (args.some((a) => a instanceof Error) ? realError(...args) : console.debug("[kernel]", ...args));
 const post = (msg: KernelResponse, transfer: Transferable[] = []) => ctx.postMessage(msg, transfer);
 
 const builder = new Builder();
+/** Embedded file contents received earlier; the UI thread sends them only once (see WorkerKernel.slim). */
+const importData = new Map<string, string>();
+
+function restoreImports(doc: KernelRequest extends { doc: infer D } ? D : never) {
+  for (const f of doc.features) {
+    if (f.type !== "import") continue;
+    if (f.data) importData.set(f.id, f.data);
+    else f.data = importData.get(f.id) ?? "";
+  }
+}
 let latestRegen = 0;
 const queue: KernelRequest[] = [];
 let ready = false;
@@ -66,7 +77,16 @@ async function handle(req: KernelRequest) {
     if (req.type === "regen") {
       await builder.prepareImports(req.doc);
       if (req.seq < latestRegen) return;
+      // Report how far a long rebuild has got (at most every 100 ms; the main thread keeps running meanwhile).
+      let lastReport = 0;
+      builder.onProgress = (done, total) => {
+        const now = performance.now();
+        if (done < total && now - lastReport < 100) return;
+        lastReport = now;
+        post({ type: "progress", seq: req.seq, done, total });
+      };
       const r = builder.regen(req.doc, req.quality, req.pickBefore);
+      builder.onProgress = null;
       const transfer: Transferable[] = [];
       for (const b of [...r.bodies, ...(r.pickBodies ?? [])]) {
         transfer.push(b.positions.buffer, b.normals.buffer, b.indices.buffer, b.faceRanges.buffer, b.edgePositions.buffer, b.edgeRanges.buffer);
@@ -76,7 +96,12 @@ async function handle(req: KernelRequest) {
     } else if (req.type === "inspect") {
       await builder.prepareImports(req.doc);
       const shapes = builder.shapes(req.doc);
-      const result = req.kind === "interference" ? { kind: "interference" as const, items: interference(shapes) } : { kind: "radii" as const, items: radii(shapes) };
+      const result: InspectResult =
+        req.kind === "interference"
+          ? { kind: "interference", items: interference(shapes) }
+          : req.kind === "validity"
+            ? { kind: "validity", items: [...shapes].map(([bodyId, s]) => ({ bodyId, valid: isValidShape(s) })) }
+            : { kind: "radii", items: radii(shapes) };
       post({ type: "inspect", seq: req.seq, result });
     } else {
       await builder.prepareImports(req.doc);
@@ -91,6 +116,7 @@ async function handle(req: KernelRequest) {
 
 ctx.onmessage = (ev: MessageEvent<KernelRequest>) => {
   const req = ev.data;
+  restoreImports(req.doc); // before the queue, so a dropped (superseded) request still records its files
   if (req.type === "regen") latestRegen = Math.max(latestRegen, req.seq);
   queue.push(req);
   // Let a burst of messages (e.g. dragging a value) coalesce before building.

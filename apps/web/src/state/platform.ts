@@ -15,6 +15,8 @@ export interface ServerConfig {
   oidc: string | null;
   signup: boolean;
   needsSetup: boolean;
+  /** The first account must present the server's setup token. */
+  needsSetupToken?: boolean;
   maxUploadBytes: number;
   maxVersions: number;
   /** "Forgot password?" is available (email is set up). */
@@ -49,6 +51,11 @@ export type Platform =
 interface TauriGlobal {
   core: { invoke<T>(cmd: string, args?: unknown, options?: { headers?: Record<string, string> }): Promise<T> };
   event: { listen<T>(event: string, cb: (e: { payload: T }) => void): Promise<() => void> };
+}
+
+/** The AI assistant needs to reach AI providers: the desktop app's security policy blocks outside connections, and a server can switch it off. */
+export function aiAvailable(p: Platform): boolean {
+  return p.kind === "browser" || (p.kind === "server" && p.config.ai !== false);
 }
 
 export function tauri(): TauriGlobal | null {

@@ -20,6 +20,8 @@ import {
 import type { ExportFormat } from "@whittle/kernel";
 import { importFile } from "./actions";
 import { placeImage } from "./refImage";
+import { startTask, withTask } from "./tasks";
+import { deleteStored, listStored, readStored, writeStored } from "./stored";
 import { getKernel } from "./kernel";
 import { addLocalVersion, listLocalVersions } from "./localHistory";
 import { ApiError, api, apiJson, ask, invoke, tauri } from "./platform";
@@ -156,8 +158,10 @@ export function loadDocument(doc: WhittleDocument, fileName: string | null) {
 }
 
 /** Load a template or recovered work, asking first if the current design has unsaved changes. */
-export async function loadDocumentConfirm(doc: WhittleDocument, fileName: string | null) {
-  if (await confirmDiscard()) loadDocument(doc, fileName);
+export async function loadDocumentConfirm(doc: WhittleDocument, fileName: string | null, unsaved = false) {
+  if (!(await confirmDiscard())) return;
+  loadDocument(doc, fileName);
+  if (unsaved) useApp.setState({ dirty: true }); // recovered work has not been saved to a file
 }
 
 /** Open: on the server this shows your designs; elsewhere it picks a file. */
@@ -186,7 +190,7 @@ export async function openFromComputer() {
     } else {
       file = await pickFileFallback(FILE_EXTENSION + ",.json");
     }
-    const doc = deserializeDocument(new Uint8Array(await file.arrayBuffer()));
+    const doc = await withTask("Opening the file…", async () => deserializeDocument(new Uint8Array(await file.arrayBuffer())));
     show(doc, file.name, h ? { kind: "handle", handle: h } : { kind: "none" });
     toast("ok", `Opened ${file.name}`);
   } catch (e) {
@@ -211,9 +215,11 @@ export async function openPath(path: string, confirm = true) {
 export async function openServerDesign(id: string) {
   if (!(await confirmDiscard())) return;
   try {
-    const res = await api(`/designs/${encodeURIComponent(id)}`);
+    const { res, doc } = await withTask("Opening the design…", async () => {
+      const res = await api(`/designs/${encodeURIComponent(id)}`);
+      return { res, doc: deserializeDocument(new Uint8Array(await res.arrayBuffer())) };
+    });
     const version = Number(res.headers.get("x-whittle-version") ?? "1");
-    const doc = deserializeDocument(new Uint8Array(await res.arrayBuffer()));
     show(doc, doc.name, { kind: "server", id, version });
   } catch (e) {
     toast("error", errText(e, "Couldn't open that design."));
@@ -249,6 +255,7 @@ export async function saveDesign(saveAs = false): Promise<boolean> {
   if (saving) return false;
   commitSession();
   saving = true;
+  const task = startTask("Saving…");
   try {
     const { doc } = useApp.getState();
     const bytes = serializeDocument(doc, thumbnail());
@@ -281,7 +288,10 @@ export async function saveDesign(saveAs = false): Promise<boolean> {
       if (doc.id) void addLocalVersion({ docId: doc.id, name: doc.name, at: Date.now(), bytes }).catch(() => {});
     }
     // Edits made while the save was in flight stay unsaved.
-    if (useApp.getState().doc === doc) useApp.setState({ dirty: false });
+    if (useApp.getState().doc === doc) {
+      useApp.setState({ dirty: false });
+      clearAutosave(); // the saved file is now the safe copy
+    }
     useApp.setState({ fileName: label });
     toast("ok", "Saved");
     return true;
@@ -290,6 +300,7 @@ export async function saveDesign(saveAs = false): Promise<boolean> {
     return false;
   } finally {
     saving = false;
+    task.done();
   }
 }
 
@@ -353,7 +364,7 @@ export async function exportDesign(format: ExportFormat, bodyId?: string) {
   commitSession();
   const { doc } = useApp.getState();
   try {
-    const file = await getKernel().export(doc, format, bodyId ? [bodyId] : undefined);
+    const file = await withTask(`Exporting ${format.toUpperCase()}…`, () => getKernel().export(doc, format, bodyId ? [bodyId] : undefined));
     const name = bodyId ? `${safeName(doc.name)} - ${safeName(doc.bodies[bodyId]?.name ?? "body")}` : safeName(doc.name);
     if (await saveBytes(file.data, `${name}.${file.ext}`, file.mime, EXPORT_FILTERS[file.ext]!)) toast("ok", `Exported ${format.toUpperCase()}`);
   } catch (e) {
@@ -429,6 +440,7 @@ async function versionBytes(item: VersionItem): Promise<Uint8Array> {
 /** Make an old version the current one (the version it replaces stays in the history). */
 export async function restoreVersion(item: VersionItem) {
   if (!(await confirmDiscard())) return;
+  const task = startTask("Restoring the version…");
   try {
     if (location.kind === "server") {
       const loc = location;
@@ -447,6 +459,8 @@ export async function restoreVersion(item: VersionItem) {
     else toast("info", "Version loaded. Save to keep it.");
   } catch (e) {
     toast("error", errText(e, "Couldn't restore that version."));
+  } finally {
+    task.done();
   }
 }
 
@@ -472,17 +486,30 @@ export async function openVersionAsCopy(item: VersionItem) {
 
 /* ───────────────────────────── Autosave ───────────────────────────── */
 
-const AUTOSAVE_KEY = "whittle.autosave.v1";
+/** One recovery copy per design (so two tabs or two designs don't overwrite each other). */
+const draftKey = (docId?: string) => `draft:${docId ?? "design"}`;
+const WEEK_MS = 7 * 24 * 3600 * 1000;
 
-export function readAutosave(): { doc: WhittleDocument; fileName: string | null; at: string } | null {
+interface Draft {
+  doc: WhittleDocument;
+  fileName: string | null;
+  at: string;
+}
+
+/** The most recent recovery copy of any design. */
+export async function readAutosave(): Promise<Draft | null> {
   try {
-    const raw = localStorage.getItem(AUTOSAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    return { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at };
+    const newest = (await listStored("draft:"))[0];
+    if (!newest) return null;
+    const data = await readStored<Draft>(newest.key);
+    return data ? { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at } : null;
   } catch {
     return null;
   }
+}
+
+function clearAutosave() {
+  void deleteStored(draftKey(useApp.getState().doc.id));
 }
 
 export function startAutosave() {
@@ -497,14 +524,19 @@ export function startAutosave() {
       const { doc, fileName, session } = useApp.getState();
       const toSave = session ? session.base : doc;
       if (toSave.features.length === 0) return;
-      try {
-        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ doc: toSave, fileName, at: new Date().toISOString() }));
-      } catch {
-        if (!warned) {
-          warned = true;
-          toast("warn", "This design is too large for crash recovery. Save it regularly.");
-        }
-      }
+      writeStored(draftKey(toSave.id), { doc: toSave, fileName, at: new Date().toISOString() })
+        .then(async () => {
+          // Copies of other designs go after a week, so they don't pile up.
+          for (const e of await listStored("draft:")) {
+            if (e.key !== draftKey(toSave.id) && e.updatedAt && Date.now() - e.updatedAt > WEEK_MS) void deleteStored(e.key);
+          }
+        })
+        .catch(() => {
+          if (!warned) {
+            warned = true;
+            toast("warn", "This design is too large for crash recovery. Save it regularly.");
+          }
+        });
     }, 800);
   });
   window.addEventListener("beforeunload", (e) => {

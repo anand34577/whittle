@@ -35,7 +35,7 @@ async fn app(tweak: impl FnOnce(&mut Config)) -> App {
     if std::env::var("WHITTLE_TEST_DATABASE_URL").is_ok() {
         // Shared database: start from a clean slate, keeping the built-in
         // `local` user that build_state just ensured for no-login mode.
-        for q in ["DELETE FROM design_versions", "DELETE FROM designs", "DELETE FROM sessions", "DELETE FROM password_resets", "DELETE FROM audit_log", "DELETE FROM settings", "DELETE FROM users WHERE id <> 'local'"] {
+        for q in ["DELETE FROM design_versions", "DELETE FROM designs", "DELETE FROM sessions", "DELETE FROM password_resets", "DELETE FROM audit_log", "DELETE FROM settings", "DELETE FROM user_data", "DELETE FROM users WHERE id <> 'local'"] {
             sqlx::query(q).execute(&state.db).await.unwrap();
         }
     }
@@ -560,4 +560,35 @@ async fn ai_assistant_switch_controls_the_browser_policy() {
     assert_eq!(r.json()["ai"], false);
     let csp = r.headers.get(header::CONTENT_SECURITY_POLICY).unwrap().to_str().unwrap().to_owned();
     assert!(!csp.contains("https:"), "{csp}");
+}
+
+#[tokio::test]
+async fn personal_data_is_kept_per_person_on_the_server() {
+    let app = app(|_| {}).await;
+    let (ada, _) = with_admin(&app).await;
+    let bob = post_json(&app, "/api/admin/users", Some(&ada), json!({ "username": "bob", "password": "battery staple", "email": "bob@example.com" })).await.json();
+    assert!(bob["id"].is_string());
+    let login = post_json(&app, "/api/auth/login", None, json!({ "username": "bob", "password": "battery staple" })).await;
+    let bob_cookie = session(&login);
+
+    let none = call(&app, Method::GET, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
+    assert_eq!(none.status, StatusCode::OK);
+    assert!(none.json().is_null());
+    let put = call(&app, Method::PUT, "/api/me/data/ai", Some(&ada), Some(Body::from(r#"{"providers":[{"key":"sk-test"}]}"#)), true, &[]).await;
+    assert_eq!(put.status, StatusCode::NO_CONTENT);
+    let got = call(&app, Method::GET, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
+    assert_eq!(got.json()["providers"][0]["key"], "sk-test");
+    // Someone else cannot see it, and bad keys and bodies are refused.
+    let other = call(&app, Method::GET, "/api/me/data/ai", Some(&bob_cookie), None, false, &[]).await;
+    assert!(other.json().is_null());
+    let bad_key = call(&app, Method::PUT, "/api/me/data/a%20b", Some(&ada), Some(Body::from("{}")), true, &[]).await;
+    assert_eq!(bad_key.status, StatusCode::BAD_REQUEST);
+    let bad_body = call(&app, Method::PUT, "/api/me/data/ai", Some(&ada), Some(Body::from("not json")), true, &[]).await;
+    assert_eq!(bad_body.status, StatusCode::BAD_REQUEST);
+    let list = call(&app, Method::GET, "/api/me/data?prefix=a", Some(&ada), None, false, &[]).await;
+    assert_eq!(list.json().as_array().unwrap().len(), 1);
+    let del = call(&app, Method::DELETE, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+    let gone = call(&app, Method::GET, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
+    assert!(gone.json().is_null());
 }

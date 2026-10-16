@@ -7,7 +7,6 @@ import {
   type Wire,
   Vector,
   assembleWire,
-  basicFaceExtrusion,
   cast,
   downcast,
   getOC,
@@ -22,7 +21,7 @@ import {
   weldShellsAndFaces,
 } from "replicad";
 import type { SketchFrame } from "./protocol";
-import { AXES, FeatureError, bodyForRefs, clean, hasSolid, orient } from "./build";
+import { AXES, FeatureError, bodyForRefs, clean, hasSolid, orient } from "./shared";
 import { add, cross, dot, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 
 const volume = (s: Shape3D) => {

@@ -11,6 +11,7 @@ pub mod mail;
 pub mod oidc;
 pub mod settings;
 pub mod tools;
+pub mod userdata;
 
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
@@ -111,6 +112,8 @@ struct PublicConfig {
     require_email: bool,
     /// The AI assistant is allowed on this server.
     ai: bool,
+    /// The first account must present the setup token (WHITTLE_SETUP_TOKEN).
+    needs_setup_token: bool,
 }
 
 async fn public_config(State(s): State<Shared>) -> ApiResult<Json<PublicConfig>> {
@@ -128,6 +131,7 @@ async fn public_config(State(s): State<Shared>) -> ApiResult<Json<PublicConfig>>
         password_reset: s.config.auth_local && s.config.public_url.is_some() && st.smtp.configured(),
         require_email: !s.config.auth_none && st.require_email(),
         ai: s.config.ai,
+        needs_setup_token: needs_setup && s.config.setup_token.is_some(),
     }))
 }
 
@@ -202,6 +206,8 @@ pub fn router(state: Shared) -> Router {
         .route("/admin/users/{id}/unlink-sso", post(admin::unlink_sso))
         .route("/admin/users/{id}/signout", post(admin::revoke_sessions))
         .route("/admin/users/{id}/send-reset", post(admin::send_reset))
+        .route("/me/data", get(userdata::list))
+        .route("/me/data/{key}", get(userdata::get).put(userdata::put).delete(userdata::remove))
         .route("/designs", get(designs::list).post(designs::create))
         .route("/designs/{id}", get(designs::download).put(designs::save).delete(designs::remove))
         .route("/designs/{id}/thumbnail", get(designs::thumbnail))

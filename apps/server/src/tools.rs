@@ -48,6 +48,7 @@ const TABLES: &[(&str, &[(&str, Ty)])] = &[
     ("designs", &[("id", Text), ("owner_id", Text), ("name", Text), ("size", Int), ("head", Int), ("has_thumbnail", Int), ("created_at", Int), ("updated_at", Int)]),
     ("design_versions", &[("design_id", Text), ("version", Int), ("size", Int), ("created_at", Int), ("author_id", OptText)]),
     ("settings", &[("key", Text), ("value", Text)]),
+    ("user_data", &[("user_id", Text), ("key", Text), ("value", Text), ("updated_at", Int)]),
     ("audit_log", &[("id", Text), ("at", Int), ("actor", OptText), ("action", Text), ("target", OptText), ("detail", OptText)]),
 ];
 
@@ -80,7 +81,7 @@ async fn dump(pool: &db::Db) -> Result<Dump, String> {
 async fn load(pool: &db::Db, data: &Dump, wipe: bool) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
     if wipe {
-        for t in ["sessions", "password_resets", "audit_log", "settings", "design_versions", "designs", "users"] {
+        for t in ["sessions", "password_resets", "audit_log", "settings", "user_data", "design_versions", "designs", "users"] {
             sqlx::query(&format!("DELETE FROM {t}")).execute(&mut *tx).await.map_err(|e| format!("clearing {t}: {e}"))?;
         }
     }
@@ -120,6 +121,18 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// A new file only its owner can read: a backup holds password hashes and the mail password.
+fn create_private(path: &Path) -> std::io::Result<File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
 /// Write a complete backup to `file`. Safe while the server runs (SQLite WAL / PostgreSQL MVCC).
 pub async fn backup(config: &Config, file: &Path) -> Result<String, String> {
     let pool = db::connect(&config.database_url).await.map_err(|e| format!("cannot open the database: {e}"))?;
@@ -127,7 +140,7 @@ pub async fn backup(config: &Config, file: &Path) -> Result<String, String> {
     let mut files = Vec::new();
     let designs = config.data.join("designs");
     walk(&designs, &mut files).map_err(|e| e.to_string())?;
-    let out = File::create(file).map_err(|e| format!("cannot create {}: {e}", file.display()))?;
+    let out = create_private(file).map_err(|e| format!("cannot create {}: {e}", file.display()))?;
     let mut zip = zip::ZipWriter::new(out);
     let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let manifest = json!({

@@ -4,9 +4,10 @@ import { PRESETS, type ProviderConfig, activeProvider, askAssistant, clearConver
 import { confirmDialog } from "../state/dialogs";
 import { uid } from "@whittle/core";
 import { useApp } from "../state/store";
+import { Spinner } from "./feedback";
 import { Select, TextField } from "./controls";
 import { Icon } from "./icons";
-import { openSettings } from "./Settings";
+import { openSettings } from "./settingsTab";
 
 const TOOL_LABELS: Record<string, string> = {
   get_design: "Read the design",
@@ -126,7 +127,7 @@ export function AssistantPanel() {
             ),
           )
         )}
-        {busy && <div className="aithinking" aria-live="polite">Working…</div>}
+        {busy && <div className="aithinking" aria-live="polite"><Spinner /> Working…</div>}
       </div>
       <form
         className="assistant__compose"
@@ -185,6 +186,7 @@ function ProviderEditor({ p, onChange, onRemove }: { p: ProviderConfig; onChange
 }
 
 export function AssistantSettings() {
+  const platform = useApp((s) => s.platform);
   const settings = useAi((s) => s.settings);
   const [preset, setPreset] = useState("");
   const update = (p: ProviderConfig) => saveAiSettings({ ...settings, providers: settings.providers.map((x) => (x.id === p.id ? p : x)) });
@@ -199,8 +201,8 @@ export function AssistantSettings() {
     <div className="settings__section">
       <h3 className="eyebrow">AI assistant</h3>
       <p className="muted small">
-        The assistant designs and edits models with Whittle's own tools, so its work is ordinary, editable features you can undo. Keys are stored only in this
-        browser and sent only to the provider you choose.
+        The assistant designs and edits models with Whittle's own tools, so its work is ordinary, editable features you can undo. {platform.kind === "server" ? "Your settings and keys are kept in your account on this server (the database)" : "Keys are stored only on this device"} and
+        sent only to the provider you choose.
       </p>
       {settings.providers.length > 1 && (
         <Select
@@ -216,7 +218,7 @@ export function AssistantSettings() {
           p={p}
           onChange={update}
           onRemove={() =>
-            void confirmDialog({ title: `Remove ${p.label}?`, message: "Its settings and key are removed from this browser.", confirmLabel: "Remove", danger: true }).then(
+            void confirmDialog({ title: `Remove ${p.label}?`, message: "Its settings and key are removed from your saved settings.", confirmLabel: "Remove", danger: true }).then(
               (ok) =>
                 ok &&
                 saveAiSettings({

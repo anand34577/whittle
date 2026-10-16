@@ -37,7 +37,7 @@ export async function exportShapes(
 
   if (format === "stl") {
     const shape = entries.length === 1 ? entries[0]![1] : (makeCompound(entries.map(([, s]) => s.clone())) as Shape3D);
-    const blob = shape.blobSTL({ binary: true, tolerance: 0.01, angularTolerance: 0.1 });
+    const blob = shape.blobSTL({ binary: true, ...meshOptions(shape) });
     return { data: await blobBytes(blob), mime: "model/stl", ext: "stl" };
   }
 
@@ -50,7 +50,12 @@ export async function exportShapes(
   return { data: build3MF(doc, entries), mime: "model/3mf", ext: "3mf" };
 }
 
-const MESH = { tolerance: 0.01, angularTolerance: 0.1 };
+/** 0.01 mm for ordinary parts; coarser for very large ones, so a metre-scale part doesn't produce a huge mesh. */
+function meshOptions(shape: Shape3D) {
+  const [a, b] = shape.boundingBox.bounds;
+  const diagonal = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  return { tolerance: Math.min(1, Math.max(0.01, diagonal * 2e-5)), angularTolerance: 0.1 };
+}
 
 /** A colour as six hex digits without the `#` (accepts #rgb and #rrggbb; anything else is a neutral grey). */
 export function hex6(color: string | undefined): string {
@@ -64,7 +69,7 @@ function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][]): string {
   const out = [`# ${doc.name}, exported from Whittle (units: millimetres)`];
   let base = 1;
   for (const [id, shape] of entries) {
-    const m = weld(shape.mesh(MESH));
+    const m = weld(shape.mesh(meshOptions(shape)));
     out.push(`o ${(doc.bodies[id]?.name ?? id).replace(/\s+/g, "_")}`);
     for (let i = 0; i < m.vertices.length; i += 3) out.push(`v ${m.vertices[i]!.toFixed(5)} ${m.vertices[i + 1]!.toFixed(5)} ${m.vertices[i + 2]!.toFixed(5)}`);
     for (let i = 0; i < m.triangles.length; i += 3) out.push(`f ${m.triangles[i]! + base} ${m.triangles[i + 1]! + base} ${m.triangles[i + 2]! + base}`);
@@ -75,7 +80,7 @@ function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][]): string {
 
 /** Binary PLY mesh (scanning and mesh tools such as MeshLab and CloudCompare). */
 function buildPLY(entries: [Id, Shape3D][]): Uint8Array {
-  const parts = entries.map(([, shape]) => weld(shape.mesh(MESH)));
+  const parts = entries.map(([, shape]) => weld(shape.mesh(meshOptions(shape))));
   const nv = parts.reduce((a, m) => a + m.vertices.length / 3, 0);
   const nf = parts.reduce((a, m) => a + m.triangles.length / 3, 0);
   const header = strToU8(
@@ -131,7 +136,7 @@ function buildGLB(doc: WhittleDocument, entries: [Id, Shape3D][]): Uint8Array {
     return bufferViews.length - 1;
   };
   entries.forEach(([id, shape], k) => {
-    const m = shape.mesh(MESH);
+    const m = shape.mesh(meshOptions(shape));
     // Z-up millimetres -> Y-up metres.
     const pos = new Float32Array(m.vertices.length);
     const min = [Infinity, Infinity, Infinity];

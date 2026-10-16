@@ -237,6 +237,8 @@ async fn finish(s: &Shared, q: CallbackQuery) -> Result<(axum::http::HeaderValue
         let st = s.settings.read().await;
         (st.oidc_link_by_email, st.oidc_auto_create(&s.config))
     };
+    // Even with automatic accounts off, the very first sign-in on a new server creates the administrator (nobody could add them otherwise).
+    let no_accounts = db::user_count(&s.db).await.map_err(|e| e.to_string())? == 0;
     // An existing account this identity may join, matched by the provider-verified email:
     // password-less invitations and accounts an administrator flagged always; any
     // account when the server links by verified email. Never when the match is ambiguous.
@@ -267,7 +269,7 @@ async fn finish(s: &Shared, q: CallbackQuery) -> Result<(axum::http::HeaderValue
             db::audit(&s.db, Some(&u.id), "user.sso_link", Some(&u.username), "linked by verified email").await;
             u
         }
-        (None, None) if !auto_create => {
+        (None, None) if !auto_create && !no_accounts => {
             return Err("You don't have an account here yet. Ask an administrator to add you with your email address.".into());
         }
         (None, None) => {

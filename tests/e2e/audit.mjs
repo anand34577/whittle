@@ -52,6 +52,7 @@ const runCommand = (id) =>
   }, id);
 
 await step("01-start", async () => {
+  await page.addInitScript(() => localStorage.setItem("whittle.debug", "1")); // the test hook is off unless asked for
   await page.goto(url);
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
   await page.getByRole("button", { name: /Engineer & professional/ }).click();
@@ -169,5 +170,16 @@ await step("09-drawing-export", async () => {
 });
 
 expect(errors.length === 0, "no console errors or native dialogs", errors);
+
+// Last, because it breaks the window on purpose: a crash while drawing must show the recovery screen, not a blank page.
+await step("10-ui-crash-is-caught", async () => {
+  await page.evaluate(() => {
+    const s = window.whittle.useApp;
+    s.setState({ doc: { ...s.getState().doc, features: [null] } });
+  });
+  await page.locator(".error-boundary").waitFor({ timeout: 5000 });
+  await page.getByRole("button", { name: "Save a copy" }).waitFor();
+});
+errors.length = 0; // the crash is expected to log errors
 console.log("no console errors");
 await browser.close();

@@ -11,7 +11,7 @@
 import { create } from "zustand";
 import { LENGTH_TO_MM, type SketchEntity, type SketchImage, type Vec2, trim, uid } from "@whittle/core";
 import { promptDialog } from "./dialogs";
-import { simplify } from "./drawings";
+import { simplify } from "./simplify";
 import { contours, fitCircle, grayscale, homography, otsu, signedArea, warp } from "./imageMath";
 import { createSketchOn } from "./actions";
 import { commitSession, findFeature, requestView, sketchMutate, toast, useApp } from "./store";

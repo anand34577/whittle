@@ -10,7 +10,7 @@
 │  │ Sketch controller (snapping)   │ ───────► │  · per-step cache           │
 │  │ Store: document + sessions     │ ◄─────── │  · persistent references    │
 │  │ History (Immer patches)        │  meshes  │  · friendly errors + fixes  │
-│  └───────────────────────────────┘ (transfer)│ Exporters: STEP, STL, 3MF   │
+│  └───────────────────────────────┘ (transfer)│ 7 export formats (exporters)│
 │                                             └─────────────────────────────┘
 │  packages/core is shared by both sides: model, formulas, sketch geometry. │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -38,7 +38,7 @@
 Fillets, chamfers, shells and face sketches don't store face/edge *indices*. They store a geometric fingerprint (center/mid-point, normal/tangent, surface/curve type, area/length). On every rebuild `packages/kernel/src/refs.ts` re-resolves it:
 
 1. keep candidates with the same type and orientation;
-2. a single candidate is the match even if it moved;
+2. a single candidate is the match even if it moved (however far: today this is silent, so a face that disappeared can be replaced by an unrelated one of the same type and direction);
 3. otherwise the closest wins, and an ambiguous choice is flagged as a **warning** so the user confirms instead of getting a silent wrong pick.
 
 `packages/kernel/test/build.test.ts` covers the key case: fillet four edges, change the sketch width 40 → 60, and the fillet stays on the same four edges with the exact expected volume.
@@ -51,7 +51,7 @@ While a fillet/chamfer/shell is being edited, the kernel also returns the bodies
 
 ## File format (.whittle)
 
-A ZIP container holding `manifest.json`, `document.json` (the source of truth) and an optional `thumbnail.png`. `migrate()` upgrades older schemas and refuses newer ones with a clear message.
+A ZIP container holding `manifest.json`, `document.json` (the source of truth), an optional `thumbnail.png`, and `imports/<id>.bin` for each embedded STEP/STL file (raw bytes; in memory they are base64 in the document). `migrate()` upgrades older schemas and refuses newer ones with a clear message.
 
 ## Swappable kernel
 
@@ -76,5 +76,5 @@ One portable schema serves SQLite and PostgreSQL through SQLx's `Any` driver; mi
 append-only list in `db.rs`. Design files live on disk (`designs/<id>/v<n>.whittle`), metadata in the
 database. Sessions are random tokens in HttpOnly cookies, stored hashed. State-changing requests must
 carry `X-Whittle: 1` (CSRF guard). The kernel's worker script is the only resource allowed `eval`
-(OpenCascade's WebAssembly bindings need it); every other response gets a strict CSP.
+(OpenCascade's WebAssembly bindings need it); every other response gets a strict CSP. (The desktop shell's own CSP in `tauri.conf.json` allows `eval` for the whole page.)
 

@@ -1,7 +1,10 @@
 /** Title bar, toolbar, status bar and toasts: the quiet frame around the viewport. */
 import { useEffect, useRef, useState } from "react";
 import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable } from "../state/commands";
+import { aiAvailable } from "../state/platform";
 import { hintFor } from "../state/hints";
+import { Activity, ActivityStrip } from "./Activity";
+import { Spinner } from "./feedback";
 import { history, mutate, setTheme, useApp } from "../state/store";
 import { AccountButton } from "./Account";
 import { type Profile, THEMES } from "../state/prefs";
@@ -15,7 +18,7 @@ export function TitleBar() {
   const dirty = useApp((s) => s.dirty);
   const theme = useApp((s) => s.theme);
   const assistant = useApp((s) => s.assistant);
-  const aiAllowed = useApp((s) => s.platform.kind !== "server" || s.platform.config.ai !== false);
+  const aiAllowed = useApp((s) => aiAvailable(s.platform));
   const dark = THEMES.find((t) => t.id === theme)?.dark ?? true;
   useApp((s) => s.historyTick);
   const session = useApp((s) => s.session);
@@ -292,15 +295,23 @@ export function StatusBar() {
         <Icon name="sparkStep" size={14} />
         {hint}
       </span>
+      <ActivityStrip />
+      <Activity />
       <span className="statusbar__meta">
         {state.kernelError ? (
           <span className="status-dot status-dot--error">Engine error</span>
         ) : !state.kernelReady ? (
-          <span className="status-dot status-dot--busy">Loading engine</span>
-        ) : (
-          <span className={`status-dot ${state.regenBusy ? "status-dot--busy" : "status-dot--ok"}`}>
-            {state.regenBusy ? "Building" : r ? `Built in ${Math.max(1, Math.round(r.ms))} ms` : "Ready"}
+          <span className="busyline">
+            <Spinner label="Loading engine" />
+            Loading engine
           </span>
+        ) : state.regenBusy ? (
+          <span className="busyline">
+            <Spinner label="Building" />
+            Building{state.regenProgress && state.regenProgress.total > 1 ? ` ${state.regenProgress.done}/${state.regenProgress.total}` : ""}
+          </span>
+        ) : (
+          <span className="status-dot status-dot--ok">{r ? `Built in ${Math.max(1, Math.round(r.ms))} ms` : "Ready"}</span>
         )}
         <span className="mono">{state.doc.units}</span>
       </span>

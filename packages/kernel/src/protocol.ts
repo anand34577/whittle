@@ -113,8 +113,12 @@ export interface RadiusItem {
   normal: Vec3;
 }
 
-export type InspectKind = "interference" | "radii";
-export type InspectResult = { kind: "interference"; items: InterferenceItem[] } | { kind: "radii"; items: RadiusItem[] };
+export type InspectKind = "interference" | "radii" | "validity";
+export type InspectResult =
+  | { kind: "interference"; items: InterferenceItem[] }
+  | { kind: "radii"; items: RadiusItem[] }
+  /** OpenCascade's own validity check of every body. */
+  | { kind: "validity"; items: { bodyId: Id; valid: boolean }[] };
 
 export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply" | "drawing";
 
@@ -126,6 +130,8 @@ export type KernelRequest =
 export type KernelResponse =
   | { type: "ready"; ms: number }
   | { type: "regen"; result: RegenResult }
+  /** A long rebuild is under way: `done` of `total` timeline steps are finished. */
+  | { type: "progress"; seq: number; done: number; total: number }
   | { type: "export"; seq: number; data: Uint8Array; mime: string; ext: string }
   | { type: "inspect"; seq: number; result: InspectResult }
   | { type: "error"; seq: number; message: string };

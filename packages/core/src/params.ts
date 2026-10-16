@@ -123,6 +123,8 @@ const NOT_EXPR = new Set([
   "id", "type", "name", "mode", "anchor", "text", "sketch", "extent", "op", "target", "axis", "shape", "bodyId", "pattern",
   "style", "fileName", "format", "data", "surface", "curve", "sketches", "tools", "face", "faces", "edges", "comment",
   "profile", "path", "orientation", "section", "keep", "center", "pull", "tilt", "refs", "a", "b", "c",
+  // Words, not formulas: plane kind, second pattern direction, thin-wall side, ruled-surface direction, joint type and origin, curve source.
+  "kind", "axis2", "thinSide", "direction", "joint", "origin", "source",
 ]);
 
 function renameIn(expr: string, from: string, to: string): string {
@@ -140,6 +142,8 @@ export function renameParameter(doc: Pick<WhittleDocument, "parameters" | "featu
     const rec = o as Record<string, unknown>;
     for (const k of Object.keys(rec)) {
       if (NOT_EXPR.has(k)) continue;
+      // An outline point [x, y, "arc"] ends with a word, not a formula.
+      if (Array.isArray(rec) && k === "2" && (rec[2] === "arc" || rec[2] === "spline")) continue;
       const v = rec[k];
       if (typeof v === "string") {
         if (k !== "plane") rec[k] = renameIn(v, from, to);
