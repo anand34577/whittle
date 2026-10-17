@@ -150,7 +150,7 @@ export function PartsDialog() {
           </div>
           <label className="parts__search">
             <Icon name="search" size={16} />
-            <input autoFocus placeholder="Search parts" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+            <input autoFocus placeholder="Search parts" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") void (q ? setQ("") : useApp.setState({ panel: null })); }} />
           </label>
         </div>
         <div className="parts__grid">

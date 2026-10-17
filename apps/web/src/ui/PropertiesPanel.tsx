@@ -517,6 +517,13 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
   const selected = useApp((s) => s.selectedEntity);
   const e = sketch.entities.find((x) => x.id === selected);
   const status = useApp((s) => s.regen?.status.find((x) => x.id === sketch.id));
+  // Constraint-ready lines and curves count too, or a sketch drawn that way reads "0 shapes".
+  const shapes = sketch.entities.length;
+  const curves = sketch.geometry?.filter((g) => g.type !== "point").length ?? 0;
+  const contents = [
+    shapes || !curves ? `${shapes} shape${shapes === 1 ? "" : "s"}` : "",
+    curves === 1 ? "1 line or curve" : curves ? `${curves} lines and curves` : "",
+  ].filter(Boolean).join(", ");
   return (
     <>
       <header className="panel__head">
@@ -524,7 +531,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
         <div>
           <h2>{sketch.name}</h2>
           <p className="muted">
-            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : sketch.plane.kind === "construction" ? "On a construction plane" : "On a model face"} · {sketch.entities.length} shape{sketch.entities.length === 1 ? "" : "s"}
+            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : sketch.plane.kind === "construction" ? "On a construction plane" : "On a model face"} · {contents}
           </p>
         </div>
       </header>

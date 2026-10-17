@@ -10,7 +10,9 @@ export type Accent = "orange" | "blue" | "green" | "violet" | "rose" | "teal" | 
 export type Density = "compact" | "comfortable" | "spacious";
 /** Who is using Whittle: tunes defaults, hints and which tools are up front. */
 export type Profile = "beginner" | "maker" | "engineer" | "designer" | "educator";
-export type NavPreset = "whittle" | "fusion" | "solidworks" | "onshape" | "blender" | "trackpad";
+export type NavPreset = "whittle" | "middle-pan" | "middle-orbit" | "middle-orbit-shift" | "right-orbit" | "trackpad";
+/** Names used by builds before 0.10, read from saved preferences. */
+const LEGACY_NAV: Record<string, NavPreset> = { fusion: "middle-pan", solidworks: "middle-orbit", blender: "middle-orbit-shift", onshape: "right-orbit" };
 
 export interface Prefs {
   theme: ThemePref;
@@ -34,6 +36,10 @@ export interface Prefs {
   reduceMotion: boolean;
   /** New shapes become constraint-ready geometry (dimension, constrain, trim, fillet them). */
   smartSketch: boolean | null;
+  /** How finely mesh exports (STL, 3MF, OBJ, GLB, PLY) follow curved faces. */
+  meshQuality: "draft" | "standard" | "fine";
+  /** Single-key shortcuts: Whittle's own, or the classic CAD letters (H hole, J joint, T trim, O offset, P project). */
+  keys: "whittle" | "classic";
 }
 
 export interface ThemeInfo {
@@ -84,10 +90,10 @@ export const PROFILES: ProfileInfo[] = [
 
 export const NAV_PRESETS: { id: NavPreset; label: string; blurb: string }[] = [
   { id: "whittle", label: "Whittle", blurb: "Left-drag orbits, right- or middle-drag pans, wheel zooms." },
-  { id: "fusion", label: "Fusion 360", blurb: "Middle-drag pans, Shift + middle-drag orbits, left-drag selects." },
-  { id: "solidworks", label: "SolidWorks", blurb: "Middle-drag orbits, Ctrl + middle-drag pans, Shift + middle-drag zooms." },
-  { id: "onshape", label: "Onshape", blurb: "Right-drag orbits, middle-drag or Ctrl + right-drag pans." },
-  { id: "blender", label: "Blender", blurb: "Middle-drag orbits, Shift + middle-drag pans, Ctrl + middle-drag zooms." },
+  { id: "middle-pan", label: "Middle button pans", blurb: "Middle-drag pans, Shift + middle-drag orbits, left-drag selects." },
+  { id: "middle-orbit", label: "Middle button orbits, Ctrl pans", blurb: "Middle-drag orbits, Ctrl + middle-drag pans, Shift + middle-drag zooms." },
+  { id: "middle-orbit-shift", label: "Middle button orbits, Shift pans", blurb: "Middle-drag orbits, Shift + middle-drag pans, Ctrl + middle-drag zooms." },
+  { id: "right-orbit", label: "Right button orbits", blurb: "Right-drag orbits, middle-drag or Ctrl + right-drag pans." },
   { id: "trackpad", label: "Trackpad", blurb: "Left-drag orbits, Shift + left-drag pans, Ctrl + left-drag zooms." },
 ];
 
@@ -110,6 +116,8 @@ export const DEFAULT_PREFS: Prefs = {
   material: "pla",
   reduceMotion: false,
   smartSketch: null,
+  meshQuality: "standard",
+  keys: "whittle",
 };
 
 /** The first look before the person's saved preferences arrive (from this device when there is no server). */
@@ -131,6 +139,10 @@ export function normalizePrefs(p: Partial<Prefs>): Prefs {
   const out = { ...DEFAULT_PREFS, ...p };
   if (!THEMES.some((t) => t.id === out.theme) && out.theme !== "system") out.theme = DEFAULT_PREFS.theme;
   out.scale = Math.min(1.3, Math.max(0.85, Number(out.scale) || 1));
+  if (!["draft", "standard", "fine"].includes(out.meshQuality)) out.meshQuality = "standard";
+  out.nav = LEGACY_NAV[out.nav] ?? out.nav;
+  if (!NAV_PRESETS.some((n) => n.id === out.nav)) out.nav = DEFAULT_PREFS.nav;
+  if (out.keys !== "classic") out.keys = "whittle";
   return out;
 }
 
@@ -175,19 +187,19 @@ export function navAction(
   const M = button === 1;
   const R = button === 2;
   switch (preset) {
-    case "fusion":
+    case "middle-pan":
       if (M) return mods.shift ? "orbit" : "pan";
       if (R) return inSketch ? "pan" : "none";
       return "none";
-    case "solidworks":
+    case "middle-orbit":
       if (M) return mods.ctrl ? "pan" : mods.shift ? "zoom" : "orbit";
       if (R) return inSketch ? "pan" : "none";
       return "none";
-    case "onshape":
+    case "right-orbit":
       if (R) return mods.ctrl ? "pan" : "orbit";
       if (M) return "pan";
       return "none";
-    case "blender":
+    case "middle-orbit-shift":
       if (M) return mods.shift ? "pan" : mods.ctrl ? "zoom" : "orbit";
       if (R) return inSketch ? "pan" : "none";
       return "none";

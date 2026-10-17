@@ -2,7 +2,7 @@
  * 2D drawing sheet of the visible bodies: front, top and right views in third-angle
  * projection plus an isometric view, hidden lines dashed, overall dimensions and a
  * title block, scaled to fit an A3 landscape sheet. Output is a plain SVG, so it
- * opens in a browser, Inkscape, Illustrator or any PDF printer.
+ * opens in a browser, any vector editor or any PDF printer.
  */
 import { type Shape3D, ProjectionCamera, drawProjection, makeCompound } from "replicad";
 

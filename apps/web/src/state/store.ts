@@ -79,6 +79,8 @@ export interface Toast {
   kind: "info" | "ok" | "warn" | "error";
   text: string;
   action?: { label: string; run: () => void };
+  /** Says what to do next; gone as soon as the next step starts, so it never tells you to do what you're doing. */
+  nextStep?: boolean;
 }
 
 /** The concrete theme on screen (preferences may say "system"). */
@@ -283,7 +285,7 @@ export function beginNewFeature(feature: Feature, label: string) {
   const { session, doc } = get();
   if (session) commitSession();
   const base = get().doc;
-  set({ session: { featureId: feature.id, isNew: true, base, label, stack: [] }, selection: [], hover: null });
+  set({ session: { featureId: feature.id, isNew: true, base, label, stack: [] }, selection: [], hover: null, toasts: get().toasts.filter((t) => !t.nextStep) });
   insertFeature(feature);
   const s = get().session;
   if (s) set({ session: { ...s, stack: [] } });
@@ -307,7 +309,7 @@ export function editFeature(id: Id) {
   if (f.type === "sketch") return enterSketch(id, false);
   const base = get().doc;
   const index = base.features.findIndex((x) => x.id === id);
-  // Like Fusion: editing an early step shows the model as it was then, so later steps neither hide it nor slow the edit.
+  // Editing an early step shows the model as it was then, so later steps neither hide it nor slow the edit.
   const isolated = index >= 0 && index < activeEnd(base) - 1;
   set({
     session: { featureId: id, isNew: false, base, label: `Edit ${f.name}`, stack: [], isolated },
@@ -467,7 +469,7 @@ export function finishSketch() {
     sketchSel: [],
     selection: sk ? [{ kind: "sketch", sketchId: sk.id }] : [],
   });
-  if (mode.isNew && sk) toast("ok", "Sketch finished. Press E to extrude it.");
+  if (mode.isNew && sk) toast("ok", "Sketch finished. Press E to extrude it.", undefined, true);
 }
 
 export function sketchMutate(label: string, recipe: (s: Draft<SketchFeature>) => void, mergeKey?: string) {
@@ -500,9 +502,9 @@ export function deleteEntity(id: Id) {
 /* ───────────────────────────── UI helpers ───────────────────────────── */
 
 let toastId = 0;
-export function toast(kind: Toast["kind"], text: string, action?: Toast["action"]) {
+export function toast(kind: Toast["kind"], text: string, action?: Toast["action"], nextStep?: boolean) {
   const id = ++toastId;
-  set({ toasts: [...get().toasts.slice(-3), { id, kind, text, action }] });
+  set({ toasts: [...get().toasts.slice(-3), { id, kind, text, action, nextStep }] });
   setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), action ? 7000 : 3200);
 }
 

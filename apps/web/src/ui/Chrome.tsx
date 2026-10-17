@@ -1,11 +1,11 @@
 /** Title bar, toolbar, status bar and toasts: the quiet frame around the viewport. */
 import { useEffect, useRef, useState } from "react";
-import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable } from "../state/commands";
+import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable, whyUnavailable } from "../state/commands";
 import { aiAvailable } from "../state/platform";
 import { hintFor } from "../state/hints";
 import { Activity, ActivityStrip } from "./Activity";
 import { Spinner } from "./feedback";
-import { history, mutate, setTheme, useApp } from "../state/store";
+import { history, mutate, setTheme, toast, useApp } from "../state/store";
 import { AccountButton } from "./Account";
 import { type Profile, THEMES } from "../state/prefs";
 import { Popover } from "./controls";
@@ -112,16 +112,16 @@ export function TitleBar() {
 
 function ToolButton({ c, active, big }: { c: Command; active?: boolean; big?: boolean }) {
   const state = useApp();
-  const enabled = isAvailable(c, state);
+  const why = whyUnavailable(c, state);
   active ||= c.on?.(state);
   return (
     <button
       className={`tool ${active ? "is-active" : ""} ${big ? "tool--big" : ""}`}
       onClick={c.run}
-      disabled={!enabled}
+      disabled={!!why}
       data-tour={c.id}
       aria-pressed={active}
-      title={`${c.label}${c.keys ? `  (${c.keys})` : ""}${c.hint ? "\n" + c.hint : ""}`}
+      title={`${c.label}${c.keys ? `  (${c.keys})` : ""}${why ? "\n" + why : c.hint ? "\n" + c.hint : ""}`}
     >
       <Icon name={c.icon ?? "more"} size={big ? 22 : 20} />
       <span className="tool__label">{c.short ?? c.label}</span>
@@ -155,12 +155,12 @@ function GroupMenu({ label, ids, asTool }: { label: string; ids: string[]; asToo
           {ids.map((id) => {
             if (id.startsWith("#")) return <div key={id} className="groupmenu__head">{id.slice(1)}</div>;
             const c = commandById(id);
-            const enabled = isAvailable(c, state);
+            const why = whyUnavailable(c, state);
             return (
               <button
                 key={id}
                 role="menuitem"
-                disabled={!enabled}
+                disabled={!!why}
                 className="groupmenu__item"
                 onClick={() => {
                   setOpen(false);
@@ -170,7 +170,7 @@ function GroupMenu({ label, ids, asTool }: { label: string; ids: string[]; asToo
                 <Icon name={c.icon ?? "more"} size={20} />
                 <span className="groupmenu__text">
                   <b>{c.label}</b>
-                  {c.hint && <small>{c.hint}</small>}
+                  {why ? <small className="groupmenu__why">{why}</small> : c.hint && <small>{c.hint}</small>}
                 </span>
                 {c.keys && <kbd>{c.keys}</kbd>}
               </button>
@@ -198,7 +198,7 @@ function Group({ label, ids, more, menu, activeId }: { label: string; ids: strin
           <ToolButton key={id} c={commandById(id)} active={id === activeId} />
         ))}
       </div>
-      {more ? <GroupMenu label={label} ids={menu ?? [...ids, ...more]} /> : <span className="toolgroup__label">{label}</span>}
+      {more ? <GroupMenu label={label} ids={menu ?? (ids.every((i) => more.includes(i)) ? more : [...ids, ...more.filter((i) => !ids.includes(i))])} /> : <span className="toolgroup__label">{label}</span>}
     </div>
   );
 }
@@ -209,13 +209,15 @@ function Group({ label, ids, more, menu, activeId }: { label: string; ids: strin
  */
 function toolsFor(profile: Profile | null) {
   const pro = profile === "engineer" || profile === "designer";
+  // Ordered the way the work flows (Create, Modify, Assemble, Construct, Inspect, Insert), the layout most CAD users already know.
+  const solids = ["#From a sketch", "extrude", "revolve", "sweep", "loft", "pipe", "rib", "web", "#Features", "hole", "thread", "thread-face", "spring", "emboss", "engrave", "boundary-fill"];
+  const primitives = ["#Primitives", "box", "cylinder", "sphere", "cone", "torus", "tube"];
+  const curves = ["#3D curves", "curve-3d", "curve-edges", "curve-faces", "curve-project"];
   return {
-    create: pro
-      ? { primary: ["extrude", "revolve", "sweep", "loft", "hole"], more: ["#More solids", "pipe", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "#3D curves", "curve-3d", "curve-edges", "curve-faces", "curve-project", "#Bring in", "import"] }
-      : { primary: ["extrude", "revolve", "hole"], more: ["#More solids", "sweep", "loft", "pipe", "rib", "web", "emboss", "engrave", "thread", "thread-face", "spring", "boundary-fill", "#3D curves", "curve-3d", "curve-edges", "curve-faces", "curve-project", "#Bring in", "import"] },
+    create: { primary: pro ? ["extrude", "revolve", "sweep", "loft", "hole"] : ["extrude", "revolve", "hole", "box"], more: [...solids, ...primitives, ...curves] },
     modify: pro
-      ? { primary: ["fillet", "chamfer", "shell", "draft", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "#Bodies", "combine", "mirror", "pattern", "split", "offset", "scale", "align", "#Edges", "fillet-all", "chamfer-all", "#Assembly", "make-component", "ground", "joint"] }
-      : { primary: ["fillet", "chamfer", "shell", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Bodies", "combine", "mirror", "pattern", "split", "offset", "scale", "align", "#Edges", "fillet-all", "chamfer-all", "#Assembly", "make-component", "ground", "joint"] },
+      ? { primary: ["press-pull", "fillet", "chamfer", "shell", "draft", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "align"] }
+      : { primary: ["fillet", "chamfer", "shell", "move", "combine"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "align"] },
   };
 }
 
@@ -264,19 +266,14 @@ export function Toolbar() {
         <span className="toolgroup__label">Start</span>
       </div>
       <Group label="Create" ids={create.primary} more={create.more} />
-      <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
-      <Group label="Surface" ids={[]} more={["surface-patch", "surface-stitch", "surface-thicken", "surface-trim", "surface-ruled", "surface-offset", "surface-untrim", "surface-extend", "surface-unstitch", "surface-merge", "surface-reverse"]} />
-      <Group label="Shapes" ids={[]} more={["box", "cylinder", "sphere", "cone", "torus", "tube", "spring"]} />
       <Group label="Modify" ids={modify.primary} more={modify.more} />
-      <Group label="Inspect" ids={["measure", "section"]} more={["#Check the model", "interference", "clear-interference", "explode", "min-radius", "overhang", "draft-analysis", "#Surface quality", "curvature", "zebra", "accessibility", "#Look", "component-colors", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho", "screenshot"]} />
+      <Group label="Assemble" ids={[]} more={["#Components", "make-component", "ground", "#Motion", "joint", "#Check", "interference", "clear-interference", "explode", "component-colors"]} />
+      <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
+      <Group label="Surface" ids={[]} more={["#Make", "surface-patch", "surface-ruled", "surface-offset", "surface-extend", "#Edit", "surface-trim", "surface-untrim", "surface-stitch", "surface-unstitch", "surface-merge", "surface-reverse", "#To a solid", "surface-thicken"]} />
+      <Group label="Inspect" ids={["measure", "section"]} more={["#Measure", "measure", "section", "check-geometry", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra", "#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
       </div>
       <div className="toolbar__fixed">
-        <div className="toolgroup toolgroup--feature">
-          <div className="toolgroup__tools">
-            <ToolButton c={commandById("parts")} />
-          </div>
-          <span className="toolgroup__label">Library</span>
-        </div>
+        <Group label="Insert" ids={["parts"]} more={["#Ready-made", "parts", "#From a file", "import"]} />
         <Group label="Export" ids={["export"]} more={["export-step", "export-3mf", "export-stl", "screenshot", "history"]} />
       </div>
     </div>
@@ -359,18 +356,19 @@ export function CommandPalette() {
   const state = useApp();
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
-  const list = COMMANDS.map((c) => ({ c, s: score(c, q) }))
-    .filter((x) => x.s > 0 && isAvailable(x.c, state))
-    .sort((a, b) => b.s - a.s)
-    .slice(0, 12)
-    .map((x) => x.c);
+  // What can't run yet still shows (after what can), with the reason, so a search never comes up empty-handed.
+  const list = COMMANDS.map((c) => ({ c, s: score(c, q), why: q ? whyUnavailable(c, state) : null }))
+    .filter((x) => x.s > 0 && (q ? true : isAvailable(x.c, state)))
+    .sort((a, b) => Number(!!a.why) - Number(!!b.why) || b.s - a.s)
+    .slice(0, 12);
   const listRef = useRef<HTMLUListElement>(null);
   useEffect(() => setI(0), [q]);
   const close = () => useApp.setState({ panel: null });
-  const run = (c: Command | undefined) => {
-    if (!c) return;
+  const run = (x: (typeof list)[number] | undefined) => {
+    if (!x) return;
+    if (x.why) return toast("info", `${x.c.label}: ${x.why}`);
     close();
-    setTimeout(c.run, 0);
+    setTimeout(x.c.run, 0);
   };
   return (
     <div className="scrim" onMouseDown={close}>
@@ -397,22 +395,26 @@ export function CommandPalette() {
         </div>
         <ul className="palette__list" ref={listRef} role="listbox">
           {list.length === 0 && <li className="palette__empty">No matching command</li>}
-          {list.map((c, k) => (
+          {list.map((x, k) => {
+            const c = x.c;
+            return (
             <li
               key={c.id}
               role="option"
               aria-selected={k === i}
-              className={`palette__item ${k === i ? "is-on" : ""}`}
+              aria-disabled={!!x.why}
+              className={`palette__item ${k === i ? "is-on" : ""} ${x.why ? "is-unavailable" : ""}`}
               onMouseEnter={() => setI(k)}
-              onClick={() => run(c)}
+              onClick={() => run(x)}
             >
               <Icon name={c.icon ?? "more"} size={18} />
               <span className="palette__label">{c.label}</span>
-              {c.hint && <span className="palette__hint">{c.hint}</span>}
+              {x.why ? <span className="palette__hint palette__why">{x.why}</span> : c.hint && <span className="palette__hint">{c.hint}</span>}
               <span className="palette__group">{c.group}</span>
               {c.keys && <kbd>{c.keys}</kbd>}
             </li>
-          ))}
+            );
+          })}
         </ul>
       </div>
     </div>

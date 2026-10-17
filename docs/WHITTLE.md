@@ -2,7 +2,7 @@
 
 **Version:** 0.2.1 · **License:** MPL-2.0 · **Type:** open-source parametric 3D CAD for part design
 
-Whittle is a parametric 3D CAD application in the same category as Fusion 360, built to be lighter, easier to install and easier to learn. It runs in any modern browser, as a desktop app (Windows, macOS, Linux via Tauri), or self-hosted on a server.
+Whittle is an open-source parametric 3D CAD application: exact solids, a full feature history and real engineering exports, in an app that is light, quick to install and easy to learn. It runs in any modern browser, as a desktop app (Windows, macOS, Linux via Tauri), or self-hosted on a server.
 
 **Audience:** beginners, hobbyists and 3D-printing users, and professional mechanical designers. The defaults are simple and guided; more depth is one click away.
 
@@ -97,7 +97,7 @@ Every launch opens the **start screen**, which offers:
 ┌─────────────────────────────── Title bar ───────────────────────────────┐
 ├──────────────────────────────── Toolbar ────────────────────────────────┤
 │ Browser │                  3D viewport                     │ Properties │
-│ (left)  │   context bar (top) · view cube (top right)       │  panel     │
+│ (left)  │   context bar (top) · orientation cube (top right) │  panel     │
 │         │   view dock (bottom) · section card (bottom left) │ (right)    │
 ├──────────────────────────────── Timeline ───────────────────────────────┤
 └────────────────────────────── Status bar ───────────────────────────────┘
@@ -111,19 +111,21 @@ Every launch opens the **start screen**, which offers:
 
 ### Toolbar (modelling mode)
 
-Tools are grouped. Each group label is also a menu listing **every** tool in that group, with a short description and shortcut.
+Tools are grouped in the order the work flows (create, modify, assemble, construct, inspect, insert), the layout most CAD users already know. Each group label is also a menu listing **every** tool in that group, in labelled sections, with a short description and shortcut. Engineer and designer profiles get a few more buttons on the bar; the menus are the same for everyone.
 
 | Group | Buttons | Also in the group menu |
 |---|---|---|
 | Start | **Sketch** | |
-| Create | Extrude, Revolve, Loft, Hole | Import STEP / STL |
-| Shapes | Box, Cylinder, Sphere | Cone, Torus, Tube |
-| Modify | Fillet, Chamfer, Shell, Move / Copy | Combine, Mirror, Pattern |
-| Inspect | Measure, Section, Print check | Display styles, Orthographic, Save image |
-| Library | Parts | |
+| Create | Extrude, Revolve, Hole, Box (Sweep and Loft for engineers and designers) | Pipe, Rib, Web, Thread, Coil, Emboss, Engrave, Boundary Fill; primitives (box, cylinder, sphere, cone, torus, tube); 3D curves |
+| Modify | Fillet, Chamfer, Shell, Move / Copy, Combine (Press / Pull and Draft for engineers and designers) | Replace / Delete / Split faces, Round or bevel all edges, Mirror, Pattern, Split, Offset, Scale, Align |
+| Assemble | (menu) | Make component, Ground, Joint, Interference, Exploded view, Color by component |
+| Construct | (menu) | Planes, axes and points |
+| Surface | (menu) | Patch, ruled, offset, extend, trim, stitch, merge, thicken… |
+| Inspect | Measure, Section | Check geometry, overhangs, draft, minimum radius, curvature, zebra, display styles, orthographic |
+| Insert | Parts | Import STEP / STL |
 | Export | Export… | Export STEP, Export 3MF, Export STL, Save image, Version history |
 
-Buttons are greyed out when they don't apply (for example, Fillet before any body exists).
+Buttons are greyed out when they don't apply, and say why: hover a greyed button, or open its group menu, to read what it needs (for example, Fillet before any body exists: "Needs a body first"). The command palette lists them too, with the same reason, so a search never comes up empty.
 
 ### Toolbar (sketch mode)
 
@@ -160,7 +162,7 @@ Shows one of three things:
 |---|---|---|
 | Context bar | top centre | Actions for the current selection (e.g. a face offers Sketch here, Hole, Shell, Measure) |
 | Banner | top centre | Shown while picking a sketch plane or measuring, with Cancel / Done |
-| View cube | top right | Click a face to look at it; home button for the default view |
+| Orientation cube | top right | Click a face to look at it; home button for the default view |
 | View dock | bottom centre | Display styles, Measure, Section, Print check, Grid, Orthographic, Fit, Save image |
 | Section card | bottom left | Section axis, flip and position slider |
 | Measure card | near the measured item | Measurement results |
@@ -186,10 +188,10 @@ Type what you want in plain words. Every command has synonyms, so for example:
 | "hollow" | Shell |
 | "drill", "m3", "screw" | Hole |
 | "bolt circle" | (shape Arrange tools) |
-| "slicer", "bambu", "prusa" | Export 3MF |
+| "slicer", "3d print" | Export 3MF |
 | "transparent" | X-ray |
 
-Arrow keys move, Enter runs, Esc closes. Only commands that apply right now are listed.
+Arrow keys move, Enter runs, Esc closes. Tools that can't run yet are listed last, dimmed, with what to do first.
 
 ### Guided first part (coach)
 
@@ -269,7 +271,7 @@ If a hole touches its outline in two separate places (which would split the shap
 ### Constraint-driven sketching
 
 Beside the whole shapes above, a sketch can hold **solver geometry**: points, lines, arcs and circles that a
-constraint solver (FreeCAD's PlaneGCS, compiled to WebAssembly) positions from the relations you give it.
+constraint solver (PlaneGCS, the open-source solver from the FreeCAD project, compiled to WebAssembly) positions from the relations you give it.
 Both kinds live in the same sketch, so the quick tools stay exactly as they were.
 
 | Tool | Use |
@@ -336,7 +338,7 @@ These work on shapes whose positions are plain numbers. If a position comes from
 
 ### Pictures to trace over
 
-Put a photo, scan or drawing on the sketch plane and draw over it at true size. Use **Special ▸ Picture**, **paste** an image (Ctrl+V) while sketching, or **drop** an image file anywhere. Dropping one outside a sketch starts a new sketch on the ground (XY) plane with the picture on it. The picture sits behind the sketch lines and isn't geometry: moving or fading it never triggers a rebuild.
+Put a photo, scan or drawing on the sketch plane and draw over it at true size. Use **Insert ▸ Picture to trace**, **paste** an image (Ctrl+V) while sketching, or **drop** an image file anywhere. Dropping one outside a sketch starts a new sketch on the ground (XY) plane with the picture on it. The picture sits behind the sketch lines and isn't geometry: moving or fading it never triggers a rebuild.
 
 | Step | How | Result |
 |---|---|---|
@@ -371,6 +373,8 @@ Extrude, Revolve, Loft and the quick shapes have a **Result** choice:
 | Keep overlap | Keeps only the overlapping volume |
 
 A **Body** selector picks a specific target for Join, Cut or Keep overlap.
+
+While the panel is open, the feature's shape is tinted by its Result, as in other CAD tools: **blue** for a new body, **green** for join, **red** for what a cut removes, **amber** for keep overlap. Length handles show an arrow pointing the way they pull (red for a cut, red/green/blue for X/Y/Z moves).
 
 ### Feature reference
 
@@ -595,11 +599,15 @@ Volume (cm³ or in³), mass for the chosen material, size, surface area, feature
 
 The camera orbits around the vertical (Z) axis and never tilts the horizon. Views animate smoothly (instantly if the system asks for reduced motion).
 
+Coming from another CAD app? **Settings → Navigation** offers the common mouse layouts (middle button pans; middle button orbits, with Ctrl or Shift to pan; right button orbits; trackpad) and two keyboard layouts: Whittle's own, or the classic CAD letters: `H` hole, `J` joint, `Home` home view, and in a sketch `T` trim, `O` offset, `P` project. Tooltips, menus and the shortcut list (`?`) always show the keys of the layout you chose.
+
+The model is lit by a key light above and to the left of the camera and a soft fill from the camera, so the faces of a part read apart at any angle. An empty scene shows a short blue Z axis at the origin so you know which way is up; it hides once there is a model.
+
 | Command | Key | Effect |
 |---|---|---|
 | Home view | H | Isometric view, fitted |
 | Fit to view | Shift+H | Fit the visible bodies, keeping the angle |
-| View cube | | Front, back, left, right, top, bottom |
+| Orientation cube | | Front, back, left, right, top, bottom |
 | Look at sketch | (automatic) | Faces the sketch plane when a sketch opens |
 
 **Display styles:**
@@ -669,22 +677,24 @@ The format is plain JSON, open and readable. Format 2 (Whittle 0.4) adds optiona
 
 | Format | Use | Notes |
 |---|---|---|
-| **3MF** | Slicers (Bambu Studio, PrusaSlicer, OrcaSlicer, Cura) | Recommended for 3D printing; units included |
+| **3MF** | Modern 3D-printing slicers | Recommended for 3D printing; units included |
 | **STL** | Any slicer or mesh tool | Binary |
-| **STEP** | Other CAD (Fusion 360, SolidWorks, Onshape, FreeCAD), CNC and manufacturing | Exact geometry |
-| **SVG** | One sketch, for laser and vinyl cutters, plotters, Inkscape, Illustrator | True size, in millimetres |
+| **STEP** | Any other CAD app, CNC and manufacturing | Exact geometry |
+| **SVG** | One sketch, for laser and vinyl cutters, plotters and vector editors | True size, in millimetres |
 | **DXF** | One sketch, for laser cutters, CNC and CAM, AutoCAD | Units set to millimetres |
 | **PNG** | Pictures | Save image |
 | **2D drawing (SVG)** | Drawings and documentation | Export dialog. Front, top and right views in third-angle projection plus an isometric view on an A3 sheet, hidden lines dashed, overall dimensions, standard scale (1:50 to 10:1) and a title block. Opens in any browser or vector editor; print to PDF |
+
+**Mesh detail** (top of the Export dialog, remembered) sets how closely 3MF, STL, OBJ, GLB and PLY follow curved faces: **Draft** is about ten times coarser (small files for previews and sharing), **Standard** is 0.01 mm on ordinary parts, **Fine** is about four times finer (smoothest prints of curved parts, bigger files). STEP and drawings are always exact.
 
 ### Import
 
 | Format | How | Notes |
 |---|---|---|
-| STEP (`.step`, `.stp`) | Create ▸ Import, or drag and drop | Exact geometry, becomes a body |
+| STEP (`.step`, `.stp`) | Insert ▸ Import STEP / STL, or drag and drop | Exact geometry, becomes a body |
 | STL | Same | Triangles are sewn into a solid and flat areas are merged into clean faces. Limit: 40,000 triangles |
-| SVG | In a sketch: Special ▸ Import SVG | Closed paths become editable sketch outlines; you choose the width |
-| Pictures (PNG, JPEG, WebP, GIF, BMP) | In a sketch: Special ▸ Picture, paste, or drop anywhere | A reference picture to calibrate, flatten and trace (see *Pictures to trace over*) |
+| SVG | In a sketch: Insert ▸ Import SVG into sketch | Closed paths become editable sketch outlines; you choose the width |
+| Pictures (PNG, JPEG, WebP, GIF, BMP) | In a sketch: Insert ▸ Picture to trace, paste, or drop anywhere | A reference picture to calibrate, flatten and trace (see *Pictures to trace over*) |
 
 Files up to 40 MB. Each import has a **Scale** field.
 
@@ -806,7 +816,7 @@ docs/              Architecture notes and this reference
 | Layer | Technology |
 |---|---|
 | Geometry kernel | OpenCascade (OCCT) compiled to WebAssembly, used through replicad; runs in a Web Worker |
-| Sketch solver | PlaneGCS (FreeCAD's 2D constraint solver) compiled to WebAssembly (`@salusoft89/planegcs`); runs in the same worker as part of each rebuild |
+| Sketch solver | PlaneGCS (the FreeCAD project's 2D constraint solver) compiled to WebAssembly (`@salusoft89/planegcs`); runs in the same worker as part of each rebuild |
 | UI | React 19, Zustand (state), Immer (immutable edits and undo patches) |
 | 3D view | Three.js with on-demand rendering, fat lines for edges, raycast and screen-space picking |
 | Language / build | TypeScript (strict), Vite, Vitest |

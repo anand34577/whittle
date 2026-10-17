@@ -691,6 +691,134 @@ const P = {
     </>
   ),
   refresh: <path d="M15.8 8.5 A6 6 0 1 0 15 13 M16 3.5 V8.5 H11" />,
+  // ── Tools that used to borrow another tool's icon ──
+  rib: (
+    <>
+      <path d="M3 3.5 V16.5 H17" />
+      <path d="M3 8 L12.5 16.5" />
+      <path d="M4.5 10 L4.5 15 L10 15" opacity=".45" />
+    </>
+  ),
+  web: (
+    <>
+      <path d="M2.5 16 H17.5" opacity=".55" />
+      <path d="M5.5 16 V7 H13.5 V16" />
+      <path d="M5.5 7 L7.5 5 H15.5 L13.5 7 M15.5 5 V14 L13.5 16" opacity=".55" />
+    </>
+  ),
+  pipe: (
+    <>
+      <path d="M3 17 C 3 10, 6.5 6, 13 6 M7.5 17 C 7.5 13, 9.5 10.5, 13 10.5" />
+      <ellipse cx="13.2" cy="8.25" rx="1.6" ry="2.25" />
+      <ellipse cx="13.2" cy="8.25" rx=".6" ry="1" opacity=".6" />
+    </>
+  ),
+  emboss: (
+    <>
+      <path d="M2.5 14 L10 17.5 L17.5 14 L10 10.5 Z" opacity=".55" />
+      <path d="M6.5 3.5 H12.5 M9.5 3.5 V11" />
+      <path d="M14.5 6 L16 4.5 L17.5 6 M16 4.5 V9" />
+    </>
+  ),
+  engrave: (
+    <>
+      <path d="M2.5 9 L10 12.5 L17.5 9 M2.5 9 V12 L10 15.5 L17.5 12 V9" opacity=".55" />
+      <path d="M6.5 2.5 H12.5 M9.5 2.5 V10" />
+      <path d="M14.5 6 L16 7.5 L17.5 6 M16 7.5 V3" />
+    </>
+  ),
+  pressPull: (
+    <>
+      <path d="M3 13.5 L10 17 L17 13.5 L10 10 Z" />
+      <path d="M10 1.8 V8.4 M7.8 4 L10 1.8 L12.2 4 M7.8 6.2 L10 8.4 L12.2 6.2" />
+    </>
+  ),
+  replaceFace: (
+    <>
+      <path d="M3 6.5 L8 4 V12.5 L3 15 Z" strokeDasharray="1.6 1.6" opacity=".6" />
+      <path d="M12 7.5 L17 5 V13.5 L12 16 Z" />
+      <path d="M5.5 10 H11 M9.2 8.2 L11 10 L9.2 11.8" />
+    </>
+  ),
+  joint: (
+    <>
+      <circle cx="10" cy="10" r="2.2" />
+      <path d="M3.5 16.5 L8.4 11.6 M11.6 8.4 L16.5 3.5" />
+      <path d="M15.5 11.5 A6 6 0 0 1 11.5 15.5 M13.3 15.9 L11.5 15.5 L12 13.7" opacity=".6" />
+    </>
+  ),
+  align: (
+    <>
+      <rect x="3" y="5" width="5.5" height="8.5" rx=".8" />
+      <rect x="11.5" y="8.5" width="5.5" height="5" rx=".8" />
+      <path d="M1.8 16 H18.2" strokeDasharray="1.6 1.6" />
+    </>
+  ),
+  interference: (
+    <>
+      <rect x="2.5" y="2.5" width="9.5" height="9.5" rx=".8" />
+      <rect x="8" y="8" width="9.5" height="9.5" rx=".8" opacity=".6" />
+      <path d="M8 10.5 L10.5 8 M8 12 L12 8 M9.5 12 L12 9.5" />
+    </>
+  ),
+  boundaryFill: (
+    <>
+      <circle cx="7.5" cy="10" r="5" opacity=".6" />
+      <circle cx="12.5" cy="10" r="5" opacity=".6" />
+      <path d="M10 5.7 A5 5 0 0 1 10 14.3 A5 5 0 0 1 10 5.7 Z" fill="currentColor" fillOpacity=".45" />
+    </>
+  ),
+  checkGeometry: (
+    <>
+      <path d="M3 7 L10 3.5 L17 7 V14 L10 17.5 L3 14 Z" opacity=".5" />
+      <path d="M6.5 10.5 L9 13 L14 7.5" />
+    </>
+  ),
+  trim: (
+    <>
+      <path d="M10 2.5 V17.5" opacity=".6" />
+      <path d="M3 14 L10 10" />
+      <path d="M10 10 L17 6" strokeDasharray="1.4 1.8" opacity=".55" />
+      <path d="M13.5 11 L16.5 14 M16.5 11 L13.5 14" />
+    </>
+  ),
+  splitFaces: (
+    <>
+      <path d="M3 7 L13 3.5 L17 13 L7 16.5 Z" />
+      <path d="M8 5.2 L12 14.8" strokeDasharray="1.6 1.6" />
+    </>
+  ),
+  curve3d: (
+    <>
+      <path d="M3 15 C 6 5, 12 17, 17 5" />
+      <circle cx="3" cy="15" r="1.2" fill="currentColor" />
+      <circle cx="10" cy="11.2" r="1.2" fill="currentColor" />
+      <circle cx="17" cy="5" r="1.2" fill="currentColor" />
+    </>
+  ),
+  curveProject: (
+    <>
+      <path d="M2.5 14 L9 17.5 L17.5 14 L11 10.5 Z" opacity=".55" />
+      <path d="M3 5 C 7 2, 11 8, 16 4" />
+      <path d="M6 5 V12 M13 5.5 V12.5" strokeDasharray="1.4 1.6" opacity=".7" />
+    </>
+  ),
+  arc: (
+    <>
+      <path d="M3.5 15 A7 7 0 0 1 16.5 15" />
+      <circle cx="3.5" cy="15" r="1.2" fill="currentColor" />
+      <circle cx="10" cy="8.4" r="1.2" fill="currentColor" />
+      <circle cx="16.5" cy="15" r="1.2" fill="currentColor" />
+    </>
+  ),
+  spline: (
+    <>
+      <path d="M3 14 C 6 4, 10 16, 17 6" />
+      <path d="M3 14 L6 4 M10 16 L17 6" opacity=".4" strokeDasharray="1.2 1.4" />
+      <rect x="5" y="3" width="2" height="2" opacity=".7" />
+      <rect x="9" y="15" width="2" height="2" opacity=".7" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="10" cy="10" r="2.6" />

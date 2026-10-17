@@ -1,6 +1,6 @@
 /**
  * When an upstream change breaks what a feature was attached to, show where it
- * used to be as a red ghost on the canvas (Fusion's repair flow). Click a ghost
+ * used to be as a red ghost on the canvas. Click a ghost
  * to let it go; click a new edge or face in the model to replace it.
  */
 import type { EdgeRef, Feature, FaceRef, Vec3 } from "@whittle/core";

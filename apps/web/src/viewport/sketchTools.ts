@@ -801,12 +801,20 @@ export class SketchController {
     if (this.tool === "dimension") {
       this.cursor = e.p;
       this.snap = null;
-      const hit = this.geomAt(e.p);
-      const plain = hit ? null : this.entityAt(e.p);
+      const plainHit = this.entityAt(e.p);
+      // A drawn shape beats the origin axes it happens to cross: it is what the click was aimed at.
+      const geom = this.geomAt(e.p);
+      const hit = geom && !(plainHit && (geom === "xaxis" || geom === "yaxis" || geom === "origin")) ? geom : null;
+      const plain = hit ? null : plainHit;
       this.hoverEntity = hit ?? plain;
       if (e.type === "down") {
         if (hit) this.env.dimension(hit, e.shift, e.screen);
-        else if (plain) this.env.convert(plain);
+        else if (plain) {
+          // One click does it: the shape becomes lines and arcs, then the one under the pointer gets its dimension.
+          this.env.convert(plain);
+          const now = this.geomAt(e.p);
+          if (now) this.env.dimension(now, e.shift, e.screen);
+        }
       }
       this.publish();
       return;

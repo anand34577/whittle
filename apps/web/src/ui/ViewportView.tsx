@@ -32,7 +32,7 @@ import { type Pick, editFeature, findFeature, setSketchTool, setView, sketchMuta
 import { type SketchUIState, SketchController } from "../viewport/sketchTools";
 import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/Viewport";
 import { Icon } from "./icons";
-import { ViewCube } from "./ViewCube";
+import { OrientationCube } from "./OrientationCube";
 import { DragHandles } from "./DragHandle";
 import { Slider } from "./controls";
 import { RebuildChip } from "./Activity";
@@ -163,10 +163,11 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
     return () => window.removeEventListener("keydown", k, true);
   }, []);
   const R = 128;
-  // Keep the whole ring inside the view.
+  // Keep the whole ring inside the view and clear of the display dock along its bottom (items are 140 x 36).
   const host = document.querySelector(".viewport");
-  const cx = host ? Math.min(Math.max(x, R + 70), host.clientWidth - R - 70) : x;
-  const cy = host ? Math.min(Math.max(y, R + 30), host.clientHeight - R - 30) : y;
+  const dock = host?.querySelector<HTMLElement>(".dock")?.offsetHeight ?? 0;
+  const cx = host ? Math.min(Math.max(x, R + 78), host.clientWidth - R - 78) : x;
+  const cy = host ? Math.min(Math.max(y, R + 26), host.clientHeight - R - 26 - (dock ? dock + 18 : 0)) : y;
   return (
     <div className="radial" style={{ left: cx, top: cy }} role="menu" aria-label="Quick actions" onPointerDown={(e) => e.stopPropagation()}>
       <button className="radial__hub" onClick={close} aria-label="Close">
@@ -213,7 +214,7 @@ function DockButton({ id, label }: { id: string; label?: string }) {
   );
 }
 
-/** Selection priority: which kind of thing a click picks (Fusion's Selection Priority). */
+/** Selection priority: which kind of thing a click picks (faces, edges, bodies...). */
 function PriorityPicker() {
   const p = useApp((s) => s.pickPriority);
   return (
@@ -421,7 +422,7 @@ export function ViewportView() {
         extend: extendAt,
         convert: (id) => {
           makeConstrainable(id);
-          toast("info", "Converted to lines and arcs. Click again to use it.");
+          toast("info", "Converted to lines and arcs, so it takes dimensions and constraints.");
         },
         selectGeom: (id, additive) => {
           const cur = useApp.getState().sketchSel;
@@ -502,7 +503,7 @@ export function ViewportView() {
 
   useEffect(() => {
     vp?.setPickBodies(regen?.pickBodies);
-    vp?.setGhost(session ? regen?.ghost : undefined);
+    vp?.setGhost(session ? regen?.ghost : undefined, regen?.ghostOp);
   }, [vp, regen, session]);
 
   // Initial framing once the first model arrives; re-frame after inserting parts.
@@ -840,7 +841,7 @@ export function ViewportView() {
       {contextActions && (
         <div className="context-bar" role="toolbar" aria-label="Actions for the selection">
           {contextActions.map((c) => (
-            <button key={c.id} className="context-bar__btn" onClick={c.run}>
+            <button key={c.id} className="context-bar__btn" onClick={c.run} title={`${c.label}${c.keys ? `  (${c.keys})` : ""}${c.hint ? "\n" + c.hint : ""}`}>
               <Icon name={c.icon ?? "more"} size={16} />
               <span>{c.short ?? c.label}</span>
               {c.keys && c.keys.length === 1 && <kbd>{c.keys}</kbd>}
@@ -980,7 +981,7 @@ export function ViewportView() {
       <SectionControl vp={vp} />
       <ExplodeControl />
       {mode.kind !== "sketch" && <ViewDock />}
-      <ViewCube viewport={vp} tick={tick} />
+      <OrientationCube viewport={vp} tick={tick} />
       {radial && <RadialMenu x={radial.x} y={radial.y} ids={radialFor(radialPick.current)} />}
     </section>
   );

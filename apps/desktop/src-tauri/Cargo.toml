@@ -1,6 +1,6 @@
 [package]
 name = "whittle-desktop"
-version = "0.9.0"
+version = "0.10.0"
 description = "Whittle: open-source parametric 3D CAD"
 authors = ["Whittle contributors"]
 license = "MPL-2.0"
