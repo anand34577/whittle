@@ -142,7 +142,7 @@ export const COMMANDS: Command[] = [
   { id: "revolve", label: "Revolve", group: "Create", icon: "revolve", keys: "R", keywords: "lathe spin turn rotate around axis vase", hint: "Spin a sketch around an axis", when: inModel, run: model(startRevolve) },
   { id: "loft", label: "Loft", group: "Create", icon: "loft", keywords: "blend transition morph between profiles", hint: "Blend smoothly between two or more sketches", when: inModel, run: model(startLoft) },
   { id: "sweep", label: "Sweep", group: "Create", icon: "sweep", keywords: "pipe tube path rail handle gasket wire follow along curve", hint: "Move a cross-section along a path: pipes, handles, rails", when: inModel, run: model(startSweep) },
-  { id: "pipe", label: "Pipe", group: "Create", icon: "sweep", keywords: "tube hose conduit round square hollow path rail", hint: "A round or square tube along a path, solid or hollow", when: inModel, run: model(startPipe) },
+  { id: "pipe", label: "Pipe", group: "Create", icon: "pipe", keywords: "tube hose conduit round square hollow path rail", hint: "A round or square tube along a path, solid or hollow", when: inModel, run: model(startPipe) },
   { id: "spring", label: "Coil / spring", short: "Coil", group: "Create", icon: "coil", keywords: "helix helical spring coil spiral auger", hint: "A helical coil: springs, spirals, augers", when: inModel, run: model(() => startCoil("spring")) },
   { id: "thread", label: "Thread", group: "Create", icon: "thread", keywords: "screw bolt nut tap threaded rod helix iso metric", hint: "A screw thread: join it to a rod, or cut it from a hole", when: inModel, run: model(() => startCoil("thread")) },
   { id: "hole", label: "Hole", group: "Create", icon: "hole", keys: "D", keywords: "drill screw bolt counterbore countersink m3 m4 bore", hint: "Drill holes on a face: simple, counterbored or countersunk", when: (s) => inModel(s) && hasBodies(s), run: model(startHole) },
@@ -164,8 +164,8 @@ export const COMMANDS: Command[] = [
   { id: "pattern", label: "Pattern", group: "Modify", icon: "pattern", keywords: "array repeat copies linear circular", hint: "Repeat a body in a row or around an axis", when: (s) => inModel(s) && hasBodies(s), run: model(startPattern) },
   { id: "split", label: "Split body", short: "Split", group: "Modify", icon: "split", keywords: "cut in half slice divide trim separate two parts", hint: "Cut a body in two along a plane, or trim one side away", when: (s) => inModel(s) && hasBodies(s), run: model(startSplit) },
   { id: "plane", label: "Construction plane", short: "Plane", group: "Create", icon: "plane", keywords: "offset angle datum reference workplane tilt", hint: "A reusable plane (offset or tilted) to sketch on", when: inModel, run: model(startConstructionPlane) },
-  { id: "joint", label: "Joint", group: "Modify", icon: "move", keywords: "assemble hinge revolute slider cylindrical rigid motion drive attach mate", hint: "Connect two bodies so one turns or slides; change the value to drive it", when: (s) => inModel(s) && hasBodies(s), run: model(startJoint) },
-  { id: "press-pull", label: "Press / Pull", short: "Press/Pull", group: "Modify", icon: "move", keys: "Q", keywords: "offset face push pull extend cut direct modeling resize", hint: "Smart tool: a profile extrudes, an edge rounds, a flat face pushes or pulls. Select first, then press Q", when: inModel, run: model(startPressPull) },
+  { id: "joint", label: "Joint", group: "Modify", icon: "joint", keywords: "assemble hinge revolute slider cylindrical rigid motion drive attach mate", hint: "Connect two bodies so one turns or slides; change the value to drive it", when: (s) => inModel(s) && hasBodies(s), run: model(startJoint) },
+  { id: "press-pull", label: "Press / Pull", short: "Press/Pull", group: "Modify", icon: "pressPull", keys: "Q", keywords: "offset face push pull extend cut direct modeling resize", hint: "Smart tool: a profile extrudes, an edge rounds, a flat face pushes or pulls. Select first, then press Q", when: inModel, run: model(startPressPull) },
   { id: "draft", label: "Draft", group: "Modify", icon: "draft", keywords: "taper angle mould mold casting release tilt faces", hint: "Tilt faces so a part releases from a mould", when: (s) => inModel(s) && hasBodies(s), run: model(startDraft) },
   { id: "offset", label: "Offset body", short: "Offset", group: "Modify", icon: "offset", keywords: "grow shrink thicken clearance tolerance inflate", hint: "Grow or shrink a whole body (clearances and tolerances)", when: (s) => inModel(s) && hasBodies(s), run: model(startOffset) },
   { id: "scale", label: "Scale body", short: "Scale", group: "Modify", icon: "scale", keywords: "resize bigger smaller enlarge reduce percent", hint: "Make a body bigger or smaller", when: (s) => inModel(s) && hasBodies(s), run: model(startScale) },
@@ -262,8 +262,8 @@ export const COMMANDS: Command[] = [
     on: (s) => s.view.analysis === "access",
     run: () => setView({ analysis: get().view.analysis === "access" ? null : "access" }),
   },
-  { id: "check-geometry", label: "Check geometry", group: "Inspect", icon: "combine", keywords: "validity valid solid check errors broken repair healthy", hint: "Ask the geometry engine whether every body is a valid solid", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 0, run: () => void runGeometryCheck() },
-  { id: "interference", label: "Interference", group: "Inspect", icon: "combine", keywords: "collision overlap clash intersect bodies check fit", hint: "Find bodies that overlap and mark where", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: () => void runInterference() },
+  { id: "check-geometry", label: "Check geometry", group: "Inspect", icon: "checkGeometry", keywords: "validity valid solid check errors broken repair healthy", hint: "Ask the geometry engine whether every body is a valid solid", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 0, run: () => void runGeometryCheck() },
+  { id: "interference", label: "Interference", group: "Inspect", icon: "interference", keywords: "collision overlap clash intersect bodies check fit", hint: "Find bodies that overlap and mark where", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: () => void runInterference() },
   { id: "clear-interference", label: "Clear interference marks", group: "Inspect", icon: "close", keywords: "remove red boxes overlap", when: (s) => s.interference.length > 0, run: clearInterference },
   { id: "min-radius", label: "Minimum radius check", short: "Min radius", group: "Inspect", icon: "measure", keywords: "cutter endmill tool radius inside corner machining cnc tight", hint: "Select inside corners a cutter of a given size can't reach", when: NEEDS_BODY, run: () => void runMinRadius() },
   { id: "component-colors", label: "Color by component", group: "Inspect", icon: "palette", keywords: "colour parts assembly distinguish each body", hint: "Give every component (or body) its own color", when: NEEDS_BODY, run: colorByComponent },
@@ -296,27 +296,27 @@ export const COMMANDS: Command[] = [
   { id: "flatten-image", label: "Flatten photo", group: "Sketch", icon: "flatten", keywords: "perspective straighten deskew rectify keystone a4 paper card photo image", hint: "Click the corners of a sheet of paper or a card in the photo to straighten and scale it", when: hasImage, run: () => startImagePick("flatten") },
   { id: "trace-image", label: "Trace whole picture", group: "Sketch", icon: "trace", keywords: "auto trace vectorize outline silhouette image photo convert", hint: "Turn the picture's shapes into editable outlines; round holes become circles", when: hasImage, run: () => void traceImage() },
   { id: "trace-area", label: "Trace one area of the picture", group: "Sketch", icon: "trace", keywords: "magic wand flood fill select region outline image photo", hint: "Click one shape in the picture to outline just that", when: hasImage, run: () => startImagePick("wand") },
-  { id: "import-dxf", label: "Import DXF into sketch", short: "DXF", group: "Sketch", icon: "drawing", keywords: "autocad cad 2d drawing lines arcs circles import cnc laser outline", hint: "Bring in lines, arcs, circles and outlines from a DXF drawing", when: inSketch, run: importDxfIntoSketch },
-  { id: "import-svg", label: "Import SVG into sketch", short: "SVG", group: "Sketch", icon: "vector", keywords: "logo trace vector illustrator inkscape figma outline artwork drawing image", hint: "Bring in a logo or outline as editable shapes", when: inSketch, run: importSvgIntoSketch },
-  { id: "export-sketch-svg", label: "Export sketch as SVG", group: "File", icon: "drawing", keywords: "laser cut vinyl cricut plotter 2d drawing vector", hint: "True-size 2D drawing for laser cutters, vinyl cutters and plotters", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "svg") },
-  { id: "export-sketch-dxf", label: "Export sketch as DXF", group: "File", icon: "drawing", keywords: "cnc router laser cam 2d drawing autocad", hint: "2D drawing for CNC, CAM and other CAD", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "dxf") },
+  { id: "import-dxf", label: "Import DXF into sketch", short: "DXF", group: "Sketch", icon: "drawing", keywords: "cad 2d drawing lines arcs circles import cnc laser outline", hint: "Bring in lines, arcs, circles and outlines from a DXF drawing", when: inSketch, run: importDxfIntoSketch },
+  { id: "import-svg", label: "Import SVG into sketch", short: "SVG", group: "Sketch", icon: "vector", keywords: "logo trace vector illustration outline artwork drawing image", hint: "Bring in a logo or outline as editable shapes", when: inSketch, run: importSvgIntoSketch },
+  { id: "export-sketch-svg", label: "Export sketch as SVG", group: "File", icon: "drawing", keywords: "laser cut vinyl cutter plotter 2d drawing vector", hint: "True-size 2D drawing for laser cutters, vinyl cutters and plotters", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "svg") },
+  { id: "export-sketch-dxf", label: "Export sketch as DXF", group: "File", icon: "drawing", keywords: "cnc router laser cam 2d drawing cad", hint: "2D drawing for CNC, CAM and other CAD", when: () => !!sketchForExport(), run: () => void exportSketch(sketchForExport()!.id, "dxf") },
   { id: "tool-select", label: "Select", group: "Sketch", icon: "select", keys: "V", keywords: "move pick edit", hint: "Select and drag shapes", when: inSketch, run: () => setSketchTool("select") },
   { id: "tool-segment", label: "Constrained line", short: "Lines", group: "Sketch", icon: "line", keywords: "segment constraint parametric sketcher professional dimension", hint: "Lines the solver keeps to your constraints; click the first point to close", when: inSketch, run: () => setSketchTool("segment") },
-  { id: "tool-arc", label: "Constrained arc", short: "Arc", group: "Sketch", icon: "path", keywords: "arc three point curve constraint tangent", hint: "Start, end, then a point on the arc", when: inSketch, run: () => setSketchTool("arc") },
-  { id: "tool-tarc", label: "Tangent arc", short: "Tangent arc", group: "Sketch", icon: "path", keywords: "arc smooth blend continue tangent line end", hint: "Start on the end of a line or arc; the arc leaves it smoothly", when: inSketch, run: () => setSketchTool("tarc") },
-  { id: "tool-carc", label: "Center-point arc", short: "Center arc", group: "Sketch", icon: "path", keywords: "arc centre radius sweep", hint: "Center, start, then end", when: inSketch, run: () => setSketchTool("carc") },
+  { id: "tool-arc", label: "Constrained arc", short: "Arc", group: "Sketch", icon: "arc", keywords: "arc three point curve constraint tangent", hint: "Start, end, then a point on the arc", when: inSketch, run: () => setSketchTool("arc") },
+  { id: "tool-tarc", label: "Tangent arc", short: "Tangent arc", group: "Sketch", icon: "arc", keywords: "arc smooth blend continue tangent line end", hint: "Start on the end of a line or arc; the arc leaves it smoothly", when: inSketch, run: () => setSketchTool("tarc") },
+  { id: "tool-carc", label: "Center-point arc", short: "Center arc", group: "Sketch", icon: "arc", keywords: "arc centre radius sweep", hint: "Center, start, then end", when: inSketch, run: () => setSketchTool("carc") },
   { id: "tool-polygonc", label: "Circumscribed polygon", short: "Circ. polygon", group: "Sketch", icon: "polygon", keywords: "polygon apothem flat to flat hexagon", hint: "Center, then the middle of an edge", when: inSketch, run: () => setSketchTool("polygonC") },
   { id: "tool-polygone", label: "Edge polygon", short: "Edge polygon", group: "Sketch", icon: "polygon", keywords: "polygon side length hexagon", hint: "Two points define one edge", when: inSketch, run: () => setSketchTool("polygonE") },
   { id: "geo-stretch", label: "Stretch", group: "Sketch", icon: "move", keywords: "pull drag extend points lengthen move ends", hint: "Select points, then pull them: attached lines stretch", when: inSketch, run: () => void stretchSelection() },
   { id: "sketch-intersect", label: "Intersect", group: "Sketch", icon: "section", keywords: "section slice cut plane cross outline body project", hint: "Draw the outline where the model crosses this sketch plane", when: inSketch, run: intersectIntoSketch },
-  { id: "tool-cspline", label: "Control-point spline", short: "Control spline", group: "Sketch", icon: "path", keywords: "bspline nurbs handles control points curve smooth freeform", hint: "Click control points that steer a smooth curve (it doesn't pass through them)", when: inSketch, run: () => setSketchTool("cspline") },
+  { id: "tool-cspline", label: "Control-point spline", short: "Control spline", group: "Sketch", icon: "spline", keywords: "bspline nurbs handles control points curve smooth freeform", hint: "Click control points that steer a smooth curve (it doesn't pass through them)", when: inSketch, run: () => setSketchTool("cspline") },
   { id: "tool-earc", label: "Elliptical arc", short: "Ellipse arc", group: "Sketch", icon: "ellipse", keywords: "oval partial ellipse arc curve", hint: "Center, major axis, minor radius, then the arc's start and end", when: inSketch, run: () => setSketchTool("earc") },
   { id: "tool-tan2c", label: "2-tangent circle", short: "2-tangent", group: "Sketch", icon: "circle", keywords: "circle touch tangent two lines fillet round between", hint: "Click two curves, then a spot for the center: the circle touches both", when: inSketch, run: () => setSketchTool("tan2c") },
   { id: "tool-tan3c", label: "3-tangent circle", short: "3-tangent", group: "Sketch", icon: "circle", keywords: "circle touch tangent three lines inscribed incircle", hint: "Click three curves, then a spot inside: the circle touches all three", when: inSketch, run: () => setSketchTool("tan3c") },
-  { id: "tool-conic", label: "Conic curve", short: "Conic", group: "Sketch", icon: "path", keywords: "parabola ellipse hyperbola rho apex", hint: "Start, end, then the apex; type rho for the shape", when: inSketch, run: () => setSketchTool("conic") },
+  { id: "tool-conic", label: "Conic curve", short: "Conic", group: "Sketch", icon: "spline", keywords: "parabola ellipse hyperbola rho apex", hint: "Start, end, then the apex; type rho for the shape", when: inSketch, run: () => setSketchTool("conic") },
   { id: "tool-pcircle", label: "Constrained circle", short: "Circle", group: "Sketch", icon: "circle", keywords: "circle constraint radius dimension", hint: "Center, then radius", when: inSketch, run: () => setSketchTool("pcircle") },
   { id: "tool-project", label: "Project model edges", short: "Project", group: "Sketch", icon: "link", keywords: "include intersect reference edge face outline copy existing body derive", hint: "Click an edge or face of the model to copy it into the sketch as locked geometry", when: (s) => inSketch(s) && hasBodies(s), run: () => setSketchTool("project") },
-  { id: "tool-spline", label: "Spline", group: "Sketch", icon: "path", keys: "Shift+S", keywords: "curve smooth fit points freeform bezier flowing", hint: "A smooth curve through points you can move, dimension and constrain", when: inSketch, run: () => setSketchTool("spline") },
+  { id: "tool-spline", label: "Spline", group: "Sketch", icon: "spline", keys: "Shift+S", keywords: "curve smooth fit points freeform bezier flowing", hint: "A smooth curve through points you can move, dimension and constrain", when: inSketch, run: () => setSketchTool("spline") },
   { id: "tool-dimension", label: "Dimension", group: "Sketch", icon: "ruler", keys: "D", keywords: "size length radius distance angle measure constrain smart", hint: "Click a line, circle, arc or two items to set an exact size", when: inSketch, run: () => setSketchTool("dimension") },
   { id: "tool-sfillet", label: "Sketch fillet", short: "Fillet", group: "Sketch", icon: "fillet", keywords: "round corner radius arc blend", hint: "Click a corner where two lines meet, then type the radius", when: inSketch, run: () => setSketchTool("sfillet") },
   { id: "tool-schamfer", label: "Sketch chamfer", short: "Chamfer", group: "Sketch", icon: "chamfer", keywords: "bevel cut corner", hint: "Click a corner where two lines meet, then type the distance", when: inSketch, run: () => setSketchTool("schamfer") },
@@ -331,7 +331,7 @@ export const COMMANDS: Command[] = [
   { id: "geo-mirror-y", label: "Mirror geometry across the Y axis", short: "Mirror ↔", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy left right", hint: "A mirrored copy held symmetric to the original", when: hasGeometry, run: () => mirrorSelection("y") },
   { id: "geo-mirror-x", label: "Mirror geometry across the X axis", short: "Mirror ↕", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy up down", hint: "A mirrored copy held symmetric to the original", when: hasGeometry, run: () => mirrorSelection("x") },
   { id: "geo-mirror-line", label: "Mirror geometry across a line", short: "Mirror line", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy axis", hint: "Select the geometry, then the mirror line last", when: hasGeometry, run: () => mirrorSelection("line") },
-  { id: "tool-trim", label: "Trim", group: "Sketch", icon: "split", keywords: "cut remove piece segment between intersections", hint: "Click the piece of a line, arc or circle to remove", when: inSketch, run: () => setSketchTool("trim") },
+  { id: "tool-trim", label: "Trim", group: "Sketch", icon: "trim", keywords: "cut remove piece segment between intersections", hint: "Click the piece of a line, arc or circle to remove", when: inSketch, run: () => setSketchTool("trim") },
   { id: "tool-extend", label: "Extend", group: "Sketch", icon: "arrowRight", keywords: "lengthen stretch to meet", hint: "Click near the end of a line or arc to stretch it to the next curve", when: inSketch, run: () => setSketchTool("extend") },
   ...(Object.keys(CONSTRAINT_LABELS) as ConstraintType[]).map(
     (t): Command => ({
@@ -429,8 +429,8 @@ export const COMMANDS: Command[] = [
   { id: "account", label: "Account", group: "File", icon: "users", keywords: "sign out logout password user profile", when: (s) => s.platform.kind === "server" && !!s.platform.user, run: () => useApp.setState({ panel: "account" }) },
   { id: "users", label: "Administration", group: "File", icon: "shield", keywords: "admin accounts people team users manage merge sso smtp email settings audit", when: (s) => s.platform.kind === "server" && !!s.platform.user?.isAdmin && s.platform.config.auth === "required", run: () => useApp.setState({ panel: "users" }) },
   { id: "export", label: "Export…", group: "File", icon: "export", keywords: "step stl 3mf print slicer download cad cnc", hint: "STEP for other CAD and machining, 3MF / STL for 3D printing", run: () => useApp.setState({ panel: "export" }) },
-  { id: "export-step", label: "Export STEP", short: "STEP", group: "File", icon: "export", keywords: "cad exchange fusion solidworks onshape freecad cnc machining", hint: "Exact geometry for other CAD tools, CNC and manufacturing", run: () => void exportDesign("step") },
-  { id: "export-3mf", label: "Export 3MF", short: "3MF", hint: "Mesh with units and colors, for 3D-printing slicers", group: "File", icon: "print", keywords: "3d print slicer bambu prusa orca cura", run: () => void exportDesign("3mf") },
+  { id: "export-step", label: "Export STEP", short: "STEP", group: "File", icon: "export", keywords: "cad exchange interchange solid cnc machining manufacturing", hint: "Exact geometry for other CAD tools, CNC and manufacturing", run: () => void exportDesign("step") },
+  { id: "export-3mf", label: "Export 3MF", short: "3MF", hint: "Mesh with units and colors, for 3D-printing slicers", group: "File", icon: "print", keywords: "3d print printer slicer color multi part", run: () => void exportDesign("3mf") },
   { id: "export-stl", label: "Export STL", short: "STL", group: "File", icon: "export", keywords: "3d print slicer mesh", hint: "Universal mesh format", run: () => void exportDesign("stl") },
   // View
   { id: "view-home", label: "Home view", group: "View", icon: "home", keys: "H", keywords: "reset camera iso", run: () => requestView("home") },
@@ -453,20 +453,20 @@ export const COMMANDS: Command[] = [
 ];
 
 COMMANDS.push(
-  { id: "curve-3d", label: "3D sketch (curve through points)", short: "3D sketch", group: "Create", icon: "path", keywords: "3d curve spline wire path points space rail", hint: "Click points on the model; a curve runs through them", when: NEEDS_BODY, run: model(() => startCurve("points")) },
-  { id: "curve-edges", label: "Include 3D geometry", short: "Include 3D", group: "Create", icon: "path", keywords: "copy edges curve reference wire project 3d", hint: "Copy model edges as a curve you can sweep along", when: NEEDS_BODY, run: model(() => startCurve("edges")) },
-  { id: "curve-faces", label: "Intersection curve", short: "Intersection", group: "Create", icon: "path", keywords: "where faces meet curve section edge between", hint: "The curve where two faces meet", when: NEEDS_BODY, run: model(() => startCurve("faces")) },
-  { id: "curve-project", label: "Project to surface", short: "Project", group: "Create", icon: "path", keywords: "wrap sketch onto face curved engrave curve on surface", hint: "Lay a sketch onto a face (each point goes to the nearest spot on it)", when: NEEDS_BODY, run: model(() => startCurve("project")) },
-  { id: "rib", label: "Rib", group: "Create", icon: "extrude", keywords: "reinforce stiffen gusset support wall", hint: "A thin reinforcing wall from a line sketched through the part", when: inModel, run: model(startRib) },
-  { id: "web", label: "Web", group: "Create", icon: "extrude", keywords: "thin wall reinforce open line", hint: "A thin wall from an open line, standing up from the sketch", when: inModel, run: model(startWeb) },
-  { id: "emboss", label: "Emboss", group: "Create", icon: "text", keywords: "raise text logo label relief", hint: "Raise the newest sketch's shapes or text off the face it sits on", when: inModel, run: model(() => startEmboss(false)) },
-  { id: "engrave", label: "Engrave", group: "Create", icon: "text", keywords: "sink carve text logo label deboss", hint: "Cut the newest sketch's shapes or text into the face it sits on", when: inModel, run: model(() => startEmboss(true)) },
+  { id: "curve-3d", label: "3D sketch (curve through points)", short: "3D sketch", group: "Create", icon: "curve3d", keywords: "3d curve spline wire path points space rail", hint: "Click points on the model; a curve runs through them", when: NEEDS_BODY, run: model(() => startCurve("points")) },
+  { id: "curve-edges", label: "Include 3D geometry", short: "Include 3D", group: "Create", icon: "curve3d", keywords: "copy edges curve reference wire project 3d", hint: "Copy model edges as a curve you can sweep along", when: NEEDS_BODY, run: model(() => startCurve("edges")) },
+  { id: "curve-faces", label: "Intersection curve", short: "Intersection", group: "Create", icon: "curve3d", keywords: "where faces meet curve section edge between", hint: "The curve where two faces meet", when: NEEDS_BODY, run: model(() => startCurve("faces")) },
+  { id: "curve-project", label: "Project to surface", short: "Project", group: "Create", icon: "curveProject", keywords: "wrap sketch onto face curved engrave curve on surface", hint: "Lay a sketch onto a face (each point goes to the nearest spot on it)", when: NEEDS_BODY, run: model(() => startCurve("project")) },
+  { id: "rib", label: "Rib", group: "Create", icon: "rib", keywords: "reinforce stiffen gusset support wall", hint: "A thin reinforcing wall from a line sketched through the part", when: inModel, run: model(startRib) },
+  { id: "web", label: "Web", group: "Create", icon: "web", keywords: "thin wall reinforce open line", hint: "A thin wall from an open line, standing up from the sketch", when: inModel, run: model(startWeb) },
+  { id: "emboss", label: "Emboss", group: "Create", icon: "emboss", keywords: "raise text logo label relief", hint: "Raise the newest sketch's shapes or text off the face it sits on", when: inModel, run: model(() => startEmboss(false)) },
+  { id: "engrave", label: "Engrave", group: "Create", icon: "engrave", keywords: "sink carve text logo label deboss", hint: "Cut the newest sketch's shapes or text into the face it sits on", when: inModel, run: model(() => startEmboss(true)) },
   { id: "thread-face", label: "Thread on a face", short: "Thread", group: "Create", icon: "thread", keywords: "screw bolt helix cylinder hole tap external internal", hint: "Cut a real screw thread along a rod or inside a hole", when: NEEDS_BODY, run: model(startThreadFace) },
-  { id: "boundary-fill", label: "Boundary Fill", group: "Create", icon: "combine", keywords: "cells overlap enclosed region bodies intersection volume", hint: "Turn the regions where bodies overlap into new bodies", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startBoundaryFill) },
-  { id: "replace-face", label: "Replace Face", group: "Modify", icon: "move", keywords: "match flat plane extend trim face to surface", hint: "Bring flat faces to another face or plane", when: NEEDS_BODY, run: model(startReplaceFace) },
+  { id: "boundary-fill", label: "Boundary Fill", group: "Create", icon: "boundaryFill", keywords: "cells overlap enclosed region bodies intersection volume", hint: "Turn the regions where bodies overlap into new bodies", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startBoundaryFill) },
+  { id: "replace-face", label: "Replace Face", group: "Modify", icon: "replaceFace", keywords: "match flat plane extend trim face to surface", hint: "Bring flat faces to another face or plane", when: NEEDS_BODY, run: model(startReplaceFace) },
   { id: "delete-face", label: "Delete Face", group: "Modify", icon: "trash", keywords: "remove heal hole pocket boss defeature simplify fill", hint: "Remove a hole, pocket or boss and heal the gap", when: NEEDS_BODY, run: model(startDeleteFace) },
-  { id: "align", label: "Align", group: "Modify", icon: "move", keywords: "mate face to face snap place flush position body", hint: "Move a body so a flat face meets a face of another body", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startAlign) },
-  { id: "split-faces", label: "Split Faces", group: "Modify", icon: "split", keywords: "divide face line plane region", hint: "Cut the faces along a plane without separating the body", when: NEEDS_BODY, run: model(startSplitFaces) },
+  { id: "align", label: "Align", group: "Modify", icon: "align", keywords: "mate face to face snap place flush position body", hint: "Move a body so a flat face meets a face of another body", when: (s) => inModel(s) && (s.regen?.bodies.length ?? 0) > 1, run: model(startAlign) },
+  { id: "split-faces", label: "Split Faces", group: "Modify", icon: "splitFaces", keywords: "divide face line plane region", hint: "Cut the faces along a plane without separating the body", when: NEEDS_BODY, run: model(startSplitFaces) },
 );
 
 const SURFACE_KEYWORDS: Record<SurfaceOp, string> = {
@@ -510,8 +510,50 @@ COMMANDS.push(...CONSTRUCT_COMMANDS);
 
 export const commandById = (id: string) => COMMANDS.find((c) => c.id === id)!;
 
+/**
+ * The classic CAD letters (H hole, J joint, T trim...), for people who already have them in their fingers. Only the keys that differ are listed;
+ * an empty string means the command has no single key in that layout. Shown everywhere a shortcut is shown.
+ */
+const CLASSIC_KEYS: Record<string, string> = {
+  hole: "H",
+  joint: "J",
+  combine: "",
+  "view-home": "Home",
+  "tool-trim": "T",
+  "geo-offset": "O",
+  "tool-project": "P",
+  "tool-text": "",
+  "tool-slot": "",
+  "tool-polygon": "",
+};
+const classicKeys = () => get().prefs.keys === "classic";
+for (const [id, classic] of Object.entries(CLASSIC_KEYS)) {
+  const c = commandById(id);
+  const own = c.keys;
+  Object.defineProperty(c, "keys", { get: () => (classicKeys() ? classic || undefined : own), enumerable: true });
+}
+
 export function isAvailable(c: Command, s = get()): boolean {
   return !c.when || c.when(s);
+}
+
+/** Why a command can't run right now, in words a first-timer can act on (null when it can). */
+export function whyUnavailable(c: Command, s = get()): string | null {
+  if (isAvailable(c, s)) return null;
+  const bodies = s.regen?.bodies.length ?? 0;
+  if (c.group === "Sketch") {
+    if (s.mode.kind !== "sketch") return "Works inside a sketch: press S and pick a plane, or double-click a sketch to edit it";
+    if (/image|trace/.test(c.id)) return "Add a picture to this sketch first (from the Insert menu)";
+    return "Select sketch geometry first (Select tool, V)";
+  }
+  if (s.mode.kind === "sketch") return "Finish the sketch first (Finish sketch, or Esc)";
+  if (s.mode.kind === "pickPlane") return "Pick a plane to sketch on first, or press Esc";
+  if (s.mode.kind !== "model" && s.mode.kind !== "measure") return "Finish what you're doing first (Esc)";
+  if (c.id === "clear-interference") return "Nothing to clear: run Interference first";
+  if (bodies === 0) return "Needs a body first: sketch a shape and extrude it, or add a Box";
+  // Would one more body make it work? Then that's what it needs (asked of the rule itself, so no list to keep up to date).
+  if (bodies === 1 && s.regen && c.when?.({ ...s, regen: { ...s.regen, bodies: [...s.regen.bodies, s.regen.bodies[0]!] } })) return "Needs at least two bodies";
+  return "Not available right now";
 }
 
 /** Map a key event to a command id, given the current mode. */
@@ -533,7 +575,13 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
   if (e.altKey) return null;
   if (e.key === "Delete" || e.key === "Backspace") return "delete";
   if (e.key === "?") return "shortcuts";
+  const classic = s.prefs.keys === "classic";
   if (s.mode.kind === "sketch") {
+    if (classic && !e.shiftKey) {
+      if (k === "t") return "tool-trim";
+      if (k === "p") return "tool-project";
+      if (k === "o") return s.selectedEntity ? "offset-shape" : "geo-offset";
+    }
     if (e.shiftKey && k === "r") return "rotate-shape";
     if (e.shiftKey && k === "o") return "offset-shape";
     if (e.shiftKey && k === "s") return "tool-spline";
@@ -541,6 +589,11 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
     return map[k] ?? null;
   }
   if (e.shiftKey && k === "h") return "view-fit";
+  if (classic) {
+    if (e.key === "Home") return "view-home";
+    const cmap: Record<string, string> = { s: "sketch", e: "extrude", r: "revolve", f: "fillet", h: "hole", m: "move", j: "joint", i: "measure", p: "parts", q: "press-pull" };
+    return cmap[k] ?? null;
+  }
   const map: Record<string, string> = { s: "sketch", e: "extrude", r: "revolve", f: "fillet", h: "view-home", d: "hole", m: "move", j: "combine", i: "measure", p: "parts", q: "press-pull" };
   return map[k] ?? null;
 }

@@ -32,7 +32,7 @@ function schedule() {
     pending++;
     useApp.setState({ regenBusy: true, regenProgress: null });
     try {
-      const result = await kernel!.regen(doc, session ? "preview" : "final", pickBeforeFor());
+      const result = await kernel!.regen(doc, session ? "preview" : "final", pickBeforeFor(), session?.featureId);
       if (result) useApp.setState({ regen: result, builtDoc: doc, kernelError: null });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

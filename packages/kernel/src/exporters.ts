@@ -2,7 +2,7 @@ import type { Id, WhittleDocument } from "@whittle/core";
 import { strToU8, zipSync } from "fflate";
 import { type Shape3D, exportSTEP, makeCompound } from "replicad";
 import { buildDrawingSVG } from "./drawing";
-import type { ExportFormat } from "./protocol";
+import type { ExportFormat, MeshQuality } from "./protocol";
 
 export interface ExportedFile {
   data: Uint8Array;
@@ -19,7 +19,9 @@ export async function exportShapes(
   shapes: Map<Id, Shape3D>,
   format: ExportFormat,
   bodyIds?: Id[],
+  quality: MeshQuality = "standard",
 ): Promise<ExportedFile> {
+  const meshOptions = (shape: Shape3D) => meshOptionsFor(shape, quality);
   const entries = [...shapes.entries()].filter(([id]) => (bodyIds ? bodyIds.includes(id) : doc.bodies[id]?.visible !== false));
   if (entries.length === 0) throw new Error(bodyIds ? "The selected body no longer exists." : "There are no visible bodies to export.");
 
@@ -44,16 +46,23 @@ export async function exportShapes(
   if (format === "drawing") {
     return { data: strToU8(buildDrawingSVG(entries.map(([, s]) => s), { title: doc.name })), mime: "image/svg+xml", ext: "svg" };
   }
-  if (format === "obj") return { data: strToU8(buildOBJ(doc, entries)), mime: "model/obj", ext: "obj" };
-  if (format === "ply") return { data: buildPLY(entries), mime: "application/x-ply", ext: "ply" };
-  if (format === "glb") return { data: buildGLB(doc, entries), mime: "model/gltf-binary", ext: "glb" };
-  return { data: build3MF(doc, entries), mime: "model/3mf", ext: "3mf" };
+  if (format === "obj") return { data: strToU8(buildOBJ(doc, entries, meshOptions)), mime: "model/obj", ext: "obj" };
+  if (format === "ply") return { data: buildPLY(entries, meshOptions), mime: "application/x-ply", ext: "ply" };
+  if (format === "glb") return { data: buildGLB(doc, entries, meshOptions), mime: "model/gltf-binary", ext: "glb" };
+  return { data: build3MF(doc, entries, meshOptions), mime: "model/3mf", ext: "3mf" };
 }
 
-/** 0.01 mm for ordinary parts; coarser for very large ones, so a metre-scale part doesn't produce a huge mesh. */
-function meshOptions(shape: Shape3D) {
+type MeshOptions = (shape: Shape3D) => { tolerance: number; angularTolerance: number };
+
+/**
+ * Standard: 0.01 mm for ordinary parts, coarser for very large ones so a metre-scale part doesn't produce a huge mesh.
+ * Draft is about ten times coarser (small files for previews and sharing); fine is about four times finer (smooth prints of curved parts).
+ */
+export function meshOptionsFor(shape: Shape3D, quality: MeshQuality = "standard") {
   const [a, b] = shape.boundingBox.bounds;
   const diagonal = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  if (quality === "draft") return { tolerance: Math.min(2, Math.max(0.05, diagonal * 2e-4)), angularTolerance: 0.35 };
+  if (quality === "fine") return { tolerance: Math.min(0.25, Math.max(0.0025, diagonal * 5e-6)), angularTolerance: 0.05 };
   return { tolerance: Math.min(1, Math.max(0.01, diagonal * 2e-5)), angularTolerance: 0.1 };
 }
 
@@ -65,7 +74,7 @@ export function hex6(color: string | undefined): string {
 }
 
 /** Wavefront OBJ: one named object per body, with a material per body color (inline .mtl names). */
-function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][]): string {
+function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][], meshOptions: MeshOptions): string {
   const out = [`# ${doc.name}, exported from Whittle (units: millimetres)`];
   let base = 1;
   for (const [id, shape] of entries) {
@@ -78,8 +87,8 @@ function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][]): string {
   return out.join("\n") + "\n";
 }
 
-/** Binary PLY mesh (scanning and mesh tools such as MeshLab and CloudCompare). */
-function buildPLY(entries: [Id, Shape3D][]): Uint8Array {
+/** Binary PLY mesh (scanning, point-cloud and mesh-analysis tools). */
+function buildPLY(entries: [Id, Shape3D][], meshOptions: MeshOptions): Uint8Array {
   const parts = entries.map(([, shape]) => weld(shape.mesh(meshOptions(shape))));
   const nv = parts.reduce((a, m) => a + m.vertices.length / 3, 0);
   const nf = parts.reduce((a, m) => a + m.triangles.length / 3, 0);
@@ -117,10 +126,10 @@ end_header
 }
 
 /**
- * glTF 2.0 binary (.glb): the web, AR, game engines, Blender and renderers.
+ * glTF 2.0 binary (.glb): the web, AR, game engines and renderers.
  * Metres (the glTF unit) and Y-up, one node per body with its color.
  */
-function buildGLB(doc: WhittleDocument, entries: [Id, Shape3D][]): Uint8Array {
+function buildGLB(doc: WhittleDocument, entries: [Id, Shape3D][], meshOptions: MeshOptions): Uint8Array {
   const chunks: Uint8Array[] = [];
   let offset = 0;
   const bufferViews: object[] = [];
@@ -239,13 +248,13 @@ export function weld(m: { vertices: number[]; triangles: number[] }): { vertices
 }
 
 /** Minimal, valid 3MF (the format modern slicers prefer: units + one object per body). */
-function build3MF(doc: WhittleDocument, entries: [Id, Shape3D][]): Uint8Array {
+function build3MF(doc: WhittleDocument, entries: [Id, Shape3D][], meshOptions: MeshOptions): Uint8Array {
   const esc = (s: string) => s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!);
   const objects: string[] = [];
   const items: string[] = [];
   const materials: string[] = [];
   entries.forEach(([id, shape], k) => {
-    const m = weld(shape.mesh({ tolerance: 0.01, angularTolerance: 0.1 }));
+    const m = weld(shape.mesh(meshOptions(shape)));
     const color = hex6(doc.bodies[id]?.color).toUpperCase();
     materials.push(`<base name="${esc(doc.bodies[id]?.name ?? id)}" displaycolor="#${color}FF" />`);
     const v: string[] = [];

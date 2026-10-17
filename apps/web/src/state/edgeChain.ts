@@ -1,6 +1,6 @@
 /**
  * Tangent chains: the edges that continue smoothly from one edge, so that rounding
- * one side of a rounded rectangle takes the whole outline (as in Fusion and Onshape).
+ * one side of a rounded rectangle takes the whole outline.
  */
 import type { EdgeInfo } from "@whittle/kernel";
 

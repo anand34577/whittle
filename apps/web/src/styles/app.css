@@ -587,6 +587,7 @@ kbd {
   overflow: hidden;
   background: var(--bg-inset);
   min-width: 0;
+  container: viewport / inline-size;
 }
 .viewport__host,
 .viewport-canvas {
@@ -689,7 +690,7 @@ kbd {
 .context-bar {
   padding: 3px;
   gap: 2px;
-  /* stay clear of the view cube on narrow windows */
+  /* stay clear of the orientation cube on narrow windows */
   max-width: calc(100% - 200px);
   overflow-x: auto;
   scrollbar-width: none;
@@ -803,8 +804,8 @@ kbd {
   color: var(--text-1);
 }
 
-/* View cube. */
-.viewcube {
+/* Orientation cube. */
+.orientcube {
   position: absolute;
   top: 14px;
   right: 18px;
@@ -812,18 +813,18 @@ kbd {
   height: 104px;
   user-select: none;
 }
-.viewcube__stage {
+.orientcube__stage {
   position: absolute;
   left: 46px;
   top: 46px;
   width: 0;
   height: 0;
 }
-.viewcube__cube {
+.orientcube__cube {
   position: absolute;
   transform-style: preserve-3d;
 }
-.viewcube__face {
+.orientcube__face {
   position: absolute;
   display: grid;
   place-items: center;
@@ -836,12 +837,12 @@ kbd {
   letter-spacing: 0.08em;
   transform-origin: 50% 50%;
 }
-.viewcube__face:hover {
+.orientcube__face:hover {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
 }
-.viewcube__home {
+.orientcube__home {
   position: absolute;
   left: -2px;
   top: -2px;
@@ -852,7 +853,7 @@ kbd {
   border-radius: var(--r-2);
   color: var(--text-3);
 }
-.viewcube__home:hover {
+.orientcube__home:hover {
   color: var(--text-1);
   background: var(--bg-3);
 }

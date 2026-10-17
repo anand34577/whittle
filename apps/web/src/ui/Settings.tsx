@@ -138,7 +138,7 @@ function Navigation() {
   return (
     <div className="settings__section">
       <h3 className="eyebrow">Mouse navigation</h3>
-      <p className="muted small">Coming from another CAD app? Use the mouse the way you're used to.</p>
+      <p className="muted small">Coming from another CAD app? Pick the buttons your hand already knows.</p>
       <div className="navlist" role="radiogroup" aria-label="Navigation style">
         {NAV_PRESETS.map((n) => (
           <button key={n.id} type="button" role="radio" aria-checked={prefs.nav === n.id} className={`navitem ${prefs.nav === n.id ? "is-on" : ""}`} onClick={() => setPrefs({ nav: n.id })}>
@@ -151,6 +151,23 @@ function Navigation() {
         ))}
       </div>
       <Switch label="Invert zoom direction" hint="Scroll up to zoom out instead of in" checked={prefs.invertZoom} onChange={(v) => setPrefs({ invertZoom: v })} />
+      <h3 className="eyebrow">Keyboard shortcuts</h3>
+      <div className="navlist" role="radiogroup" aria-label="Keyboard shortcuts">
+        {(
+          [
+            ["whittle", "Whittle", "D hole, J combine, H home view; in a sketch T text, O slot, P polygon"],
+            ["classic", "Classic CAD letters", "H hole, J joint, Home key for the home view; in a sketch T trim, O offset, P project"],
+          ] as const
+        ).map(([id, label, blurb]) => (
+          <button key={id} type="button" role="radio" aria-checked={prefs.keys === id} className={`navitem ${prefs.keys === id ? "is-on" : ""}`} onClick={() => setPrefs({ keys: id })}>
+            <span className="navitem__radio" aria-hidden="true" />
+            <span>
+              <b>{label}</b>
+              <small>{blurb}</small>
+            </span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

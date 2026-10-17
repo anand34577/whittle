@@ -85,7 +85,7 @@ async function handle(req: KernelRequest) {
         lastReport = now;
         post({ type: "progress", seq: req.seq, done, total });
       };
-      const r = builder.regen(req.doc, req.quality, req.pickBefore);
+      const r = builder.regen(req.doc, req.quality, req.pickBefore, req.preview);
       builder.onProgress = null;
       const transfer: Transferable[] = [];
       for (const b of [...r.bodies, ...(r.pickBodies ?? []), ...(r.ghost ? [r.ghost] : [])]) {
@@ -106,7 +106,7 @@ async function handle(req: KernelRequest) {
     } else {
       await builder.prepareImports(req.doc);
       const shapes = builder.shapes(req.doc);
-      const file = await exportShapes(req.doc, shapes, req.format, req.bodyIds);
+      const file = await exportShapes(req.doc, shapes, req.format, req.bodyIds, req.quality);
       post({ type: "export", seq: req.seq, ...file }, [file.data.buffer]);
     }
   } catch (e) {

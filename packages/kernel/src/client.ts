@@ -1,11 +1,11 @@
 /** Main-thread handle to the kernel worker (the default KernelHost). */
 import type { Id, WhittleDocument } from "@whittle/core";
-import type { ExportFormat, InspectKind, InspectResult, KernelRequest, KernelResponse, RegenResult } from "./protocol";
+import type { ExportFormat, InspectKind, InspectResult, KernelRequest, KernelResponse, MeshQuality, RegenResult } from "./protocol";
 
 export interface KernelHost {
   readonly ready: Promise<number>;
-  regen(doc: WhittleDocument, quality?: "preview" | "final", pickBefore?: Id): Promise<RegenResult | null>;
-  export(doc: WhittleDocument, format: ExportFormat, bodyIds?: Id[]): Promise<{ data: Uint8Array; mime: string; ext: string }>;
+  regen(doc: WhittleDocument, quality?: "preview" | "final", pickBefore?: Id, preview?: Id): Promise<RegenResult | null>;
+  export(doc: WhittleDocument, format: ExportFormat, bodyIds?: Id[], quality?: MeshQuality): Promise<{ data: Uint8Array; mime: string; ext: string }>;
   inspect(doc: WhittleDocument, kind: InspectKind): Promise<InspectResult>;
   dispose(): void;
   /** Stops a long operation by restarting the engine. */
@@ -92,7 +92,7 @@ export class WorkerKernel implements KernelHost {
     this.restart("Cancelled.");
   }
 
-  regen(doc: WhittleDocument, quality: "preview" | "final" = "final", pickBefore?: Id): Promise<RegenResult | null> {
+  regen(doc: WhittleDocument, quality: "preview" | "final" = "final", pickBefore?: Id, preview?: Id): Promise<RegenResult | null> {
     const seq = ++this.seq;
     // Older regens that never answer (superseded) resolve to null.
     for (const [s, p] of [...this.pending]) {
@@ -101,11 +101,11 @@ export class WorkerKernel implements KernelHost {
         p.resolve(null as never);
       }
     }
-    return this.send({ type: "regen", seq, doc, quality, pickBefore }, true);
+    return this.send({ type: "regen", seq, doc, quality, pickBefore, preview }, true);
   }
 
-  export(doc: WhittleDocument, format: ExportFormat, bodyIds?: Id[]) {
-    return this.send<{ data: Uint8Array; mime: string; ext: string }>({ type: "export", seq: ++this.seq, doc, format, bodyIds });
+  export(doc: WhittleDocument, format: ExportFormat, bodyIds?: Id[], quality?: MeshQuality) {
+    return this.send<{ data: Uint8Array; mime: string; ext: string }>({ type: "export", seq: ++this.seq, doc, format, bodyIds, quality });
   }
 
   inspect(doc: WhittleDocument, kind: InspectKind) {

@@ -7,6 +7,7 @@ export interface ViewportTheme {
   gridMajor: string;
   axisX: string;
   axisY: string;
+  axisZ: string;
   edge: string;
   edgeOverlay: string;
   hover: string;
@@ -30,6 +31,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     gridMajor: "#57534b",
     axisX: "#a85b4c",
     axisY: "#6f8f5e",
+    axisZ: "#5b7fb0",
     edge: "#141312",
     edgeOverlay: "#e8e2d6",
     hover: "#ffb27a",
@@ -41,7 +43,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     defined: "#7ccf8a",
     conflict: "#ff6b5e",
     plane: "#7fd0f0",
-    envIntensity: 0.55,
+    envIntensity: 0.12,
   },
   paper: {
     bgTop: "#f7f4ee",
@@ -50,6 +52,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     gridMajor: "#bdb6a7",
     axisX: "#c8705e",
     axisY: "#6f9a5c",
+    axisZ: "#5a7fb8",
     edge: "#2a2722",
     edgeOverlay: "#2a2722",
     hover: "#e8742f",
@@ -61,7 +64,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     defined: "#2f8a4a",
     conflict: "#c8332b",
     plane: "#2f7fb8",
-    envIntensity: 0.75,
+    envIntensity: 0.17,
   },
   midnight: {
     bgTop: "#1f2533",
@@ -70,6 +73,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     gridMajor: "#343c4e",
     axisX: "#c0605a",
     axisY: "#5d9a6a",
+    axisZ: "#5f86c8",
     edge: "#07080b",
     edgeOverlay: "#dfe6f5",
     hover: "#ffb27a",
@@ -81,7 +85,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     defined: "#7ccf8a",
     conflict: "#ff6b5e",
     plane: "#6fc8ff",
-    envIntensity: 0.5,
+    envIntensity: 0.11,
   },
   blueprint: {
     bgTop: "#1d3d6b",
@@ -90,6 +94,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     gridMajor: "#3a6aa8",
     axisX: "#e88a7a",
     axisY: "#8fd6a0",
+    axisZ: "#8fb8ff",
     edge: "#e8f0ff",
     edgeOverlay: "#ffffff",
     hover: "#ffd27a",
@@ -101,7 +106,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     defined: "#7ccf8a",
     conflict: "#ff6b5e",
     plane: "#7fe8ff",
-    envIntensity: 0.6,
+    envIntensity: 0.13,
   },
   studio: {
     bgTop: "#45464b",
@@ -110,6 +115,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     gridMajor: "#5c5e64",
     axisX: "#c46a5c",
     axisY: "#6e9c62",
+    axisZ: "#5d86c0",
     edge: "#121214",
     edgeOverlay: "#ececee",
     hover: "#ffb27a",
@@ -121,7 +127,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     defined: "#7ccf8a",
     conflict: "#ff6b5e",
     plane: "#5fb7ff",
-    envIntensity: 0.6,
+    envIntensity: 0.13,
   },
   contrast: {
     bgTop: "#000000",
@@ -130,6 +136,7 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     gridMajor: "#4d4d4d",
     axisX: "#ff5c5c",
     axisY: "#5cff7a",
+    axisZ: "#5c9cff",
     edge: "#ffffff",
     edgeOverlay: "#ffffff",
     hover: "#ffd400",
@@ -141,6 +148,6 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     defined: "#7ccf8a",
     conflict: "#ff6b5e",
     plane: "#00e5ff",
-    envIntensity: 0.7,
+    envIntensity: 0.15,
   },
 };
