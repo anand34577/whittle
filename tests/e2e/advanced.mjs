@@ -73,9 +73,9 @@ await step("03-settings-select-and-nav", async () => {
   await units.click();
   await page.getByRole("option", { name: /Millimetres/ }).click();
   await page.getByRole("tab", { name: "Navigation" }).click();
-  await page.getByRole("radio", { name: /SolidWorks/ }).click();
-  expect((await page.evaluate(() => window.whittle.useApp.getState().prefs.nav)) === "solidworks", "nav preset", {});
-  await page.getByRole("radio", { name: /^Whittle/ }).click();
+  await page.getByRole("radio", { name: /Ctrl pans/ }).click();
+  expect((await page.evaluate(() => window.whittle.useApp.getState().prefs.nav)) === "middle-orbit", "nav preset", {});
+  await page.getByRole("radiogroup", { name: "Navigation style" }).getByRole("radio", { name: /^Whittle/ }).click();
   await page.keyboard.press("Escape");
 });
 

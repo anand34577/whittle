@@ -71,7 +71,7 @@ function bounds(shapes: DrawingShape[]): [number, number, number, number] {
 
 const n = (v: number) => trim(v, 4);
 
-/** An SVG in real millimetres (opens at true size in Inkscape, Illustrator, LightBurn, Cricut). */
+/** An SVG in real millimetres (opens at true size in vector editors and laser or vinyl-cutter software). */
 export function shapesToSvg(shapes: DrawingShape[], title: string): string {
   const [x0, y0, x1, y1] = bounds(shapes);
   const pad = 1;

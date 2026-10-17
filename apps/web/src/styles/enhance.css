@@ -130,7 +130,9 @@
 .groupmenu__item:hover:not(:disabled) {
   background: var(--bg-3);
 }
-.groupmenu__item:disabled {
+.groupmenu__item:disabled > svg,
+.groupmenu__item:disabled b,
+.groupmenu__item:disabled kbd {
   opacity: 0.4;
 }
 .groupmenu__item svg {
@@ -196,6 +198,23 @@
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
   box-shadow: var(--lift), 0 0 0 1px var(--glass-line);
   border: none;
+}
+
+/* The selection's actions never run under the orientation cube: narrow views show icons only (names in tooltips). */
+.context-bar {
+  max-width: calc(100% - 240px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+@container viewport (max-width: 1000px) {
+  .context-bar__btn kbd {
+    display: none;
+  }
+}
+@container viewport (max-width: 800px) {
+  .context-bar__btn span {
+    display: none;
+  }
 }
 
 .dock {
@@ -378,8 +397,9 @@
   position: absolute;
   left: 0;
   top: 0;
-  margin: -18px 0 0 -58px;
-  width: 116px;
+  margin: -18px 0 0 -70px;
+  width: 140px;
+  white-space: nowrap;
   height: 36px;
   display: flex;
   align-items: center;
@@ -398,6 +418,8 @@
 }
 .radial__item span {
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .radial__item kbd {
   display: none;
@@ -850,6 +872,38 @@ details.points summary {
 .drag-handle.is-axis-x .drag-handle__dot { background: #e5484d; }
 .drag-handle.is-axis-y .drag-handle__dot { background: #46a758; }
 .drag-handle.is-axis-z .drag-handle__dot { background: #3e63dd; }
+.drag-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
+}
+.drag-arrow {
+  color: var(--accent);
+  opacity: 0.9;
+}
+.drag-arrow line {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+.drag-arrow polygon {
+  fill: currentColor;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.5));
+}
+.drag-arrow.is-live {
+  opacity: 1;
+}
+.drag-arrow.is-live line {
+  stroke-dasharray: none;
+}
+.drag-arrow.is-cut { color: var(--danger); }
+.drag-arrow.is-axis-x { color: #e5484d; }
+.drag-arrow.is-axis-y { color: #46a758; }
+.drag-arrow.is-axis-z { color: #3e63dd; }
 .drag-handle__tip.is-quiet {
   opacity: 0.75;
 }
@@ -1040,4 +1094,36 @@ details.points summary {
 .prio__btn.is-on {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* Why a tool can't run yet: guidance, not an error. */
+.groupmenu__item:disabled .groupmenu__why,
+.palette__why {
+  color: var(--warn, #e6a23c);
+  opacity: 1;
+}
+.palette__item.is-unavailable .palette__label {
+  opacity: 0.55;
+}
+
+/* Export: one mesh-detail choice above the formats. */
+.export-quality {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 6px;
+}
+.export-quality__label {
+  display: grid;
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  font-weight: 600;
+}
+.export-quality__label small {
+  font-weight: 400;
+  color: var(--text-3);
+}
+.export-quality .seg {
+  flex: none;
 }

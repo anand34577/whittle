@@ -130,7 +130,7 @@ export function createsBody(f: Feature): boolean {
   }
 }
 
-/** A sketch is "consumed" once a downstream feature uses it (Fusion-style dimming). */
+/** A sketch is "consumed" once a downstream feature uses it (shown dimmed in the browser). */
 export function isSketchConsumed(doc: WhittleDocument, sketchId: Id): boolean {
   return doc.features.some(
     (f) =>

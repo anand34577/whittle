@@ -199,3 +199,53 @@ describe("regeneration", () => {
     expect(one.data.byteLength).toBeLessThan(all.data.byteLength);
   });
 });
+
+describe("feature preview", () => {
+  it("reports the edited feature's tool and what it does with it", () => {
+    const { doc, extrude } = plateDoc();
+    const b = new Builder();
+    // Built once without a preview, so the step is cached and must be rebuilt to recover its tool.
+    expect(b.regen(doc, "final").ghost).toBeUndefined();
+    const first = b.regen(doc, "preview", undefined, extrude.id);
+    expect(first.ghostOp).toBe("new");
+    expect(first.ghost!.volume).toBeCloseTo(40 * 30 * 10, 3);
+
+    const boss = makeSketch(doc, { kind: "origin", plane: "XY", offset: "10" }) as SketchFeature;
+    boss.entities.push({ id: uid(), type: "circle", cx: "0", cy: "0", r: "5" });
+    doc.features.push(boss);
+    const join = makeExtrude(doc, boss.id, "join") as ExtrudeFeature;
+    join.distance = "4";
+    doc.features.push(join);
+    const joined = b.regen(doc, "preview", undefined, join.id);
+    expect(joined.ghostOp).toBe("join");
+    expect(joined.ghost!.volume).toBeCloseTo(Math.PI * 25 * 4, 1);
+
+    const cut = makeExtrude(doc, boss.id, "cut") as ExtrudeFeature;
+    cut.distance = "4";
+    cut.flip = true;
+    doc.features.push(cut);
+    const cutting = b.regen(doc, "preview", undefined, cut.id);
+    expect(cutting.ghostOp).toBe("cut");
+    expect(cutting.ghost).toBeDefined();
+    // Nothing is previewed once the edit ends.
+    expect(b.regen(doc, "final").ghost).toBeUndefined();
+  });
+});
+
+describe("mesh export detail", () => {
+  it("draft, standard and fine give coarser and finer meshes of curved parts", async () => {
+    const doc = newDocument();
+    const cyl = makePrimitive(doc, "cylinder");
+    doc.features.push(cyl);
+    const shapes = new Builder().shapes(doc);
+    for (const fmt of ["stl", "3mf"] as const) {
+      const [draft, standard, fine] = await Promise.all((["draft", "standard", "fine"] as const).map((q) => exportShapes(doc, shapes, fmt, undefined, q)));
+      expect(draft!.data.byteLength).toBeLessThan(standard!.data.byteLength);
+      expect(standard!.data.byteLength).toBeLessThan(fine!.data.byteLength);
+    }
+    // The default stays what it always was.
+    const plain = await exportShapes(doc, shapes, "stl");
+    const standard = await exportShapes(doc, shapes, "stl", undefined, "standard");
+    expect(plain.data.byteLength).toBe(standard.data.byteLength);
+  });
+});

@@ -40,12 +40,13 @@ interface Snapshot {
   bodies: Map<Id, Shape3D>;
   sketches: Map<Id, SketchBuilt>;
   status: FeatureStatus;
-  /** The shape a cut or intersect removed with, kept for the feature being edited (shown as a red ghost). */
+  /** The tool shape of the feature being edited and what it did with it (shown as a tinted preview). */
   ghost?: Shape3D;
+  ghostOp?: BodyOp;
 }
 
-/** Filled by applyOp for a cut, so the editor can show what is being removed. */
-const ghostSink: { tool: Shape3D | null } = { tool: null };
+/** Filled by applyOp, so the editor can show what the feature adds, cuts or keeps. */
+const ghostSink: { tool: Shape3D | null; op: BodyOp | null } = { tool: null, op: null };
 
 function bboxOverlap(a: Shape3D, b: Shape3D): boolean {
   const [a0, a1] = a.boundingBox.bounds;
@@ -104,7 +105,8 @@ export function applyOp(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, tar
 }
 
 function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, target: Id | undefined, tool: Shape3D): string | undefined {
-  if (op === "cut") ghostSink.tool = tool;
+  ghostSink.tool = tool;
+  ghostSink.op = op;
   if (op === "new") {
     bodies.set(featureId, tool);
     return;
@@ -272,9 +274,9 @@ export class Builder {
 
   private ghostFeature: Id | undefined;
 
-  regen(doc: WhittleDocument, quality: "preview" | "final", pickBefore?: Id): Omit<RegenResult, "seq"> {
+  regen(doc: WhittleDocument, quality: "preview" | "final", pickBefore?: Id, preview?: Id): Omit<RegenResult, "seq"> {
     const t0 = performance.now();
-    this.ghostFeature = pickBefore;
+    this.ghostFeature = preview ?? pickBefore;
     const { prev, statuses, rebuilt, end } = this.walk(doc);
 
     const bodies: BodyResult[] = [];
@@ -311,8 +313,9 @@ export class Builder {
       }
     }
     let ghost: BodyResult | undefined;
-    const gi = pickBefore ? doc.features.findIndex((f) => f.id === pickBefore) : -1;
+    const gi = this.ghostFeature ? doc.features.findIndex((f) => f.id === this.ghostFeature) : -1;
     const gs = gi >= 0 ? this.cache[gi]?.ghost : undefined;
+    const ghostOp = gi >= 0 ? this.cache[gi]?.ghostOp : undefined;
     if (gs) {
       try {
         ghost = this.mesh("ghost", gs, "preview");
@@ -321,7 +324,7 @@ export class Builder {
       }
     }
     for (const s of statuses) if (CELL_INFO.has(s.id)) s.cells = CELL_INFO.get(s.id);
-    return { bodies, sketches, planes, status: statuses, pickBodies, ghost, ms: performance.now() - t0, rebuilt };
+    return { bodies, sketches, planes, status: statuses, pickBodies, ghost, ghostOp: ghost ? ghostOp : undefined, ms: performance.now() - t0, rebuilt };
   }
 
   /** The final body shapes of the active timeline (for export). */
@@ -412,7 +415,7 @@ export class Builder {
       const key = hashKey(prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)) + (f.type === "joint" ? compSig : ""));
       const cached = this.cache[i];
       let snap: Snapshot;
-      const needGhost = f.id === this.ghostFeature && (f as { op?: string }).op === "cut" && !cached?.ghost;
+      const needGhost = f.id === this.ghostFeature && !!(f as { op?: string }).op && !cached?.ghost;
       if (cached && cached.key === key && !needGhost) {
         snap = cached;
       } else {
@@ -446,6 +449,7 @@ export class Builder {
       return { key, bodies, sketches, status: { id: f.id, state: "suppressed" } };
     }
     ghostSink.tool = null;
+    ghostSink.op = null;
     try {
       const warning = this.apply(f, bodies, sketches, ev);
       return {
@@ -454,6 +458,7 @@ export class Builder {
         sketches,
         status: { id: f.id, state: warning ? "warning" : "ok", message: warning, ms: performance.now() - t },
         ghost: f.id === this.ghostFeature ? ghostSink.tool ?? undefined : undefined,
+        ghostOp: f.id === this.ghostFeature ? ghostSink.op ?? undefined : undefined,
       };
     } catch (e) {
       const fix = e instanceof FeatureError ? e.fix : undefined;

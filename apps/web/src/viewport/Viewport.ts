@@ -99,6 +99,9 @@ function zebra(mat: THREE.MeshStandardMaterial) {
 }
 
 const tmpV = new THREE.Vector3();
+
+/** Preview tints for the feature being edited, by its body operation. */
+const GHOST_COLORS: Record<string, string> = { new: "#3d8bfd", join: "#2fbf71", cut: "#e5484d", intersect: "#f5a524" };
 const ease = (t: number) => 1 - Math.pow(1 - t, 3);
 
 /** Turntable orbit around world Z. Represents any view, including top/bottom. */
@@ -175,11 +178,15 @@ export class Viewport {
   private previewGroup = new THREE.Group();
   private highlightGroup = new THREE.Group();
   private grid = new THREE.Group();
+  /** World Z, drawn with the grid while modelling (in a sketch the grid's own axes take over). */
+  private axisZ = new THREE.Group();
   private planes = new THREE.Group();
   /** User-made construction planes: always shown faintly, pickable when choosing a sketch plane. */
   private cplanes = new THREE.Group();
-  private headlight = new THREE.DirectionalLight(0xffffff, 1.6);
-  private hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
+  /** Key light above and left of the camera, and a soft fill from the camera: faces read apart at any angle. */
+  private headlight = new THREE.DirectionalLight(0xffffff, 1.9);
+  private fill = new THREE.DirectionalLight(0xffffff, 0.55);
+  private hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.3);
   private raycaster = new THREE.Raycaster();
   private lineMaterials = new Set<LineMaterial>();
   private frame = 0;
@@ -223,13 +230,20 @@ export class Viewport {
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
+    // The room is built Y-up; turn it so its ceiling lights sit above a Z-up model, not behind it.
+    this.scene.environmentRotation.set(Math.PI / 2, 0, 0);
 
     this.persp.up.set(0, 0, 1);
-    this.scene.add(this.shadow, this.imageGroup, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.flagGroup, this.grid, this.planes, this.cplanes, this.hemi, this.persp, this.orthoCam);
-    this.persp.add(this.headlight);
-    this.headlight.position.set(0.3, 0.6, 1);
-    const orthoLight = this.headlight.clone();
-    this.orthoCam.add(orthoLight);
+    this.scene.add(this.shadow, this.imageGroup, this.world, this.fillGroup, this.sketchGroup, this.previewGroup, this.overlay, this.highlightGroup, this.measureGroup, this.flagGroup, this.grid, this.axisZ, this.planes, this.cplanes, this.hemi, this.persp, this.orthoCam);
+    // Each light rides with its camera and aims at the camera itself, so its offset is a direction in view space.
+    // (A light's target is the world origin unless it's parented too, which makes every light a plain headlight.)
+    const rig = (cam: THREE.Camera, key: THREE.DirectionalLight, fill: THREE.DirectionalLight) => {
+      key.position.set(-0.8, 0.85, 0.6);
+      fill.position.set(0.2, -0.1, 1);
+      cam.add(key, key.target, fill, fill.target);
+    };
+    rig(this.persp, this.headlight, this.fill);
+    rig(this.orthoCam, this.headlight.clone(), this.fill.clone());
     this.grid.matrixAutoUpdate = false;
     this.planes.visible = false;
     this.setTheme("graphite");
@@ -399,6 +413,14 @@ export class Viewport {
     };
     this.grid.add(mk(minor, this.theme.gridMinor, 0.9), mk(major, this.theme.gridMajor, 1));
     this.grid.add(mk([-ext, 0, 0, ext, 0, 0], this.theme.axisX, 1), mk([0, -ext, 0, 0, ext, 0], this.theme.axisY, 1));
+    this.clearGroup(this.axisZ);
+    // A short stub up from the origin: enough to show which way is up without running through the model.
+    this.axisZ.add(mk([0, 0, 0, 0, 0, step * 5], this.theme.axisZ, 1));
+  }
+
+  /** "Up" is shown on an empty scene only: once there is a model, a line through it is just clutter. */
+  private syncAxisZ(frame = this.sketchFrame) {
+    this.axisZ.visible = this.view.grid && !frame && ![...this.bodies.values()].some((b) => b.visible);
   }
 
   private setGridFrame(frame: SketchFrame | null) {
@@ -409,15 +431,16 @@ export class Viewport {
     }
     this.grid.matrix.copy(m);
     this.grid.matrixWorldNeedsUpdate = true;
+    this.syncAxisZ(frame);
   }
 
   private buildPlanes() {
     this.clearGroup(this.planes);
     const s = Math.max(40, this.sceneRadius * 0.9);
-    const defs: { plane: OriginPlane; normal: THREE.Vector3; up: THREE.Vector3 }[] = [
-      { plane: "XY", normal: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) },
-      { plane: "XZ", normal: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, 1) },
-      { plane: "YZ", normal: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 0, 1) },
+    const defs: { plane: OriginPlane; view: string; normal: THREE.Vector3; up: THREE.Vector3 }[] = [
+      { plane: "XY", view: "Top", normal: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) },
+      { plane: "XZ", view: "Front", normal: new THREE.Vector3(0, -1, 0), up: new THREE.Vector3(0, 0, 1) },
+      { plane: "YZ", view: "Right", normal: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 0, 1) },
     ];
     for (const d of defs) {
       const geo = new THREE.PlaneGeometry(s, s);
@@ -432,8 +455,38 @@ export class Viewport {
       const border = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: this.theme.plane, transparent: true, opacity: 0.55 }));
       border.raycast = () => {};
       mesh.add(border);
+      // Name each plane on the canvas, so "XZ" and "Front" connect without reading the tree.
+      const label = this.textSprite(`${d.plane} · ${d.view}`, this.theme.plane);
+      label.position.set(s * 0.32, s * 0.42, 0);
+      mesh.add(label);
       this.planes.add(mesh);
     }
+  }
+
+  /** A small screen-sized text tag (always faces the camera). */
+  private textSprite(text: string, color: string): THREE.Sprite {
+    const c = document.createElement("canvas");
+    const px = 28;
+    const g = c.getContext("2d")!;
+    g.font = `600 ${px}px "IBM Plex Sans", system-ui, sans-serif`;
+    c.width = Math.ceil(g.measureText(text).width) + 24;
+    c.height = px + 16;
+    g.font = `600 ${px}px "IBM Plex Sans", system-ui, sans-serif`;
+    g.fillStyle = "rgba(0,0,0,0.55)";
+    g.beginPath();
+    g.roundRect(0, 0, c.width, c.height, 8);
+    g.fill();
+    g.fillStyle = color;
+    g.textBaseline = "middle";
+    g.fillText(text, 12, c.height / 2 + 1);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false, toneMapped: false }));
+    const h = 0.017;
+    sprite.scale.set((h * c.width) / c.height, h, 1);
+    sprite.renderOrder = 30;
+    sprite.raycast = () => {};
+    return sprite;
   }
 
   setConstructionPlanes(frames: SketchFrame[]) {
@@ -520,6 +573,12 @@ export class Viewport {
       side: section ? THREE.FrontSide : THREE.DoubleSide,
       clippingPlanes: clipping,
     });
+    // A material's own reflection strength only counts with its own map (the scene's comes with the scene's strength).
+    if (look.reflect) {
+      mat.envMap = this.scene.environment;
+      mat.envMapRotation.copy(this.scene.environmentRotation);
+      mat.envMapIntensity = look.reflect * this.theme.envIntensity;
+    }
     if (analysis === "zebra") zebra(mat);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.userData.bodyId = b.id;
@@ -763,6 +822,7 @@ export class Viewport {
     if (rebuild) this.setBodies(this.lastBodies.list, this.lastBodies.meta);
     else if ((prev.explode ?? 0) !== (v.explode ?? 0)) this.applyExplode();
     this.grid.visible = v.grid;
+    this.syncAxisZ();
     if (prev.ortho !== v.ortho) {
       this.applyOrbit();
       this.cb.onCamera();
@@ -830,8 +890,11 @@ export class Viewport {
 
   private ghost: THREE.Mesh | null = null;
 
-  /** A translucent red volume: what the feature being edited is cutting away. */
-  setGhost(b: BodyResult | undefined) {
+  /**
+   * The feature being edited, tinted by what it does, as in other CAD tools: blue makes a
+   * new body, green joins, red cuts away, amber keeps only the overlap.
+   */
+  setGhost(b: BodyResult | undefined, op?: string) {
     if (this.ghost) {
       this.overlay.remove(this.ghost);
       this.disposeObject(this.ghost);
@@ -842,7 +905,9 @@ export class Viewport {
       geo.setAttribute("position", new THREE.BufferAttribute(b.positions, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(b.normals, 3));
       geo.setIndex(new THREE.BufferAttribute(b.indices, 1));
-      const mat = new THREE.MeshBasicMaterial({ color: "#e5484d", transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+      const color = GHOST_COLORS[op ?? "cut"] ?? GHOST_COLORS.cut!;
+      // Pulled toward the camera so it wins over the body faces it shares (an added volume is part of the body).
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
       this.ghost = new THREE.Mesh(geo, mat);
       this.ghost.raycast = () => {};
       this.ghost.renderOrder = 5;
@@ -868,6 +933,7 @@ export class Viewport {
     for (const v of this.bodies.values()) if (v.visible && v.mesh.geometry.boundingBox) box.union(v.mesh.geometry.boundingBox);
     const r = box.isEmpty() ? 60 : box.getBoundingSphere(new THREE.Sphere()).radius;
     this.updateShadow();
+    this.syncAxisZ();
     if (Math.abs(r - this.sceneRadius) / this.sceneRadius > 0.25) {
       this.sceneRadius = r;
       this.buildPlanes();
@@ -893,8 +959,10 @@ export class Viewport {
           const mat = new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: style === "hover" ? 0.3 : 0.45,
+            opacity: style === "hover" ? 0.35 : 0.55,
             depthWrite: false,
+            // Kept out of tone mapping, which greys a light tint on a light body until it hardly shows.
+            toneMapped: false,
             depthTest: this.pickBodies.length === 0,
             side: THREE.DoubleSide,
             polygonOffset: true,
@@ -926,7 +994,7 @@ export class Viewport {
       } else if (pick.kind === "plane") {
         const mesh = this.planes.children.find((c) => c.userData.plane === pick.plane) as THREE.Mesh | undefined;
         if (mesh) {
-          const m = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+          const m = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
           m.userData.sharedGeometry = true;
           m.matrixAutoUpdate = false;
           m.matrix.copy(mesh.matrix);
@@ -1513,8 +1581,13 @@ export class Viewport {
   /** Look straight at a sketch plane. */
   viewNormal(frame: SketchFrame) {
     const to = new Turntable();
-    const r = Math.max(60, this.sceneBox().getBoundingSphere(new THREE.Sphere()).radius);
-    to.target.set(...frame.origin);
+    const sphere = this.sceneBox().getBoundingSphere(new THREE.Sphere());
+    const r = Math.max(60, sphere.radius);
+    // Center on the model where it meets the plane, not the plane's origin: a part drawn up from the origin stays in view.
+    const o = new THREE.Vector3(...frame.origin);
+    const n = new THREE.Vector3(...frame.normal).normalize();
+    if ([...this.bodies.values()].some((v) => v.visible)) to.target.copy(sphere.center).addScaledVector(n, -sphere.center.clone().sub(o).dot(n));
+    else to.target.copy(o);
     to.distance = this.fitDistance(r);
     const a = Turntable.anglesFor(new THREE.Vector3(...frame.normal), new THREE.Vector3(...frame.yDir));
     to.theta = a.theta;

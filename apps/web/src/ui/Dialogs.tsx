@@ -29,7 +29,7 @@ import {
 } from "../state/files";
 import { apiJson, ask } from "../state/platform";
 import { exportParametersCsv } from "../state/files";
-import { mutate, selectedBodyId, useApp } from "../state/store";
+import { mutate, selectedBodyId, setPrefs, useApp } from "../state/store";
 import { promptDialog } from "../state/dialogs";
 import { TEMPLATES } from "../state/templates";
 import { Icon } from "./icons";
@@ -249,14 +249,15 @@ export function ExportDialog() {
   const selected = bodies > 1 ? selectedBodyId() : undefined;
   const selectedName = useApp((s) => (selected ? s.doc.bodies[selected]?.name : undefined));
   const [onlySelected, setOnlySelected] = useState(true);
-  const items: { f: ExportFormat; title: string; sub: string; body: string }[] = [
-    { f: "step", title: "STEP", sub: "Engineering & manufacturing", body: "Exact geometry for other CAD (Fusion, SolidWorks, Onshape, FreeCAD), CNC machining, CAM and manufacturers." },
-    { f: "glb", title: "glTF (GLB)", sub: "Web, AR, games, rendering", body: "Colors and finishes included. For Blender, Unity, Unreal, three.js, product viewers and AR." },
-    { f: "obj", title: "OBJ", sub: "Rendering & visualisation", body: "Opens in virtually every 3D and rendering tool: Blender, KeyShot, Cinema 4D, Rhino." },
-    { f: "3mf", title: "3MF", sub: "3D printing", body: "Best for slicers (Bambu Studio, PrusaSlicer, OrcaSlicer, Cura). Keeps units, names and colors." },
+  const quality = useApp((s) => s.prefs.meshQuality);
+  const items: { f: ExportFormat; title: string; sub: string; body: string; ext?: string }[] = [
+    { f: "step", title: "STEP", sub: "Engineering & manufacturing", body: "Exact geometry that every professional CAD app opens. Use it for CNC machining, CAM and manufacturers." },
+    { f: "glb", title: "glTF (GLB)", sub: "Web, AR, games, rendering", body: "Colors and finishes included. For game engines, renderers, web product viewers and AR." },
+    { f: "obj", title: "OBJ", sub: "Rendering & visualisation", body: "Opens in virtually every 3D modelling, animation and rendering app." },
+    { f: "3mf", title: "3MF", sub: "3D printing", body: "The best choice for modern 3D-printing slicers. Keeps units, part names and colors." },
     { f: "stl", title: "STL", sub: "3D printing & meshes", body: "The universal mesh format. Works with every slicer, printing service and mesh tool." },
-    { f: "drawing", title: "2D drawing (SVG)", sub: "Drawings & documentation", body: "Front, top, right and isometric views on an A3 sheet with hidden lines, overall dimensions and a title block. Opens in any browser or vector editor; print to PDF." },
-    { f: "ply", title: "PLY", sub: "Scanning & mesh analysis", body: "For MeshLab, CloudCompare and scan-comparison workflows." },
+    { f: "drawing", ext: "svg", title: "2D drawing (SVG)", sub: "Drawings & documentation", body: "Front, top, right and isometric views on an A3 sheet with hidden lines, overall dimensions and a title block. Opens in any browser or vector editor; print to PDF." },
+    { f: "ply", title: "PLY", sub: "Scanning & mesh analysis", body: "For point-cloud and mesh-analysis tools and scan-comparison workflows." },
   ];
   return (
     <Modal title="Export">
@@ -264,6 +265,24 @@ export function ExportDialog() {
         <p className="modal__lede">There's nothing to export yet. Create a body first.</p>
       ) : (
         <div className="export-grid">
+          <div className="export-quality" role="radiogroup" aria-label="Mesh detail">
+            <span className="export-quality__label">
+              Mesh detail <small>for 3MF, STL, OBJ, GLB and PLY (STEP and drawings are always exact)</small>
+            </span>
+            <div className="seg">
+              {(
+                [
+                  ["draft", "Draft", "About 10x coarser: small files for previews and sharing"],
+                  ["standard", "Standard", "0.01 mm on ordinary parts: right for most prints"],
+                  ["fine", "Fine", "About 4x finer: the smoothest curves, bigger files"],
+                ] as const
+              ).map(([v, label, title]) => (
+                <button key={v} type="button" role="radio" aria-checked={quality === v} className={`seg__btn ${quality === v ? "is-on" : ""}`} title={title} onClick={() => setPrefs({ meshQuality: v })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {items.map((it) => (
             <button
               key={it.f}
@@ -273,7 +292,7 @@ export function ExportDialog() {
                 void exportDesign(it.f, selected && onlySelected ? selected : undefined);
               }}
             >
-              <span className="export-card__fmt mono">.{it.f}</span>
+              <span className="export-card__fmt mono">.{it.ext ?? it.f}</span>
               <span className="export-card__title">
                 {it.title} <small>{it.sub}</small>
               </span>
@@ -475,7 +494,7 @@ function ServerLibrary() {
         {(list?.length ?? 0) > 6 && (
           <label className="parts__search">
             <Icon name="search" size={14} />
-            <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+            <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape" && q) setQ(""); else if (e.key === "Escape") return; e.stopPropagation(); }} />
           </label>
         )}
       </div>

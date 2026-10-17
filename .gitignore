@@ -9,5 +9,5 @@ Thumbs.db
 apps/desktop/src-tauri/gen/
 *.log
 .claude/
-Claude-Account-*.cmd
+Claude-*.cmd
 target-*/

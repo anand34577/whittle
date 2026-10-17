@@ -5,7 +5,7 @@
  */
 import { type KeyboardEvent, type PointerEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type QuantityKind, documentEvaluator, formatQuantity, trim } from "@whittle/core";
-import { commitSession, useApp } from "../state/store";
+import { cancelSession, commitSession, useApp } from "../state/store";
 import { Switch } from "./controls";
 
 interface Props {
@@ -122,9 +122,12 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }
               const s = useApp.getState();
               if (s.session && s.mode.kind === "model") setTimeout(commitSession, 0);
             } else if (e.key === "Escape") {
+              // First Esc undoes the typing; with nothing typed, Esc cancels the feature as it does everywhere else.
+              const typed = text !== value;
               setText(value);
               (e.target as HTMLInputElement).blur();
-              e.stopPropagation();
+              const s = useApp.getState();
+              if (!typed && s.session && s.mode.kind === "model") setTimeout(cancelSession, 0);
             }
             e.stopPropagation();
           }}

@@ -2,7 +2,7 @@
 
 > **Name:** Whittle (shaping material by hand, simply). **License:** MPL-2.0.
 > **Audience:** people new to 3D design, makers and hobbyists, product and industrial designers, engineers, teachers and students. A first-run profile tunes the defaults; everything is one click away ("progressive disclosure").
-> **Goal:** an open-source parametric 3D CAD app in Fusion 360's category: lighter, easier to install, easier to learn, nicer to use. It runs on Windows, macOS and Linux, and in any modern browser when hosted.
+> **Goal:** an open-source parametric 3D CAD app for part design: lighter, easier to install, easier to learn, nicer to use. It runs on Windows, macOS and Linux, and in any modern browser when hosted.
 > **Status (v0.2):** Phases 0–1 are done; 3 and 4 are nearly complete and 2 is partly done (constraints are next). See the [status table](#status).
 
 ---
@@ -43,14 +43,14 @@ Assemblies & joints, 2D drawings (OCCT HLR → PDF/DXF), sheet metal, direct edi
 ### v2+
 Real-time collaboration (Yjs/yrs), plugin & scripting API, optional AI assistant (plugin, off by default).
 
-> Fusion `.f3d` is proprietary and can't be opened. Users move models over by exporting STEP from Fusion.
+> Closed, proprietary design formats can't be opened. Models move in from other CAD apps as STEP, the open exchange standard.
 
 ## 3. Technology
 
 | Layer | Choice | Why |
 |---|---|---|
 | Geometry kernel | **OpenCascade (OCCT)** in **WebAssembly** via `replicad` + `replicad-opencascadejs` | The only mature open-source B-rep kernel; prebuilt WASM let Phase 0 skip a multi-hour custom OCCT build. A custom slimmer build is planned. |
-| Sketch solver (next) | **PlaneGCS** (FreeCAD) → WASM | Proven; LGPL (SolveSpace is GPL) |
+| Sketch solver | **PlaneGCS** (from the FreeCAD project) → WASM | Proven; LGPL (SolveSpace is GPL) |
 | App language | TypeScript (strict) | One codebase for web + desktop |
 | UI | React 19 + Vite 8; custom design system (CSS tokens, own icon set) | No template look |
 | Viewport | Three.js (imperative engine, WebGL2; WebGPU later) | Mature, fast, on-demand rendering |
@@ -81,7 +81,7 @@ Layout: title bar → intent-grouped toolbar → browser | **viewport** | proper
 - **Typed dimensions while drawing**: start typing; Tab switches W/H; Enter places.
 - **Scrubbable labels:** drag any field label to change the value; arrows nudge it (Shift ×10, Alt ×0.1).
 - **Guided first part** checklist, starter templates, start screen with session recovery.
-- **View cube**, home/fit views, turntable navigation that never rolls the horizon.
+- **Orientation cube**, home/fit views, turntable navigation that never rolls the horizon.
 - Accessibility: keyboard-reachable controls, focus rings, reduced motion respected, no colour-only states.
 
 ## 6. Visual design: "Drafting Table"

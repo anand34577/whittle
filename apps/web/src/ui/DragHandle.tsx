@@ -257,17 +257,36 @@ export function DragHandles({
     s.set(Math.round(v * 1000) / 1000, d.flip0);
   };
 
+  const tone = (s: Spec) => (s.tone === "cut" ? "is-cut" : s.tone && "xyz".includes(s.tone) ? "is-axis-" + s.tone : "");
   return (
     <>
+      {/* Each pull is an arrow from where it starts, so the direction reads at a glance (as in other CAD tools). */}
+      <svg className="drag-arrows" aria-hidden="true">
+        {specs.map((s) => {
+          if (!s.dir) return null;
+          const a = vp.worldToScreen(s.anchor);
+          const { at, u } = place(vp, s);
+          // Pulled through zero, the arrow points back the way it now goes.
+          const k = s.off < 0 ? -1 : 1;
+          const tip: [number, number] = [at[0] + u[0] * k * 30, at[1] + u[1] * k * 30];
+          const back: [number, number] = [tip[0] - u[0] * k * 16, tip[1] - u[1] * k * 16];
+          const side: [number, number] = [-u[1] * 8, u[0] * 8];
+          return (
+            <g key={s.key} className={`drag-arrow ${tone(s)} ${live === s.key ? "is-live" : ""}`}>
+              <line x1={a[0]} y1={a[1]} x2={back[0]} y2={back[1]} />
+              <polygon points={`${tip[0]},${tip[1]} ${back[0] + side[0]},${back[1] + side[1]} ${back[0] - side[0]},${back[1] - side[1]}`} />
+            </g>
+          );
+        })}
+      </svg>
       {specs.map((s) => {
         const { at, u, ppm } = place(vp, s);
         const active = live === s.key;
-        const danger = s.tone === "cut";
         return (
           <button
             key={s.key}
             type="button"
-            className={`drag-handle ${active ? "is-live" : ""} ${danger ? "is-cut" : ""} ${s.tone && "xyz".includes(s.tone) ? "is-axis-" + s.tone : ""}`}
+            className={`drag-handle ${active ? "is-live" : ""} ${tone(s)}`}
             style={{ left: at[0], top: at[1] }}
             aria-label={`Drag to change ${s.label ?? "the value"} (now ${Math.round(s.value * 100) / 100} ${s.unit})`}
             onPointerDown={(e) => {

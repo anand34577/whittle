@@ -92,8 +92,10 @@ export interface RegenResult {
   status: FeatureStatus[];
   /** Bodies as they were just before pickBefore (for picking while a feature previews). */
   pickBodies?: BodyResult[];
-  /** What the feature being edited cuts away, for a translucent red preview. */
+  /** The tool shape of the feature being edited (what it adds, cuts or keeps), for a tinted preview. */
   ghost?: BodyResult;
+  /** What the feature does with the ghost: "new", "join", "cut" or "intersect". */
+  ghostOp?: string;
   ms: number;
   /** Number of features recomputed (the rest came from cache). */
   rebuilt: number;
@@ -123,10 +125,12 @@ export type InspectResult =
   | { kind: "validity"; items: { bodyId: Id; valid: boolean }[] };
 
 export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply" | "drawing";
+/** How finely curved faces are cut into triangles for mesh formats: smoother files are bigger. */
+export type MeshQuality = "draft" | "standard" | "fine";
 
 export type KernelRequest =
-  | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id }
-  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[] }
+  | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id; preview?: Id }
+  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[]; quality?: MeshQuality }
   | { type: "inspect"; seq: number; doc: WhittleDocument; kind: InspectKind };
 
 export type KernelResponse =
