@@ -149,6 +149,55 @@ await step("05-quick-box-and-timeline-hover", async () => {
   await page.mouse.move(700, 400);
 });
 
+await step("06-empty-fillet-is-not-kept", async () => {
+  await state(() => window.whittle.commands.find((c) => c.id === "box").run());
+  await waitBuilt();
+  await page.keyboard.press("Enter");
+  await waitBuilt();
+  const n = await state(() => window.whittle.useApp.getState().doc.features.length);
+  await page.keyboard.press("f");
+  await waitBuilt();
+  await page.keyboard.press("Enter"); // no edges picked: OK says so and stays open
+  await page.waitForTimeout(200);
+  expect(await state(() => !!window.whittle.useApp.getState().session), "fillet still open", {});
+  await state(() => window.whittle.commands.find((c) => c.id === "shell").run()); // moving on drops the empty fillet
+  await page.keyboard.press("Escape");
+  await waitBuilt();
+  const types = await state(() => window.whittle.useApp.getState().doc.features.map((f) => f.type));
+  expect(types.length === n && !types.includes("fillet"), "no broken fillet left in the timeline", types);
+});
+
+await step("07-push-into-face-cuts", async () => {
+  const top = await state(() => {
+    const s = window.whittle.useApp.getState();
+    const b = s.regen.bodies.at(-1);
+    const i = b.faces.findIndex((f) => f.normal[2] > 0.99);
+    return { bodyId: b.id, index: i };
+  });
+  await state((t) => window.whittle.useApp.setState({ selection: [{ kind: "face", ...t }] }), top);
+  await page.keyboard.press("s");
+  await page.waitForTimeout(900);
+  await page.keyboard.press("c");
+  await click(0, 0);
+  await click(40, 0);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await waitBuilt();
+  await page.keyboard.press("e");
+  await waitBuilt();
+  await page.waitForTimeout(700); // the view swings off the plan view
+  const hb = await page.locator(".drag-handle").first().boundingBox();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2 + 160, { steps: 12 });
+  await page.mouse.up();
+  await waitBuilt();
+  const f = await feature("extrude");
+  expect(f.op === "cut" && f.flip, "pushed into the body it cuts", f);
+  await page.keyboard.press("Enter");
+  await waitBuilt();
+});
+
 if (errors.length) {
   console.error("console errors:\n" + errors.join("\n"));
   process.exit(1);

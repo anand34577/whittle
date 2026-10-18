@@ -19,9 +19,11 @@ import {
   addArc,
   endTangent,
   resolveGeometry,
+  geomOutline,
   tangentArcThrough,
   addCircle,
   addConstraint,
+  autoConstrain,
   addLine,
   bakeSolution,
   constraintsFor,
@@ -45,12 +47,14 @@ import {
   trim,
   trimGeometry,
 } from "@whittle/core";
+import { create } from "zustand";
 import { promptDialog } from "./dialogs";
-import { breakLine, moveGeometry, rectPattern, scaleGeometry } from "@whittle/core";
+import { type GeometryClip, breakLine, clipGeometry, moveGeometry, pasteGeometry, rectPattern, scaleGeometry } from "@whittle/core";
+import { movedCopy } from "./sketchOps";
 import { smartSketchOn } from "./prefs";
 import { nearestOnCurve } from "../viewport/inference";
 import type { DrawnRelation } from "../viewport/sketchTools";
-import { type Pick, findFeature, setSketchTool, sketchMutate, toast, useApp } from "./store";
+import { type Pick, deleteEntity, findFeature, setSketchTool, sketchMutate, toast, useApp } from "./store";
 
 /** The open sketch and its latest solution. */
 export function openSketch(): { sk: SketchFeature; sol?: SketchSolution } | null {
@@ -668,6 +672,23 @@ export function addFreePoint(p: Vec2) {
 
 let lastCorner = "2";
 
+/** The corner being rounded or cut, drawn on the canvas while its size is typed. */
+export const useCornerPreview = create<{ shapes: { pts: Vec2[]; closed: boolean }[] }>(() => ({ shapes: [] }));
+
+/** Try the corner on a copy: the message when it can't be done, else the new curves for the preview. */
+function trialCorner(id: Id, text: string, chamfer: boolean): { why?: string; shapes: { pts: Vec2[]; closed: boolean }[] } {
+  const o = openSketch();
+  const r = documentEvaluator(useApp.getState().doc).eval(text, "length");
+  if (!o || !r.ok) return { shapes: [] };
+  const trial = structuredClone(o.sk);
+  bakeSolution(trial, o.sol);
+  const before = new Set((trial.geometry ?? []).map((g) => g.id));
+  const why = filletCorner(trial, id, r.value, text, chamfer);
+  if (why) return { why, shapes: [] };
+  const added = resolveGeometry(trial).filter((g) => !before.has(g.id) && g.type !== "point");
+  return { shapes: added.map((g) => ({ pts: geomOutline(g), closed: false })) };
+}
+
 /** Fillet or chamfer the corner at a point where two lines meet. */
 export async function cornerAt(id: Id, kind: "fillet" | "chamfer", at?: [number, number]) {
   const o = openSketch();
@@ -680,8 +701,9 @@ export async function cornerAt(id: Id, kind: "fillet" | "chamfer", at?: [number,
     message: "A number or a formula using parameters.",
     initial: lastCorner,
     unit: useApp.getState().doc.units,
-    validate: (t) => checkValue("radius", t),
-  });
+    validate: (t) => checkValue("radius", t) ?? trialCorner(id, t, chamfer).why ?? null,
+    onInput: (t) => useCornerPreview.setState({ shapes: trialCorner(id, t, chamfer).shapes }),
+  }).finally(() => useCornerPreview.setState({ shapes: [] }));
   if (text === null) return;
   const r = documentEvaluator(useApp.getState().doc).eval(text, "length");
   if (!r.ok) return;
@@ -831,4 +853,52 @@ export function breakSelection() {
   const sel = sketchSelection();
   if (sel.length !== 2) return void toast("info", "Select the line to split, then the line that crosses it.");
   copyEdit("Break", (sk) => breakLine(sk, sel[0]!, sel[1]!));
+}
+
+/** AutoConstrain the open sketch; anything the solver finds redundant is taken out again (see drawMutate). */
+export function autoConstrainSketch() {
+  const o = openSketch();
+  if (!o?.sk.geometry?.length) return toast("info", "AutoConstrain works on constrainable geometry. Select a shape and choose Make constrainable first.");
+  let r = { coincident: 0, aligned: 0 };
+  drawMutate("AutoConstrain", (sk) => void (r = autoConstrain(sk)));
+  const n = r.coincident + r.aligned;
+  toast("info", n ? `AutoConstrain added ${[r.coincident && `${r.coincident} coincident`, r.aligned && `${r.aligned} horizontal/vertical`].filter(Boolean).join(" and ")}. Add dimensions to fix the sizes.` : "Nothing to add: touching ends are joined and level lines are already set.");
+}
+
+/* ── Sketch clipboard: Ctrl+C / Ctrl+X / Ctrl+V, within a sketch or into another one ── */
+
+let clip: { from: Id; geometry: GeometryClip | null; entity: SketchEntity | null; pastes: number } | null = null;
+
+export function copySketchSelection(cut = false) {
+  const o = openSketch();
+  if (!o) return;
+  const { selectedEntity } = useApp.getState();
+  const entity = selectedEntity ? (o.sk.entities.find((e) => e.id === selectedEntity) ?? null) : null;
+  const sol = useApp.getState().builtDoc === useApp.getState().doc ? o.sol : undefined;
+  const ids = sketchSelection().filter((id) => geomById(o.sk, id));
+  // Copy what is on screen: the solved positions.
+  const solved = (o.sk.geometry ?? []).map((g) => (g.type === "point" && sol?.points[g.id] ? { ...g, x: sol.points[g.id]![0], y: sol.points[g.id]![1] } : g));
+  const geometry = ids.length ? clipGeometry({ geometry: solved, constraints: o.sk.constraints }, ids) : null;
+  if (!geometry && !entity) return toast("info", "Select lines, arcs, points or a shape to copy.");
+  clip = { from: o.sk.id, geometry, entity, pastes: 0 };
+  if (cut) {
+    if (geometry) deleteSketchSelection();
+    if (entity) deleteEntity(entity.id);
+  } else toast("info", "Copied. Ctrl+V pastes it here or into another sketch.");
+}
+
+export function pasteSketchClip() {
+  const o = openSketch();
+  if (!o || !clip) return toast("info", "Nothing copied yet: select sketch geometry and press Ctrl+C.");
+  // Into the same sketch, each paste steps aside so it doesn't land on the original; into another it keeps its place.
+  const step = clip.from === o.sk.id ? 10 * ++clip.pastes : 0;
+  const c = clip;
+  let added: Id[] = [];
+  if (c.geometry) geoMutate("Paste", (sk) => void (added = pasteGeometry(sk, c.geometry!, step, -step)));
+  if (c.entity) {
+    const e = movedCopy(c.entity, step, -step);
+    sketchMutate("Paste shape", (sk) => void sk.entities.push(e as Draft<SketchEntity>));
+    useApp.setState({ selectedEntity: e.id });
+  }
+  if (added.length) useApp.setState({ sketchSel: added });
 }

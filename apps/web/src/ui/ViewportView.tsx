@@ -23,12 +23,14 @@ import {
   resolveGeometry,
   trim,
 } from "@whittle/core";
-import { handlePick, matchEdge, matchFace } from "../state/actions";
+import { handlePick, matchEdge, matchFace, samePick } from "../state/actions";
 import { regionAt } from "../state/regions";
-import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
-import { measure } from "../state/measure";
+import { measure, measurePicks, quickInfo } from "../state/measure";
+import { nextSteps } from "../state/problems";
+import { getKernel } from "../state/kernel";
 import { cancelImagePick, imagePickPointer, placeImage, useImagePick } from "../state/refImage";
 import { type Pick, editFeature, findFeature, setSketchTool, setView, sketchMutate, toast, useApp } from "../state/store";
 import { type SketchUIState, SketchController } from "../viewport/sketchTools";
@@ -322,6 +324,66 @@ function ExplodeControl() {
   );
 }
 
+const lastPointer = { x: 0, y: 0, down: false };
+if (typeof window !== "undefined") {
+  window.addEventListener("pointermove", (e) => Object.assign(lastPointer, { x: e.clientX, y: e.clientY, down: e.buttons !== 0 }), { passive: true });
+}
+
+/** Rest the pointer on a face or edge: its kind and size, like an editor's hover info. */
+function HoverInfo() {
+  const hover = useApp((s) => s.hover);
+  const regen = useApp((s) => s.regen);
+  const unit = useApp((s) => s.doc.units);
+  const on = useApp((s) => s.mode.kind === "model" && s.prefs.hints);
+  const [at, setAt] = useState<{ x: number; y: number; text: string } | null>(null);
+  useEffect(() => {
+    setAt(null);
+    const text = on && hover && regen ? quickInfo(hover, regen.bodies, unit) : null;
+    if (!text) return;
+    const t = setTimeout(() => !lastPointer.down && setAt({ x: lastPointer.x, y: lastPointer.y, text }), 550);
+    return () => clearTimeout(t);
+  }, [hover, regen, unit, on]);
+  if (!at) return null;
+  return (
+    <div className="hoverinfo" style={{ left: at.x + 14, top: at.y + 16 }} role="tooltip">
+      {at.text}
+    </div>
+  );
+}
+
+/** An empty design: the ways in, one click each, in the middle of the empty view. */
+function StartCard() {
+  const state = useApp();
+  const ways = nextSteps(state).map((x) => ({ ...x, c: commandById(x.id) })).filter((x) => x.c && isAvailable(x.c, state));
+  const ai = commandById("assistant");
+  return (
+    <div className="startcard" role="region" aria-label="Start your design">
+      <h2>Start your part</h2>
+      <div className="startcard__grid">
+        {ways.map(({ id, why, c }) => (
+          <button key={id} className="startcard__way" onClick={() => c.run()}>
+            <Icon name={c.icon ?? "more"} size={22} />
+            <b>{c.short ?? c.label}</b>
+            <small>{why}</small>
+            {c.keys && <kbd>{c.keys}</kbd>}
+          </button>
+        ))}
+      </div>
+      <p className="startcard__more">
+        {ai && isAvailable(ai, state) && (
+          <>
+            <button className="link" onClick={() => ai.run()}>
+              Describe it to the AI assistant
+            </button>
+            {" · "}
+          </>
+        )}
+        Drop a STEP or STL file here ·<kbd>Ctrl K</kbd> finds any command
+      </p>
+    </div>
+  );
+}
+
 export function ViewportView() {
   const host = useRef<HTMLDivElement>(null);
   const [vp, setVp] = useState<Viewport | null>(null);
@@ -507,10 +569,24 @@ export function ViewportView() {
     vp.setBodies(regen.bodies, doc.bodies);
   }, [vp, regen, doc.bodies]);
 
+  // A new extrude or revolve started while looking straight at its sketch turns the view so the solid can be seen forming.
+  const newSession = session?.isNew ? session.featureId : null;
   useEffect(() => {
-    vp?.setPickBodies(regen?.pickBodies);
+    if (!vp || !newSession) return;
+    const s = useApp.getState();
+    const f = s.doc.features.find((x) => x.id === newSession);
+    if (f?.type !== "extrude" && f?.type !== "revolve") return;
+    const fr = s.regen?.sketches.find((x) => x.id === f.sketch);
+    if (fr) vp.tiltFromPlan(fr.normal);
+  }, [vp, newSession]);
+  const edgeEdit = useApp((s) => {
+    const t = s.session && s.doc.features.find((f) => f.id === s.session!.featureId)?.type;
+    return t === "fillet" || t === "chamfer";
+  });
+  useEffect(() => {
+    vp?.setPickBodies(regen?.pickBodies, !edgeEdit);
     vp?.setGhost(session ? regen?.ghost : undefined, regen?.ghostOp);
-  }, [vp, regen, session]);
+  }, [vp, regen, session, edgeEdit]);
 
   // Initial framing once the first model arrives; re-frame after inserting parts.
   const framed = useRef(false);
@@ -538,7 +614,7 @@ export function ViewportView() {
     let filter: PickFilter = { faces: true, edges: true, planes: false, sketches: true };
     if (mode.kind === "pickPlane") filter = { faces: true, edges: false, planes: true, sketches: false };
     else if (mode.kind === "measure") filter = { faces: true, edges: true, planes: false, sketches: false };
-    else if (f?.type === "fillet" || f?.type === "chamfer") filter = { faces: false, edges: true, planes: false, sketches: false };
+    else if (f?.type === "fillet" || f?.type === "chamfer") filter = { faces: true, edges: true, planes: false, sketches: false }; // a face takes all its edges
     else if (f?.type === "shell" || f?.type === "hole" || f?.type === "draft" || f?.type === "offsetFace") filter = bodiesOnly;
     else if (f?.type === "thread" || f?.type === "replaceFace" || f?.type === "deleteFace" || f?.type === "align") filter = bodiesOnly;
     else if (f?.type === "boundaryFill") filter = bodiesOnly;
@@ -546,6 +622,7 @@ export function ViewportView() {
     else if (f?.type === "surface") filter = f.op === "patch" || f.op === "ruled" ? { faces: false, edges: true, planes: false, sketches: false } : bodiesOnly;
     else if (f?.type === "curve") filter = { faces: true, edges: true, planes: false, sketches: f.source === "project" };
     else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
+    else if (f?.type === "pattern" && f.axisGeom) filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
     else if (f?.type === "loft") filter = { faces: false, edges: false, planes: false, sketches: true };
     // Areas of the sketch go in and out of the profile; "up to a face" also takes a face.
@@ -674,6 +751,7 @@ export function ViewportView() {
   }, [vp, regen, doc, sketchId]);
 
   const imagePick = useImagePick();
+  const cornerPreview = useCornerPreview((s) => s.shapes);
   useEffect(() => {
     if (mode.kind !== "sketch" && imagePick.kind) cancelImagePick();
   }, [mode.kind, imagePick.kind]);
@@ -700,11 +778,28 @@ export function ViewportView() {
       const r = 6 * vp.pixelSize;
       for (const [x, y] of imagePick.pts) extra.push({ pts: [[x - r, y - r], [x + r, y + r], [x, y], [x - r, y + r], [x + r, y - r]], closed: false });
     }
-    vp.setSketchPreview(frame, [...(sketchUI?.preview ?? []), ...extra], sketchUI?.guides ?? []);
-  }, [vp, frame, sketchUI, imagePick]);
+    vp.setSketchPreview(frame, [...(sketchUI?.preview ?? []), ...extra, ...cornerPreview], sketchUI?.guides ?? []);
+  }, [vp, frame, sketchUI, imagePick, cornerPreview]);
 
   // Measure.
-  const measured = useMemo(() => (mode.kind === "measure" ? measure(picks, regen?.bodies ?? [], doc.units) : null), [mode.kind, picks, regen, doc.units]);
+  // Two picks: ask the engine for the true shortest distance between them (the card shows an estimate until then).
+  const [exact, setExact] = useState<{ key: string; r: { d: number; a: Vec3; b: Vec3 } | null } | null>(null);
+  const exactKey = mode.kind === "measure" ? JSON.stringify(measurePicks(picks)) : "null";
+  useEffect(() => {
+    const mp = mode.kind === "measure" ? measurePicks(picks) : null;
+    const built = useApp.getState().builtDoc;
+    if (!mp || !built) return;
+    let live = true;
+    getKernel()
+      .inspect(built, "distance", mp)
+      .then((r) => live && r.kind === "distance" && setExact({ key: exactKey, r: r.result }))
+      .catch(() => {});
+    return () => void (live = false);
+  }, [exactKey, regen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const measured = useMemo(
+    () => (mode.kind === "measure" ? measure(picks, regen?.bodies ?? [], doc.units, exact?.key === exactKey ? exact.r : undefined) : null),
+    [mode.kind, picks, regen, doc.units, exact, exactKey],
+  );
   useEffect(() => {
     vp?.setMeasure(measured?.segment ?? null);
   }, [vp, measured]);
@@ -718,14 +813,13 @@ export function ViewportView() {
     const items: { pick: Pick; style: "hover" | "select" | "ref" }[] = [];
     const f = sessionFeature;
     const pb = regen?.pickBodies ?? regen?.bodies ?? [];
-    if (f && (f.type === "fillet" || f.type === "chamfer")) {
-      for (const ref of f.edges) {
-        const b = pb.find((x) => x.id === ref.bodyId);
-        const i = b ? matchEdge(b.edges, ref) : -1;
-        if (b && i >= 0) items.push({ pick: { kind: "edge", bodyId: b.id, index: i }, style: "ref" });
-      }
+    const edgeRefs = f && (f.type === "fillet" || f.type === "chamfer") ? f.edges : f?.type === "pattern" && f.axisGeom?.edge ? [f.axisGeom.edge] : [];
+    for (const ref of edgeRefs) {
+      const b = pb.find((x) => x.id === ref.bodyId);
+      const i = b ? matchEdge(b.edges, ref) : -1;
+      if (b && i >= 0) items.push({ pick: { kind: "edge", bodyId: b.id, index: i }, style: "ref" });
     }
-    const faceRefs = f?.type === "shell" ? f.faces : f?.type === "hole" && f.face ? [f.face] : [];
+    const faceRefs = f?.type === "shell" ? f.faces : f?.type === "hole" && f.face ? [f.face] : f?.type === "pattern" && f.axisGeom?.face ? [f.axisGeom.face] : [];
     for (const ref of faceRefs) {
       const b = pb.find((x) => x.id === ref.bodyId);
       const i = b ? matchFace(b.faces, ref) : -1;
@@ -738,7 +832,8 @@ export function ViewportView() {
     if ((f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") && f.bodyId) items.push({ pick: { kind: "body", bodyId: f.bodyId }, style: "ref" });
     if (mode.kind === "measure") for (const p of picks) items.push({ pick: p, style: "select" });
     else for (const p of selection) if (p.kind !== "sketch") items.push({ pick: p, style: "select" });
-    if (hover && hover.kind !== "sketch" && mode.kind !== "sketch") items.push({ pick: hover, style: "hover" });
+    // Hovering something already chosen keeps its selected color rather than masking it with the hover tint.
+    if (hover && hover.kind !== "sketch" && mode.kind !== "sketch" && !items.some((i) => samePick(i.pick, hover))) items.push({ pick: hover, style: "hover" });
     vp.setHighlights(items);
   }, [vp, regen, selection, hover, sessionFeature, mode.kind, picks]);
 
@@ -828,6 +923,9 @@ export function ViewportView() {
       <InlinePrompt />
       {session && mode.kind === "model" && <MissingRefs vp={vp} feature={sessionFeature} regen={regen} />}
 
+      {kernelReady && mode.kind === "model" && !session && doc.features.length === 0 && <StartCard />}
+      <HoverInfo />
+
       {mode.kind === "pickPlane" && (
         <div className="viewport__banner">
           <Icon name="plane" size={16} /> Pick a plane or a flat face to sketch on
@@ -860,7 +958,7 @@ export function ViewportView() {
         </div>
       )}
 
-      {contextActions && (
+      {contextActions && !radial && (
         <div className="context-bar" role="toolbar" aria-label="Actions for the selection">
           {contextActions.map((c) => (
             <button key={c.id} className="context-bar__btn" onClick={c.run} title={`${c.label}${c.keys ? `  (${c.keys})` : ""}${c.hint ? "\n" + c.hint : ""}`}>

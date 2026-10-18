@@ -38,6 +38,8 @@ export interface Prefs {
   meshQuality: "draft" | "standard" | "fine";
   /** Single-key shortcuts: Whittle's own, or the classic CAD letters (H hole, J joint, T trim, O offset, P project). */
   keys: "whittle" | "classic";
+  /** Send to slicer (desktop): an installed slicer by name, or "" for whatever opens .3mf files. */
+  slicer?: string;
   /** The desktop app looks for a newer release once a day. */
   updateCheck: boolean;
 }

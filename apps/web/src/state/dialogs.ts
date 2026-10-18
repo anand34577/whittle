@@ -70,6 +70,8 @@ export interface InlinePromptRequest {
   initial: string;
   unit?: string;
   validate?: (v: string) => string | null;
+  /** Called with the text as it is typed (and once at the start), e.g. to preview the result. */
+  onInput?: (v: string) => void;
   resolve: (v: string | null) => void;
 }
 export const inlinePromptHost: { show: ((r: InlinePromptRequest) => void) | null } = { show: null };
@@ -86,11 +88,12 @@ export function promptDialog(opts: {
   type?: PromptRequest["type"];
   unit?: string;
   validate?: (v: string) => string | null;
+  onInput?: (v: string) => void;
   choices?: { label: string; value: string }[];
 }): Promise<string | null> {
   if (opts.at && inlinePromptHost.show) {
     const show = inlinePromptHost.show;
-    return new Promise((resolve) => show({ at: opts.at!, title: opts.title, label: opts.label, initial: opts.initial ?? "", unit: opts.unit, validate: opts.validate, resolve }));
+    return new Promise((resolve) => show({ at: opts.at!, title: opts.title, label: opts.label, initial: opts.initial ?? "", unit: opts.unit, validate: opts.validate, onInput: opts.onInput, resolve }));
   }
   return new Promise((resolve) =>
     open({

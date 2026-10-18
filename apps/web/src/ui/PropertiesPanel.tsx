@@ -1,17 +1,20 @@
 /** Right-hand panel: the active feature's editor, the selected sketch shape, or an inspector. */
 import { useState } from "react";
 import type { Draft } from "immer";
-import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, geomType, trim } from "@whittle/core";
+import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, geomType, trim, documentEvaluator, maxPolylineCorner, maxRectCorner } from "@whittle/core";
 import { availableConstraints, canConstrain, constrainSelection, geoMutate, makeConstrainable, offsetSelection, patternSelection, mirrorSelection, setDimension } from "../state/constraintOps";
-import { commandById } from "../state/commands";
+import { commandById, isAvailable } from "../state/commands";
+import { nextSteps } from "../state/problems";
+import { GUIDES, GuideCard } from "./toolGuides";
 import { areaText, volumeText } from "../state/measure";
 import type { FeatureStatus } from "@whittle/kernel";
 import { circularCopies, duplicateEntity, linearCopies, mirrorEntity, offsetEntity, rotateEntity } from "../state/sketchOps";
-import { LOOKS } from "../viewport/looks";
+import { LOOKS, lookById } from "../viewport/looks";
 import {
   cancelSession,
   commitSession,
   deleteEntity,
+  editFeature,
   findFeature,
   finishSketch,
   mutate,
@@ -24,6 +27,7 @@ import { ExprInput, Segmented, Toggle } from "./ExprInput";
 import { ColorPicker, Disclosure, NumberField, Select, Slider } from "./controls";
 import { importImage, startImagePick, traceImage, updateImage } from "../state/refImage";
 import { FeatureEditor } from "./FeatureEditors";
+import { fixInUnits } from "./DragHandle";
 import { Icon, type IconName } from "./icons";
 
 export const FEATURE_ICONS: Record<string, IconName> = {
@@ -45,6 +49,7 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   coil: "coil",
   split: "split",
   offset: "offset",
+  boundingSolid: "box",
   scale: "scale",
   draft: "draft",
   offsetFace: "move",
@@ -173,7 +178,7 @@ function StatusNote({ status, featureId }: { status?: FeatureStatus; featureId: 
             className="btn btn--small"
             onClick={() =>
               updateFeature(featureId, fix.label, (d) => {
-                (d as unknown as Record<string, string>)[fix.field] = fix.value;
+                (d as unknown as Record<string, string>)[fix.field] = fixInUnits(fix.value, useApp.getState().doc.units);
               })
             }
           >
@@ -196,7 +201,28 @@ function diameterOf(r: string): string {
   return balanced ? m![1]! : `2 * (${r})`;
 }
 
+/** The biggest corner radius this shape can take, in the document's units (undefined when it can't be worked out). */
+function cornerLimit(e: SketchEntity, doc: Parameters<typeof documentEvaluator>[0]): number | undefined {
+  const ev = documentEvaluator(doc);
+  const f = LENGTH_TO_MM[doc.units];
+  if (e.type === "rect") {
+    const w = ev.eval(e.w, "length");
+    const h = ev.eval(e.h, "length");
+    return w.ok && h.ok ? maxRectCorner(w.value, h.value) / f : undefined;
+  }
+  if (e.type === "polyline" && !e.open && !e.points.some((p) => p[2])) {
+    const pts = e.points.map(([x, y]) => [ev.eval(x, "length"), ev.eval(y, "length")] as const);
+    if (pts.some(([x, y]) => !x.ok || !y.ok)) return undefined;
+    const m = maxPolylineCorner(pts.map(([x, y]) => [(x as { value: number }).value, (y as { value: number }).value]));
+    return Number.isFinite(m) ? m / f : undefined;
+  }
+  return undefined;
+}
+
 function EntityEditor({ e }: { e: SketchEntity }) {
+  const doc = useApp((s) => s.doc);
+  const maxCorner = cornerLimit(e, doc);
+  const cornerHint = maxCorner === undefined ? undefined : `Largest that fits: ${trim(maxCorner, 2)} ${doc.units}`;
   const set = (label: string, recipe: (d: Draft<SketchEntity>) => void) =>
     sketchMutate(
       label,
@@ -286,7 +312,7 @@ function EntityEditor({ e }: { e: SketchEntity }) {
             {L(e.anchor === "center" ? "Center X" : "Corner X", "x")}
             {L(e.anchor === "center" ? "Center Y" : "Corner Y", "y")}
           </div>
-          <ExprInput label="Rounded corners" kind="length" value={e.corner ?? "0"} min={0} onChange={(v) => set("Corner", (d) => void ((d as typeof e).corner = v))} />
+          <ExprInput label="Rounded corners" kind="length" value={e.corner ?? "0"} min={0} max={maxCorner} hint={cornerHint} onChange={(v) => set("Corner", (d) => void ((d as typeof e).corner = v))} />
           <ExprInput label="Rotation" kind="angle" value={e.angle ?? "0"} onChange={(v) => set("Rotation", (d) => void ((d as typeof e).angle = v))} />
           <Segmented
             label="Position from"
@@ -340,7 +366,7 @@ function EntityEditor({ e }: { e: SketchEntity }) {
       {e.type === "polyline" && (
         <>
           <Toggle label="Smooth curve" hint="A flowing spline through the points" checked={!!e.smooth} onChange={(v) => set("Smooth", (d) => void ((d as typeof e).smooth = v))} />
-          {!e.smooth && <ExprInput label="Round corners" kind="length" value={e.corner ?? "0"} min={0} onChange={(v) => set("Corner", (d) => void ((d as typeof e).corner = v))} />}
+          {!e.smooth && <ExprInput label="Round corners" kind="length" value={e.corner ?? "0"} min={0} max={maxCorner} hint={cornerHint} onChange={(v) => set("Corner", (d) => void ((d as typeof e).corner = v))} />}
           <Toggle label="Open path" hint="A line that isn't closed: sweep paths, revolve axes, and ribs with a thin extrude" checked={!!e.open} onChange={(v) => set("Open", (d) => void ((d as typeof e).open = v))} />
           <Disclosure summary={`${e.points.length} points`}>
             {e.points.map((p, i) => (
@@ -680,13 +706,26 @@ function Inspector() {
                   role="radio"
                   aria-checked={(meta.look ?? "matte") === l.id}
                   className={`look ${(meta.look ?? "matte") === l.id ? "is-on" : ""}`}
-                  onClick={() => mutate("Body finish", (d) => void (d.bodies[body.id]!.look = l.id))}
+                  onClick={() => mutate("Body finish", (d) => { d.bodies[body.id]!.look = l.id; d.bodies[body.id]!.opacity = undefined; })}
                   title={l.hint}
                 >
                   <span className={`look__ball look__ball--${l.id}`} style={{ background: meta.color }} />
                   {l.label}
                 </button>
               ))}
+            </div>
+            <div className="copyrow copyrow--wide">
+              <span>Opacity</span>
+              <div style={{ flex: 1 }}>
+                <Slider
+                  value={meta.opacity ?? lookById(meta.look).opacity}
+                  min={0.05}
+                  max={1}
+                  onChange={(v) => mutate("Body opacity", (d) => void (d.bodies[body.id]!.opacity = v >= 0.995 ? undefined : v), "opacity" + body.id)}
+                  ariaLabel="Body opacity"
+                  format={(v) => `${Math.round(v * 100)}%`}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -740,6 +779,7 @@ function Inspector() {
             </dl>
           </div>
         )}
+        {p?.kind === "sketch" && <SketchSummary id={p.sketchId} />}
         <div className="panel__section">
           <h3 className="eyebrow">{body ? "Measurements" : "Model"}</h3>
           <dl className="stats">
@@ -757,7 +797,7 @@ function Inspector() {
                 <dd className="mono">{volumeText(body ? body.volume : totalVolume, unit, 2)}</dd>
                 <dt>Mass</dt>
                 <dd className="mono">
-                  {massText(((body ? body.volume : totalVolume) / 1000) * density)}
+                  <span style={{ whiteSpace: "nowrap", marginRight: 8 }}>{massText(((body ? body.volume : totalVolume) / 1000) * density)}</span>
                   <Select
                     size="sm"
                     ariaLabel="Material"
@@ -789,8 +829,106 @@ function Inspector() {
           </dl>
           {!body && bodies.length === 0 && <p className="muted small">Nothing to measure yet. Sketch a shape and extrude it, or add a quick Box.</p>}
         </div>
+        {!p && <KeySizes />}
+        {!p && <NextSteps />}
       </div>
     </>
+  );
+}
+
+/** A selected sketch: where it is, how defined it is, what uses it, and what to do with it. */
+function SketchSummary({ id }: { id: string }) {
+  const doc = useApp((s) => s.doc);
+  const sol = useApp((s) => s.regen?.sketches.find((x) => x.id === id)?.solution);
+  const sk = findFeature(doc, id, "sketch");
+  if (!sk) return null;
+  const users = doc.features.filter((g) => g.type !== "sketch" && JSON.stringify(g).includes(id)).map((g) => g.name);
+  const plane = sk.plane.kind === "origin" ? `${sk.plane.plane} plane` : sk.plane.kind === "construction" ? "Construction plane" : "Model face";
+  const state = !sol ? "Shapes (no constraints)" : sol.state === "full" ? "Fully defined" : sol.state === "under" ? `${sol.dof} way${sol.dof === 1 ? "" : "s"} to move left` : "Constraints conflict";
+  return (
+    <div className="panel__section">
+      <h3 className="eyebrow">Sketch</h3>
+      <dl className="stats">
+        <dt>On</dt>
+        <dd>{plane}</dd>
+        <dt>Shapes</dt>
+        <dd className="mono">{sk.entities.length + (sk.geometry?.length ?? 0)}</dd>
+        <dt>State</dt>
+        <dd>{state}</dd>
+        <dt>Used by</dt>
+        <dd>{users.length ? users.join(", ") : "Nothing yet"}</dd>
+      </dl>
+      <div className="row-actions">
+        <button className="btn btn--small" onClick={() => editFeature(id)}>
+          <Icon name="edit" size={14} /> Edit
+        </button>
+        {["extrude", "revolve"].map((cid) => {
+          const c = commandById(cid);
+          return (
+            <button key={cid} className="btn btn--small" onClick={c.run} title={c.hint}>
+              <Icon name={c.icon as IconName} size={14} /> {c.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Starred parameters, editable right here: the few numbers someone tweaks most. */
+function KeySizes() {
+  const params = useApp((s) => s.doc.parameters);
+  const fav = params.filter((p) => p.favorite);
+  if (!fav.length) return null;
+  return (
+    <div className="panel__section">
+      <h3 className="eyebrow">Key sizes</h3>
+      {fav.map((p) => (
+        <ExprInput
+          key={p.id}
+          label={p.name}
+          kind={p.kind}
+          value={p.expr}
+          hint={p.comment}
+          onChange={(v) =>
+            mutate(
+              `Set ${p.name}`,
+              (d) => {
+                const x = d.parameters.find((y) => y.id === p.id);
+                if (x) x.expr = v;
+              },
+              "param" + p.id,
+            )
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+/** With nothing selected: what usually comes next, one click each. */
+function NextSteps() {
+  const state = useApp();
+  const steps = nextSteps(state)
+    .map((x) => ({ ...x, c: commandById(x.id) }))
+    .filter((x) => x.c && isAvailable(x.c, state));
+  if (!steps.length) return null;
+  return (
+    <div className="panel__section">
+      <h3 className="eyebrow">Next steps</h3>
+      <div className="nextsteps">
+        {steps.map(({ id, why, c }) => (
+          <button key={id} className="nextstep" onClick={() => c!.run()}>
+            <Icon name={(c!.icon ?? "more") as IconName} size={18} />
+            <span>
+              <b>{c!.short ?? c!.label}</b>
+              <small>{why}</small>
+            </span>
+            {c!.keys && <kbd>{c!.keys}</kbd>}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -799,6 +937,7 @@ export function PropertiesPanel() {
   const mode = useApp((s) => s.mode);
   const doc = useApp((s) => s.doc);
   const regen = useApp((s) => s.regen);
+  const profile = useApp((s) => s.prefs.profile);
 
   if (mode.kind === "sketch") {
     const sk = findFeature(doc, mode.sketchId, "sketch");
@@ -829,17 +968,24 @@ export function PropertiesPanel() {
             // Only Enter (the hidden default button) applies; other buttons in the panel never submit.
             const by = (e.nativeEvent as SubmitEvent).submitter;
             if (by && !by.hasAttribute("data-submit")) return;
-            commitSession();
+            commitSession(true);
           }}
         >
           <StatusNote status={status} featureId={f.id} />
+          {GUIDES[f.type] && (
+            <div className="panel__section panel__guide">
+              <Disclosure summary="How it works" defaultOpen={session.isNew && (profile === "beginner" || profile === "educator")}>
+                <GuideCard guide={GUIDES[f.type]!} />
+              </Disclosure>
+            </div>
+          )}
           <div className="panel__section">
             <FeatureEditor f={f} />
           </div>
           <button type="submit" hidden data-submit />
         </form>
         <footer className="panel__foot">
-          <button className="btn btn--accent btn--wide" onClick={commitSession} disabled={busy}>
+          <button className="btn btn--accent btn--wide" onClick={() => commitSession(true)} disabled={busy}>
             <Icon name="check" size={16} /> OK
           </button>
           <button className="btn btn--ghost" onClick={cancelSession}>

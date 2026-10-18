@@ -1,6 +1,6 @@
 /** The AI assistant panel and its provider settings. */
 import { useEffect, useRef, useState } from "react";
-import { PRESETS, type ProviderConfig, activeProvider, askAssistant, clearConversation, saveAiSettings, stopAssistant, useAi } from "../state/ai";
+import { PRESETS, type ProviderConfig, listModels, activeProvider, askAssistant, clearConversation, saveAiSettings, stopAssistant, useAi } from "../state/ai";
 import { confirmDialog } from "../state/dialogs";
 import { uid } from "@whittle/core";
 import { useApp } from "../state/store";
@@ -168,6 +168,23 @@ export function AssistantPanel() {
 /* ───────────────────────────── Settings tab ───────────────────────────── */
 
 function ProviderEditor({ p, onChange, onRemove }: { p: ProviderConfig; onChange: (p: ProviderConfig) => void; onRemove: () => void }) {
+  const [found, setFound] = useState<string[]>([]);
+  const [finding, setFinding] = useState(false);
+  const [problem, setProblem] = useState("");
+  const find = async () => {
+    setFinding(true);
+    setProblem("");
+    try {
+      const ids = await listModels(p);
+      setFound(ids);
+      if (!ids.includes(p.model)) onChange({ ...p, model: ids[0]! });
+    } catch (e) {
+      setFound([]);
+      setProblem(e instanceof Error ? e.message : "Couldn't list the models.");
+    } finally {
+      setFinding(false);
+    }
+  };
   return (
     <div className="provider">
       <div className="provider__head">
@@ -180,6 +197,17 @@ function ProviderEditor({ p, onChange, onRemove }: { p: ProviderConfig; onChange
       </div>
       {p.kind === "openai" && <TextField label="Endpoint" value={p.baseUrl} placeholder="https://…/v1" onChange={(v) => onChange({ ...p, baseUrl: v })} type="url" />}
       <TextField label="Model" value={p.model} placeholder={p.kind === "anthropic" ? "claude-opus-5-5" : "e.g. gpt-…, qwen2.5:14b"} onChange={(v) => onChange({ ...p, model: v.trim() })} />
+      {p.kind === "openai" && (
+        <>
+          <div className="btnrow">
+            <button className="btn btn--small" disabled={finding || !p.baseUrl} onClick={() => void find()} title="Ask the server which models it has">
+              {finding ? "Looking…" : "Find models"}
+            </button>
+          </div>
+          {found.length > 0 && <Select label="Installed" value={p.model} options={found.map((m) => ({ value: m, label: m }))} onChange={(v) => onChange({ ...p, model: v })} />}
+          {problem && <p className="muted small" role="alert">{problem}</p>}
+        </>
+      )}
       <TextField label="API key" type="password" value={p.apiKey} placeholder={p.kind === "anthropic" ? "sk-ant-…" : "Leave empty for local servers"} onChange={(v) => onChange({ ...p, apiKey: v.trim() })} autoComplete="off" />
     </div>
   );

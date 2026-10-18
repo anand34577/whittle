@@ -1,12 +1,35 @@
 /** Model checks that need the real solids (interference between bodies, tight inside corners), and text outlines for 2D export. */
 import { type Id, type Vec3, type WhittleDocument, documentEvaluator, resolveEntity } from "@whittle/core";
-import { type Edge, type Shape3D, measureShapeVolumeProperties } from "replicad";
+import { type Edge, type Shape3D, getOC, measureShapeVolumeProperties } from "replicad";
 import { circleOf } from "./construct";
 import { dot, sub } from "./refs";
 import { drawingLoops, entityDrawing } from "./shared";
-import type { InterferenceItem, RadiusItem } from "./protocol";
+import type { InterferenceItem, MeasurePick, RadiusItem } from "./protocol";
 
 const volume = (s: Shape3D) => measureShapeVolumeProperties(s).volume;
+
+/** The shortest distance between two picked faces, edges or bodies, and where it runs (Fusion's Measure). */
+export function minDistance(shapes: Map<Id, Shape3D>, picks: MeasurePick[]): { d: number; a: Vec3; b: Vec3 } | null {
+  const shapeOf = (p: MeasurePick) => {
+    const s = shapes.get(p.bodyId);
+    if (!s) return undefined;
+    return p.kind === "face" ? s.faces[p.index!] : p.kind === "edge" ? s.edges[p.index!] : s;
+  };
+  const [sa, sb] = picks.map(shapeOf);
+  if (picks.length !== 2 || !sa || !sb) return null;
+  const oc = getOC();
+  const q = new oc.BRepExtrema_DistShapeShape();
+  try {
+    q.LoadS1(sa.wrapped);
+    q.LoadS2(sb.wrapped);
+    q.Perform();
+    if (!q.IsDone() || q.NbSolution() < 1) return null;
+    const pt = (p: { X(): number; Y(): number; Z(): number }): Vec3 => [p.X(), p.Y(), p.Z()];
+    return { d: q.Value(), a: pt(q.PointOnShape1(1)), b: pt(q.PointOnShape2(1)) };
+  } finally {
+    q.delete();
+  }
+}
 
 /** Pairs of bodies whose solids overlap, with the overlapping volume and its bounding box. */
 export function interference(shapes: Map<Id, Shape3D>): InterferenceItem[] {

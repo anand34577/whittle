@@ -766,3 +766,38 @@ export function extendGeometry(sk: Geo, id: Id, click: Vec2): string | undefined
   if (src.type === "line") dropLengths(sk, id);
   return undefined;
 }
+
+/**
+ * AutoConstrain: the relations a drawing plainly means but doesn't have yet. Ends that touch become Coincident
+ * (points on the origin join it), lines drawn level or upright become Horizontal or Vertical.
+ * Dimensions are left to the person: they carry intent a picture can't.
+ */
+export function autoConstrain(sk: Geo, tol = 1e-3): { coincident: number; aligned: number } {
+  const pts = (sk.geometry ?? []).filter((g) => g.type === "point").map((g) => ({ id: g.id, p: pointAt(sk, g.id) }));
+  // Points already joined (directly or through others) share a group, so no relation is added twice.
+  const parent = new Map<Id, Id>();
+  const find = (x: Id): Id => (parent.get(x) ?? x) === x ? x : find(parent.get(x)!);
+  const join = (a: Id, b: Id) => parent.set(find(a), find(b));
+  for (const c of sk.constraints ?? []) if (c.type === "coincident" && c.refs.every((r) => geomType(sk, r) === "point")) join(c.refs[0]!, c.refs[1]!);
+  let coincident = 0;
+  let aligned = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]!;
+    if (Math.hypot(a.p[0], a.p[1]) < tol && find(a.id) !== find("origin") && "id" in addConstraint(sk, "coincident", [a.id, "origin"])) join(a.id, "origin"), coincident++;
+    for (let j = i + 1; j < pts.length; j++) {
+      const b = pts[j]!;
+      if (find(a.id) === find(b.id) || dist(a.p, b.p) >= tol) continue;
+      if ("id" in addConstraint(sk, "coincident", [a.id, b.id])) join(a.id, b.id), coincident++;
+    }
+  }
+  const leveled = new Set((sk.constraints ?? []).filter((c) => ["horizontal", "vertical", "parallel", "perpendicular", "collinear", "angle"].includes(c.type)).flatMap((c) => c.refs));
+  for (const g of sk.geometry ?? []) {
+    if (g.type !== "line" || leveled.has(g.id)) continue;
+    const [p, q] = [pointAt(sk, g.a), pointAt(sk, g.b)];
+    const len = dist(p, q);
+    if (len < tol) continue;
+    const type = Math.abs(q[1] - p[1]) < len * 1e-3 ? "horizontal" : Math.abs(q[0] - p[0]) < len * 1e-3 ? "vertical" : null;
+    if (type && "id" in addConstraint(sk, type, [g.id])) aligned++;
+  }
+  return { coincident, aligned };
+}

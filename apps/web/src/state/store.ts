@@ -135,7 +135,7 @@ export interface AppState {
   /** Desktop app, self-hosted server or plain browser (see platform.ts). */
   platform: Platform;
   platformReady: boolean;
-  coach: boolean;
+  coach: string | false;
   toasts: Toast[];
   viewRequest: { kind: "home" | "fit" | "normal"; at: number } | null;
   /** Frame the model once the next rebuild arrives (after inserting things). */
@@ -331,9 +331,18 @@ export function editFeature(id: Id) {
   void doc;
 }
 
-export function commitSession() {
-  const { session, doc } = get();
+/**
+ * Apply the open feature. A new one still waiting for its picks (no edges, no face...) is never kept as a broken
+ * step: OK (`explicit`) says what's missing and stays open, and anything else that ends the session drops it.
+ */
+export function commitSession(explicit = false) {
+  const { session, doc, regen, builtDoc } = get();
   if (!session) return;
+  const st = session.isNew && builtDoc === doc ? regen?.status.find((x) => x.id === session.featureId) : undefined;
+  if (st?.state === "incomplete") {
+    if (explicit) return toast("info", st.message ?? "Finish the selection first.");
+    return set({ doc: session.base, session: null });
+  }
   set({ session: null });
   if (session.isolated) {
     // Marker back where it was; nothing edited means nothing to record.

@@ -74,7 +74,7 @@ function onKey(e: KeyboardEvent) {
     return;
   }
   if (e.key === "Enter" && s.session && s.mode.kind === "model") {
-    commitSession();
+    commitSession(true);
     return;
   }
 

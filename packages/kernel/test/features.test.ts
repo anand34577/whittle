@@ -25,6 +25,7 @@ import {
   uid,
 } from "@whittle/core";
 import { Builder } from "../src/build";
+import { minDistance } from "../src/inspect";
 
 beforeAll(async () => {
   const require = createRequire(import.meta.url);
@@ -140,6 +141,28 @@ describe("hole, loft, move, combine", () => {
     expect(r.bodies[0]!.volume).toBeLessThan(40 * 30 * 20 - Math.PI * 2.5 * 2.5 * 8 * 0.9);
   });
 
+  it("ends a blind hole in a drill point and honours the countersink angle", () => {
+    const blind = (set: (h: HoleFeature) => void) => {
+      const doc = newDocument();
+      const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+      const top = new Builder().regen(doc, "final").bodies[0]!.faces.find((f) => f.normal[2] > 0.99)!;
+      const hole = makeHole(doc) as HoleFeature;
+      Object.assign(hole, { face: { bodyId: box.id, ...top }, points: [["0", "0"]], through: false, depth: "8", diameter: "6" });
+      set(hole);
+      push(doc, hole);
+      const r = new Builder().regen(doc, "final");
+      ok(r);
+      return 40 * 30 * 20 - r.bodies[0]!.volume;
+    };
+    const cyl = Math.PI * 9 * 8;
+    expect(blind((h) => (h.tipAngle = undefined))).toBeCloseTo(cyl, 1);
+    // 90° point: a cone 3 deep under the cylinder.
+    expect(blind((h) => (h.tipAngle = "90"))).toBeCloseTo(cyl + (Math.PI * 9 * 3) / 3, 1);
+    // A 60° countersink to Ø12 is deeper than the 90° one: (6 - 3) / tan 30°.
+    const sink = (a?: string) => blind((h) => ((h.tipAngle = undefined), (h.style = "countersink"), (h.headDiameter = "12"), (h.sinkAngle = a)));
+    expect(sink("60")).toBeGreaterThan(sink() + 10);
+  });
+
   it("lofts a square into a circle", () => {
     const doc = newDocument();
     const a = sketchWith(doc, [{ id: uid(), type: "rect", x: "0", y: "0", w: "20", h: "20", anchor: "center" }]);
@@ -201,5 +224,110 @@ describe("hole placement", () => {
     expect(st.state).toBe("warning");
     expect(st.message).toMatch(/Hole 2 is off the body/);
     expect(r.bodies[0]!.volume).toBeCloseTo(40 * 30 * 20 - Math.PI * 2.5 * 2.5 * 20, 0);
+  });
+});
+
+describe("measure distance", () => {
+  it("gives the shortest distance between faces, not between the clicked spots", () => {
+    const doc = newDocument();
+    const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature; // 40 x 30 x 20
+    const b = new Builder();
+    const body = b.regen(doc, "final").bodies[0]!;
+    const shapes = b.shapes(doc);
+    const top = body.faces.findIndex((f) => f.normal[2] > 0.99);
+    const bottom = body.faces.findIndex((f) => f.normal[2] < -0.99);
+    const front = body.faces.findIndex((f) => f.normal[1] < -0.99);
+    const at = (i: number, j: number) => minDistance(shapes, [{ bodyId: box.id, kind: "face", index: i }, { bodyId: box.id, kind: "face", index: j }])!.d;
+    expect(at(top, bottom)).toBeCloseTo(20, 6);
+    expect(at(top, front)).toBeCloseTo(0, 6); // they share an edge
+  });
+});
+
+describe("pattern direction picked on the model", () => {
+  it("repeats along a picked edge and around a picked round face", () => {
+    const doc = newDocument();
+    const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature; // 40 x 30 x 20 at the origin
+    const cyl = makePrimitive(doc, "cylinder") as PrimitiveFeature;
+    cyl.position = ["100", "0", "0"];
+    push(doc, cyl, true);
+    const built = new Builder().regen(doc, "final").bodies;
+    const b = built.find((x) => x.id === box.id)!;
+    const yEdge = b.edges.find((e) => Math.abs(Math.abs(e.tangent[1]) - 1) < 1e-6)!;
+    const side = built.find((x) => x.id === cyl.id)!.faces.find((x) => x.surface === "CYLINDRE")!;
+    const pattern = (axisGeom: object, kind: "linear" | "circular") => {
+      const d = structuredClone(doc);
+      const p = { id: uid(), type: "pattern", name: "P", bodyId: box.id, pattern: kind, axis: "x", axisGeom, count: "3", spacing: "50", angle: "360", merge: false } as unknown as Feature;
+      d.features.push(p);
+      const r = new Builder().regen(d, "final");
+      ok(r);
+      return r.bodies.find((x) => x.id === p.id)!.bbox;
+    };
+    const lin = pattern({ edge: { bodyId: box.id, ...yEdge } }, "linear");
+    expect(lin[1][1] - lin[0][1]).toBeCloseTo(80, 3); // two copies 50 apart along Y, not the default X
+    expect(lin[1][0] - lin[0][0]).toBeCloseTo(40, 3);
+    const circ = pattern({ face: { bodyId: cyl.id, ...side } }, "circular");
+    expect(circ[1][0]).toBeGreaterThan(150); // swung round the cylinder at x = 100
+  });
+});
+
+describe("shell after a fillet", () => {
+  // A 40 x 30 x 20 box with its top edges rounded, then opened at the top.
+  const shelled = (allTop: boolean, wall: string) => {
+    const doc = newDocument();
+    const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+    const b = new Builder().regen(doc, "final").bodies[0]!;
+    const edges = b.edges.filter((x) => Math.abs(x.mid[2] - 20) < 1e-6 && (allTop || Math.abs(x.mid[1] + 15) < 1e-6));
+    push(doc, { id: uid(), type: "fillet", name: "F", edges: edges.map((e) => ({ bodyId: box.id, ...e })), radius: "2" } as Feature);
+    const filleted = new Builder().regen(doc, "final").bodies[0]!;
+    const top = filleted.faces.find((f) => f.surface === "PLANE" && f.normal[2] > 0.99)!;
+    push(doc, { id: uid(), type: "shell", name: "S", bodyId: box.id, faces: [{ bodyId: box.id, ...top }], thickness: wall } as Feature);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    return { before: filleted.volume, after: r.bodies[0]!.volume };
+  };
+  it("hollows a filleted box (it used to come back unchanged)", () => {
+    for (const [all, wall] of [[false, "2"], [false, "3"], [true, "1.5"]] as const) {
+      const { before, after } = shelled(all, wall);
+      expect(after, `${all} ${wall}`).toBeLessThan(before * 0.6);
+      expect(after).toBeGreaterThan(before * 0.15);
+    }
+  });
+});
+
+describe("chamfer types", () => {
+  // A 40 x 30 x 20 box; the top front edge (40 long) is cut, so the removed volume is a triangle x 40.
+  const cut = (set: (c: Extract<Feature, { type: "chamfer" }>) => void) => {
+    const doc = newDocument();
+    const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+    const b = new Builder().regen(doc, "final").bodies[0]!;
+    const i = b.edges.findIndex((e) => Math.abs(e.mid[1] + 15) < 1e-6 && Math.abs(e.mid[2] - 20) < 1e-6);
+    const c = { id: uid(), type: "chamfer", name: "C", edges: [{ bodyId: box.id, ...b.edges[i]! }], distance: "2" } as Extract<Feature, { type: "chamfer" }>;
+    set(c);
+    push(doc, c);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    return 40 * 30 * 20 - r.bodies[0]!.volume;
+  };
+  it("cuts equal, two-distance and distance-angle chamfers", () => {
+    expect(cut(() => {})).toBeCloseTo(0.5 * 2 * 2 * 40, 1);
+    expect(cut((c) => ((c.mode = "two"), (c.distance2 = "6")))).toBeCloseTo(0.5 * 2 * 6 * 40, 1);
+    expect(cut((c) => ((c.mode = "two"), (c.distance2 = "6"), (c.flip = true)))).toBeCloseTo(0.5 * 2 * 6 * 40, 1);
+    expect(cut((c) => ((c.mode = "angle"), (c.distance = "4"), (c.angle = "45")))).toBeCloseTo(0.5 * 4 * 4 * 40, 1);
+  });
+});
+
+describe("bounding solid", () => {
+  it("encloses a cylinder with a tight box and cylinder, plus padding", () => {
+    const doc = newDocument();
+    const cyl = push(doc, makePrimitive(doc, "cylinder"), true) as PrimitiveFeature;
+    cyl.radius = "10";
+    cyl.height = "30";
+    const box = push(doc, { id: uid("bs"), type: "boundingSolid", name: "B", bodies: [cyl.id], shape: "box", padding: "1", axis: "z" } as Feature);
+    const tube = push(doc, { id: uid("bs"), type: "boundingSolid", name: "C", bodies: [cyl.id], shape: "cylinder", padding: "0", axis: "z" } as Feature);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    const vol = (id: string) => r.bodies.find((b) => b.id === id)!.volume;
+    expect(vol(box.id) / (22 * 22 * 32)).toBeCloseTo(1, 2);
+    expect(vol(tube.id) / (Math.PI * 100 * 30)).toBeCloseTo(1, 2);
   });
 });

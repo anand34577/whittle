@@ -8,12 +8,12 @@
  * friendly message (and, where possible, a one-click fix) and later features
  * keep building on the last good state.
  */
-import { type BodyOp, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, entityOutline, expandSketch, frameAxes, planeOrigin, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
-import { Drawing, type Edge, type Face, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
+import { type BodyOp, type EdgeRef, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, entityOutline, expandSketch, frameAxes, planeOrigin, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
+import { Drawing, type Edge, type Face, type FaceFinder, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeSolid, Vector, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
 import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import { stlToShape } from "./stl";
-import { constructFrame } from "./construct";
+import { circleOf, constructFrame } from "./construct";
 import { surfaceTool, prismSurface, revolveSurface } from "./surface";
 import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
@@ -686,7 +686,7 @@ export class Builder {
             const h = ev.num(f.height, "length", "Height");
             if (r <= 0 || h <= 0) throw new FeatureError("The outer radius and height must be greater than zero.");
             if (inner <= 0 || inner >= r) {
-              throw new FeatureError("The inner radius must be positive and smaller than the outer radius.", inner >= r ? { label: `Use ${fmt(r * 0.8)} mm`, field: "radius2", value: fmt(r * 0.8) } : undefined);
+              throw new FeatureError("The inner radius must be positive and smaller than the outer radius.", inner >= r ? { label: `Use ${fmt(r * 0.8)} mm`, field: "radius2", value: `${fmt(r * 0.8)} mm` } : undefined);
             }
             tool = makeCylinder(r, h, [px, py, pz], [0, 0, 1]).cut(makeCylinder(inner, h + 2, [px, py, pz - 1], [0, 0, 1]));
             break;
@@ -745,6 +745,39 @@ export class Builder {
         return;
       }
 
+      case "boundingSolid": {
+        const ids = f.bodies.length ? f.bodies.filter((b) => bodies.has(b)) : [...bodies.keys()];
+        if (!ids.length) throw new FeatureError("There's no body to enclose yet.");
+        const pad = ev.num(f.padding, "length", "Padding");
+        // Mesh points sit on the surface (curves only sag inwards by the tolerance), so this fits tighter than OCC's box.
+        const tol = 0.01;
+        const pts: number[] = [];
+        for (const id of ids) pts.push(...bodies.get(id)!.mesh({ tolerance: tol, angularTolerance: 0.1 }).vertices);
+        const lo = [Infinity, Infinity, Infinity];
+        const hi = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < pts.length; i += 3) for (let k = 0; k < 3; k++) (lo[k] = Math.min(lo[k]!, pts[i + k]!)), (hi[k] = Math.max(hi[k]!, pts[i + k]!));
+        const grow = pad + tol;
+        if (f.shape === "box") {
+          bodies.set(f.id, makeBox([lo[0]! - grow, lo[1]! - grow, lo[2]! - grow], [hi[0]! + grow, hi[1]! + grow, hi[2]! + grow]));
+          return;
+        }
+        // ponytail: centred on the box's middle, not the smallest enclosing circle; exact for round and symmetric parts.
+        const a = { x: 0, y: 1, z: 2 }[f.axis];
+        const [u, v] = [0, 1, 2].filter((k) => k !== a) as [number, number];
+        const cu = (lo[u]! + hi[u]!) / 2;
+        const cv = (lo[v]! + hi[v]!) / 2;
+        let r = 0;
+        for (let i = 0; i < pts.length; i += 3) r = Math.max(r, Math.hypot(pts[i + u]! - cu, pts[i + v]! - cv));
+        const base: [number, number, number] = [0, 0, 0];
+        base[a] = lo[a]! - grow;
+        base[u] = cu;
+        base[v] = cv;
+        const dir: [number, number, number] = [0, 0, 0];
+        dir[a] = 1;
+        bodies.set(f.id, makeCylinder(r + grow, hi[a]! - lo[a]! + 2 * grow, base, dir));
+        return;
+      }
+
       case "scale": {
         const id = f.bodyId ?? lastBody(bodies);
         if (!id || !bodies.has(id)) throw new FeatureError("Pick a body to scale.");
@@ -791,12 +824,35 @@ export class Builder {
         const end = f.type === "fillet" && f.radius2 ? ev.num(f.radius2, "length", "End radius") : null;
         if (end !== null && end <= 0) throw new FeatureError("The end radius must be greater than zero.");
         const ratio = end !== null ? end / value : 1;
+        // Uneven chamfers: a second setback (scaled with the first when searching for a size that fits) or an angle.
+        const cmode = f.type === "chamfer" ? (f.mode ?? "equal") : "equal";
+        const d2 = f.type === "chamfer" && cmode === "two" ? ev.num(f.distance2 ?? f.distance, "length", "Second distance") : null;
+        const ang = f.type === "chamfer" && cmode === "angle" ? ev.num(f.angle ?? "45", "angle", "Angle") * (180 / Math.PI) : null;
+        if (d2 !== null && d2 <= 0) throw new FeatureError("The second distance must be greater than zero.");
+        if (ang !== null && (ang <= 0 || ang >= 90)) throw new FeatureError("The chamfer angle must be between 0° and 90°.");
+        const flip = f.type === "chamfer" && !!f.flip;
         const run = (size: number): Map<Id, Shape3D> => {
           const out = new Map<Id, Shape3D>();
           for (const [id, edges] of byBody) {
             const body = bodies.get(id)!;
-            const pickFn = (e: Edge): number | [number, number] | null => (edges.some((x) => x.isSame(e)) ? (end !== null ? [size, size * ratio] : size) : null);
-            out.set(id, f.type === "fillet" ? body.fillet(pickFn) : body.chamfer(pickFn as (e: Edge) => number | null));
+            if (f.type === "fillet") {
+              out.set(id, body.fillet((e: Edge) => (edges.some((x) => x.isSame(e)) ? (end !== null ? [size, size * ratio] : size) : null)));
+              continue;
+            }
+            const faces = d2 !== null || ang !== null ? body.faces : [];
+            out.set(
+              id,
+              body.chamfer((e: Edge) => {
+                if (!edges.some((x) => x.isSame(e))) return null;
+                if (d2 === null && ang === null) return size;
+                // The face the first setback is measured on: one of the two the edge joins.
+                const adj = faces.filter((fc) => fc.edges.some((x) => x.isSame(e)));
+                const face = adj[flip ? 1 : 0] ?? adj[0];
+                if (!face) return size;
+                const selectedFace = (finder: FaceFinder) => finder.when(({ element }) => element.isSame(face));
+                return d2 !== null ? { distances: [size, (d2 * size) / value] as [number, number], selectedFace } : { distance: size, angle: ang!, selectedFace };
+              }),
+            );
           }
           return out;
         };
@@ -810,7 +866,7 @@ export class Builder {
             fit
               ? `A ${fmt(value)} mm ${what} is too large for these edges. The largest that fits is about ${fmt(fit)} mm.`
               : `This ${what} can't be applied to the selected edges. Try a much smaller value or fewer edges.`,
-            fit ? { label: `Use ${fmt(fit)} mm`, field, value: fmt(fit) } : undefined,
+            fit ? { label: `Use ${fmt(fit)} mm`, field, value: `${fmt(fit)} mm` } : undefined,
           );
         }
         return warning;
@@ -830,13 +886,24 @@ export class Builder {
           if (res.uncertain) warning = "A face moved after an upstream change. Please check the selection.";
           faces.push(res.item);
         }
+        const shellOf = (v: number) => {
+          const before = measureShapeVolumeProperties(body).volume;
+          try {
+            const out = body.shell(v, (finder) => finder.when(({ element }) => faces.some((x) => x.isSame(element))));
+            // OpenCascade hands the body back untouched (and says it succeeded) when a fillet meets an open face.
+            if (Math.abs(measureShapeVolumeProperties(out).volume - before) > before * 1e-6) return out;
+          } catch {
+            /* try the other way */
+          }
+          return shellBySubtraction(body, faces, v);
+        };
         try {
-          bodies.set(bodyId, body.shell(t, (finder) => finder.when(({ element }) => faces.some((x) => x.isSame(element)))));
+          bodies.set(bodyId, shellOf(t));
         } catch {
-          const fit = largestWorking(t, (v) => body.shell(v, (finder) => finder.when(({ element }) => faces.some((x) => x.isSame(element)))));
+          const fit = largestWorking(t, shellOf);
           throw new FeatureError(
             fit ? `A ${fmt(t)} mm wall is too thick for this body. About ${fmt(fit)} mm fits.` : FRIENDLY.shell!,
-            fit ? { label: `Use ${fmt(fit)} mm`, field: "thickness", value: fmt(fit) } : undefined,
+            fit ? { label: `Use ${fmt(fit)} mm`, field: "thickness", value: `${fmt(fit)} mm` } : undefined,
           );
         }
         return warning;
@@ -869,8 +936,9 @@ export class Builder {
         if (count < 2 || count > 200) throw new FeatureError("The count must be between 2 and 200.");
         const axisFrame = f.axisRef ? sketches.get(f.axisRef)?.frame : undefined;
         if (f.axisRef && !axisFrame) throw new FeatureError("The construction axis is missing. Pick another axis.");
-        const axis = axisFrame ? axisFrame.normal : AXES[f.axis];
-        const axisAt: Vec3 = axisFrame ? axisFrame.origin : [0, 0, 0];
+        const picked = f.axisGeom ? pickedAxis(f.axisGeom, bodies) : undefined;
+        const axis = picked?.dir ?? (axisFrame ? axisFrame.normal : AXES[f.axis]);
+        const axisAt: Vec3 = picked?.at ?? (axisFrame ? axisFrame.origin : [0, 0, 0]);
         // The copies of one shape, in a fixed order (the original is left alone).
         const copiesOf = (src: Shape3D): Shape3D[] => {
           const copies: Shape3D[] = [];
@@ -972,10 +1040,21 @@ export class Builder {
     if (f.style !== "simple") {
       headD = ev.num(f.headDiameter, "length", "Head diameter");
       if (headD <= d) {
-        throw new FeatureError("The head diameter must be larger than the hole.", { label: `Use ${fmt(d * 1.8)} mm`, field: "headDiameter", value: fmt(d * 1.8) });
+        throw new FeatureError("The head diameter must be larger than the hole.", { label: `Use ${fmt(d * 1.8)} mm`, field: "headDiameter", value: `${fmt(d * 1.8)} mm` });
       }
-      headDepth = f.style === "counterbore" ? ev.num(f.headDepth, "length", "Head depth") : (headD - d) / 2;
+      let sink = Math.PI / 2;
+      if (f.style === "countersink" && f.sinkAngle) {
+        sink = ev.num(f.sinkAngle, "angle", "Countersink angle");
+        if (!(sink > 0 && sink < Math.PI)) throw new FeatureError("The countersink angle must be between 0° and 180°.");
+      }
+      headDepth = f.style === "counterbore" ? ev.num(f.headDepth, "length", "Head depth") : (headD - d) / 2 / Math.tan(sink / 2);
       if (headDepth <= 0) throw new FeatureError("The head depth must be greater than zero.");
+    }
+    let tipLen = 0;
+    if (!f.through && f.tipAngle) {
+      const a = ev.num(f.tipAngle, "angle", "Drill point angle");
+      if (!(a > 0 && a < Math.PI)) throw new FeatureError("The drill point angle must be between 0° and 180°.");
+      tipLen = d / 2 / Math.tan(a / 2);
     }
     const lift = 0.02;
     const missed: number[] = [];
@@ -986,6 +1065,8 @@ export class Builder {
       const at = add(add(planeOrigin(info.center, info.normal), scale(xDir, x)), scale(yDir, y));
       const top = add(at, scale(info.normal, lift));
       let tool: Shape3D = makeCylinder(d / 2, depth + lift, top, down);
+      // The cone a drill leaves below the full-diameter depth.
+      if (tipLen > 0) tool = tool.fuse(orient(frustumZ(d / 2, 0, tipLen), down, add(at, scale(down, depth))));
       if (f.style === "counterbore") tool = tool.fuse(makeCylinder(headD / 2, headDepth + lift, top, down));
       if (f.style === "countersink") tool = tool.fuse(orient(frustumZ(headD / 2 + lift, d / 2, headDepth + lift), down, top));
       const before = out.faces.length;
@@ -1243,7 +1324,7 @@ function coilTool(f: CoilFeature, ev: Evaluator): Shape3D {
     throw new FeatureError(`The section is too large for a ${fmt(pitch)} mm pitch, so the turns would overlap.`, {
       label: `Use ${fmt(fit)} mm`,
       field: "size",
-      value: fmt(fit),
+      value: `${fmt(fit)} mm`,
     });
   }
   if (f.section === "circle" && size / 2 >= r) throw new FeatureError("The wire is thicker than the coil radius. Increase the radius.");
@@ -1298,6 +1379,78 @@ function draftFaces(f: DraftFeature, bodies: Map<Id, Shape3D>, ev: Evaluator): s
 }
 
 /** Press/Pull on flat faces: sweep each face along its normal and join (pull) or cut (push) the result. */
+/** A pattern's direction or axis from what was clicked: a straight edge, a circle's axis, or a face's axis or normal. */
+function pickedAxis(g: { edge?: EdgeRef; face?: FaceRef }, bodies: Map<Id, Shape3D>): { at: Vec3; dir: Vec3 } {
+  if (g.edge) {
+    const r = resolveEdge(bodyForRefs(bodies, g.edge.bodyId), g.edge);
+    if (!r) throw new FeatureError("The edge for the direction is gone. Pick it again.");
+    if (r.item.geomType === "CIRCLE") {
+      const c = circleOf(r.item);
+      if (c) return { at: c.c, dir: c.n };
+    }
+    const info = edgeInfo(r.item);
+    if (info.curve !== "LINE") throw new FeatureError("Pick a straight edge, a circular edge or a round face for the direction.");
+    return { at: info.mid, dir: info.tangent };
+  }
+  if (g.face) {
+    const r = resolveFace(bodyForRefs(bodies, g.face.bodyId), g.face);
+    if (!r) throw new FeatureError("The face for the direction is gone. Pick it again.");
+    for (const e of r.item.edges) {
+      const c = e.geomType === "CIRCLE" ? circleOf(e) : null;
+      if (c && r.item.geomType !== "PLANE") return { at: c.c, dir: c.n };
+    }
+    const info = faceInfo(r.item);
+    if (info.surface === "PLANE") return { at: info.center, dir: info.normal };
+    throw new FeatureError("Pick a flat or round face, or an edge, for the direction.");
+  }
+  throw new FeatureError("Click an edge or a face on the model for the direction.", undefined, true);
+}
+
+/**
+ * Shell the long way: the body less its inward offset, opened through each removed (flat) face. Used when
+ * OpenCascade's thick solid fails, which it does whenever a fillet runs into an open face.
+ */
+function shellBySubtraction(body: Shape3D, faces: Face[], t: number): Shape3D {
+  const before = measureShapeVolumeProperties(body).volume;
+  let inner: Shape3D | undefined;
+  // ponytail: an offset exactly equal to a fillet radius degenerates; a hair more gives the sharp inner corner.
+  for (const d of [t, t * 1.001, t * 1.01]) {
+    try {
+      // Sharp (intersection) joins: rounded ones fail once the wall is thicker than a fillet's radius.
+      const oc = getOC();
+      const b = new oc.BRepOffsetAPI_MakeOffsetShape();
+      b.PerformByJoin(body.wrapped, -d, 1e-4, oc.BRepOffset_Mode.BRepOffset_Skin, false, false, oc.GeomAbs_JoinType.GeomAbs_Intersection, false, new oc.Message_ProgressRange());
+      let s = cast(downcast(b.Shape())) as unknown as Shape3D;
+      b.delete();
+      if (s.constructor.name === "Shell") s = makeSolid([s as never]) as unknown as Shape3D;
+      const v = measureShapeVolumeProperties(s).volume;
+      if (v > 1e-9 && v < before) {
+        inner = s;
+        break;
+      }
+    } catch {
+      /* next */
+    }
+  }
+  if (!inner) throw new Error("no inner offset");
+  let cutter: Shape3D = inner;
+  for (const face of faces) {
+    if (face.geomType !== "PLANE") throw new Error("curved opening");
+    const { center, normal } = faceInfo(face);
+    // The inner solid's copy of this face, pushed out through the wall.
+    const under = inner.faces.find((x) => {
+      if (x.geomType !== "PLANE") return false;
+      const i = faceInfo(x);
+      return dot(i.normal, normal) > 0.999 && Math.abs(dot(subv(i.center, center), normal) + t) < Math.max(1e-3, t * 0.01);
+    });
+    if (!under) throw new Error("no inner face");
+    cutter = cutter.fuse(basicFaceExtrusion(under, new Vector(scale(normal, t * 1.5))) as unknown as Shape3D);
+  }
+  const out = clean(body.cut(cutter));
+  if (!(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");
+  return out;
+}
+
 function offsetFaces(f: OffsetFaceFeature, bodies: Map<Id, Shape3D>, ev: Evaluator): string | undefined {
   if (f.faces.length === 0) throw new FeatureError("Click the flat faces to push or pull.", undefined, true);
   const d = ev.num(f.distance, "length", "Distance");

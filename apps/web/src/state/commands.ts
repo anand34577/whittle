@@ -28,6 +28,7 @@ import {
   startEdgeFeature,
   startEdgeFeatureAll,
   startOffset,
+  startBoundingSolid,
   startScale,
   startSplit,
   startPipe,
@@ -41,15 +42,17 @@ import {
   startRevolve,
   startShell,
   startSketch,
+  saveNamedView,
 } from "./actions";
 import { aiAvailable } from "./platform";
-import { downloadCopy, exportDesign, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
+import { downloadCopy, exportDesign, sendToSlicer, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
 import { exportSketch, importDxfIntoSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
 import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS, SURFACE_OPS, type SurfaceOp } from "@whittle/core";
-import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, deleteSketchSelection, startConstraint, makeConstrainable, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
+import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, deleteSketchSelection, startConstraint, makeConstrainable, autoConstrainSketch, copySketchSelection, pasteSketchClip, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { intersectIntoSketch } from "./sectionCurves";
+import { copySteps, folderSteps, pasteSteps } from "./steps";
 import { clearInterference, colorByComponent, makeComponent, runGeometryCheck, runInterference, runMinRadius, toggleGround } from "./inspect";
 import { THEMES } from "./prefs";
 import {
@@ -169,6 +172,7 @@ export const COMMANDS: Command[] = [
   { id: "press-pull", label: "Press / Pull", short: "Press/Pull", group: "Modify", icon: "pressPull", keys: "Q", keywords: "offset face push pull extend cut direct modeling resize", hint: "Smart tool: a profile extrudes, an edge rounds, a flat face pushes or pulls. Select first, then press Q", when: inModel, run: model(startPressPull) },
   { id: "draft", label: "Draft", group: "Modify", icon: "draft", keywords: "taper angle mould mold casting release tilt faces", hint: "Tilt faces so a part releases from a mould", when: (s) => inModel(s) && hasBodies(s), run: model(startDraft) },
   { id: "offset", label: "Offset body", short: "Offset", group: "Modify", icon: "offset", keywords: "grow shrink thicken clearance tolerance inflate", hint: "Grow or shrink a whole body (clearances and tolerances)", when: (s) => inModel(s) && hasBodies(s), run: model(startOffset) },
+  { id: "bounding-solid", label: "Bounding solid", short: "Bounding", group: "Modify", icon: "box", keywords: "stock block enclose envelope blank keep out machining raw material wrap", hint: "A box or cylinder that just encloses bodies: stock for machining, a case blank", when: (s) => inModel(s) && hasBodies(s), run: model(startBoundingSolid) },
   { id: "scale", label: "Scale body", short: "Scale", group: "Modify", icon: "scale", keywords: "resize bigger smaller enlarge reduce percent", hint: "Make a body bigger or smaller", when: (s) => inModel(s) && hasBodies(s), run: model(startScale) },
   { id: "fillet-all", label: "Round all edges", group: "Modify", icon: "fillet", keywords: "fillet every edge soften smooth whole body", hint: "Fillet every edge of a body at once", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeatureAll("fillet")) },
   { id: "chamfer-all", label: "Bevel all edges", group: "Modify", icon: "chamfer", keywords: "chamfer every edge whole body", hint: "Chamfer every edge of a body at once", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeatureAll("chamfer")) },
@@ -323,6 +327,7 @@ export const COMMANDS: Command[] = [
   { id: "tool-schamfer", label: "Sketch chamfer", short: "Chamfer", group: "Sketch", icon: "chamfer", keywords: "bevel cut corner", hint: "Click a corner where two lines meet, then type the distance", when: inSketch, run: () => setSketchTool("schamfer") },
   { id: "tool-gpoint", label: "Point", group: "Sketch", icon: "point", keywords: "dot marker datum construction", hint: "Click to place a point you can dimension and constrain to", when: inSketch, run: () => setSketchTool("gpoint") },
   { id: "make-constrainable", label: "Make constrainable", short: "Constrain", group: "Sketch", icon: "link", keywords: "convert dimension constraint lines geometry trim fillet parametric", hint: "Turn this shape into lines and arcs you can dimension, constrain, trim and fillet", when: (s) => hasEntity(s) && s.selectedEntity !== null, run: () => makeConstrainable() },
+  { id: "auto-constrain", label: "AutoConstrain", group: "Sketch", icon: "coincident", keywords: "auto constrain join ends coincident horizontal vertical fix tidy lock", hint: "Join touching ends and set level lines horizontal or vertical, in one step", when: inSketch, run: () => autoConstrainSketch() },
   { id: "geo-move", label: "Move geometry", short: "Move", group: "Sketch", icon: "move", keywords: "translate shift stretch reposition numeric", hint: "Select geometry, then type how far to move it", when: hasGeometry, run: () => void moveSelection(false) },
   { id: "geo-copy", label: "Copy geometry", short: "Copy", group: "Sketch", icon: "duplicate", keywords: "duplicate clone offset translate", hint: "Select geometry, then type how far to place the copy", when: hasGeometry, run: () => void moveSelection(true) },
   { id: "geo-scale", label: "Scale geometry", short: "Scale", group: "Sketch", icon: "scale", keywords: "resize bigger smaller factor enlarge shrink", hint: "Select geometry, then type a scale factor", when: hasGeometry, run: () => void scaleSelection() },
@@ -347,6 +352,9 @@ export const COMMANDS: Command[] = [
       run: () => startConstraint(t),
     }),
   ),
+  { id: "sketch-copy", label: "Copy sketch geometry", short: "Copy", group: "Sketch", icon: "copy", keys: "Ctrl+C", keywords: "clipboard copy", hint: "Copy the selected lines, arcs, points or shape (with their relations)", when: (s) => hasGeometry(s) || hasEntity(s), run: () => copySketchSelection() },
+  { id: "sketch-cut", label: "Cut sketch geometry", short: "Cut", group: "Sketch", icon: "copy", keys: "Ctrl+X", keywords: "clipboard cut", when: (s) => hasGeometry(s) || hasEntity(s), run: () => copySketchSelection(true) },
+  { id: "sketch-paste", label: "Paste sketch geometry", short: "Paste", group: "Sketch", icon: "copy", keys: "Ctrl+V", keywords: "clipboard paste", hint: "Paste copied geometry here, or into another sketch at the same place", when: inSketch, run: () => pasteSketchClip() },
   { id: "duplicate", label: "Duplicate shape", short: "Duplicate", group: "Sketch", icon: "duplicate", keys: "Ctrl+D", keywords: "copy clone", when: hasEntity, run: () => duplicateEntity() },
   { id: "mirror-shape-y", label: "Mirror shape left/right", short: "Mirror", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy", when: hasEntity, run: () => mirrorEntity("y") },
   { id: "mirror-shape-x", label: "Mirror shape up/down", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy", when: hasEntity, run: () => mirrorEntity("x") },
@@ -373,7 +381,7 @@ export const COMMANDS: Command[] = [
   },
   { id: "finish-sketch", label: "Finish sketch", group: "Sketch", icon: "finish", keys: "Esc", keywords: "done exit close stop", when: inSketch, run: finishSketch },
   // Document
-  { id: "ok", label: "OK (apply)", group: "Edit", icon: "check", keys: "Enter", when: (s) => !!s.session && s.mode.kind === "model", run: commitSession },
+  { id: "ok", label: "OK (apply)", group: "Edit", icon: "check", keys: "Enter", when: (s) => !!s.session && s.mode.kind === "model", run: () => commitSession(true) },
   { id: "cancel", label: "Cancel", group: "Edit", icon: "close", keys: "Esc", when: (s) => !!s.session && s.mode.kind === "model", run: cancelSession },
   { id: "undo", label: "Undo", group: "Edit", icon: "undo", keys: "Ctrl+Z", run: undo },
   { id: "redo", label: "Redo", group: "Edit", icon: "redo", keys: "Ctrl+Shift+Z", run: redo },
@@ -419,6 +427,9 @@ export const COMMANDS: Command[] = [
       mutate("Isolate", (d) => Object.entries(d.bodies).forEach(([id, b]) => (b.visible = keep.has(id))));
     },
   },
+  { id: "copy-steps", label: "Copy steps", group: "Edit", icon: "copy", keys: "Ctrl+C", keywords: "timeline feature copy clipboard duplicate history", hint: "Copy the steps picked in the timeline (Shift+click picks more)", when: inModel, run: () => copySteps() },
+  { id: "paste-steps", label: "Paste steps", group: "Edit", icon: "copy", keys: "Ctrl+V", keywords: "timeline feature paste clipboard duplicate history", hint: "Paste copied steps at the timeline marker", when: inModel, run: () => pasteSteps() },
+  { id: "folder-steps", label: "Group steps into a folder", short: "Folder", group: "Edit", icon: "folder", keywords: "timeline folder group organize collapse history", hint: "Fold the picked timeline steps into one named folder", when: inModel, run: () => void folderSteps() },
   { id: "params", label: "Parameters", group: "Document", icon: "params", keywords: "variables dimensions named values formula", hint: "Named values that drive your design", run: () => useApp.setState({ panel: "params" }) },
   { id: "new", label: "New design", group: "File", icon: "file", keywords: "blank start", run: () => newDesign() },
   { id: "new-inch", label: "New design (inches)", group: "File", icon: "file", keywords: "imperial blank", run: () => newDesign("in") },
@@ -433,9 +444,11 @@ export const COMMANDS: Command[] = [
   { id: "export", label: "Export…", group: "File", icon: "export", keywords: "step stl 3mf print slicer download cad cnc", hint: "STEP for other CAD and machining, 3MF / STL for 3D printing", run: () => useApp.setState({ panel: "export" }) },
   { id: "export-step", label: "Export STEP", short: "STEP", group: "File", icon: "export", keywords: "cad exchange interchange solid cnc machining manufacturing", hint: "Exact geometry for other CAD tools, CNC and manufacturing", run: () => void exportDesign("step") },
   { id: "export-3mf", label: "Export 3MF", short: "3MF", hint: "Mesh with units and colors, for 3D-printing slicers", group: "File", icon: "print", keywords: "3d print printer slicer color multi part", run: () => void exportDesign("3mf") },
+  { id: "send-to-slicer", label: "Send to slicer", short: "Slicer", group: "File", icon: "print", keywords: "3d print printer slicer prusa bambu orca cura 3mf make", hint: "Open the design in your 3D-printing slicer, as a 3MF with units and colors", when: (s) => (s.regen?.bodies.length ?? 0) > 0, run: () => void sendToSlicer() },
   { id: "export-stl", label: "Export STL", short: "STL", group: "File", icon: "export", keywords: "3d print slicer mesh", hint: "Universal mesh format", run: () => void exportDesign("stl") },
   // View
   { id: "view-home", label: "Home view", group: "View", icon: "home", keys: "H", keywords: "reset camera iso", run: () => requestView("home") },
+  { id: "save-view", label: "Save view", group: "View", icon: "camera", keywords: "named view bookmark camera remember angle", hint: "Remember this camera angle; it appears under Views in the browser", run: () => void saveNamedView() },
   { id: "view-fit", label: "Fit to view", group: "View", icon: "fit", keys: "Shift+H", keywords: "zoom all frame", run: () => requestView("fit") },
   ...THEMES.map((t): Command => ({
     id: `theme-${t.id}`,
@@ -450,8 +463,8 @@ export const COMMANDS: Command[] = [
   { id: "assistant", label: "AI assistant", short: "Assistant", group: "Help", icon: "assistant", keys: "Ctrl+I", keywords: "ai chat claude gpt openai ollama llm generate prompt describe design copilot", hint: "Describe a part or a change and let AI build it with Whittle's tools", when: (s) => aiAvailable(s.platform), on: (s) => s.assistant, run: () => useApp.setState({ assistant: !get().assistant }) },
   { id: "settings", label: "Settings", group: "File", icon: "settings", keys: "Ctrl+,", keywords: "preferences options theme appearance navigation mouse units profile accent density", hint: "Themes, navigation, units, workspace and more", run: () => useApp.setState({ panel: "settings" }) },
   { id: "shortcuts", label: "Keyboard shortcuts", group: "Help", icon: "keyboard", keys: "?", keywords: "keys hotkeys help", run: () => useApp.setState({ panel: "shortcuts" }) },
-  { id: "coach", label: "Guided first part", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started", run: () => useApp.setState({ coach: true, panel: null }) },
-  { id: "welcome", label: "Start screen & templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
+  { id: "coach", label: "Lessons", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started guided first part lesson course teach", hint: "Short hands-on lessons that check off as you go", run: () => useApp.setState({ coach: "pick", panel: null }) },
+  { id: "welcome", label: "Start screen & templates", short: "Templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
 ];
 
 COMMANDS.push(
@@ -572,6 +585,9 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
     if (k === ",") return "settings";
     if (k === "i") return "assistant";
     if (k === "d" && s.mode.kind === "sketch") return "duplicate";
+    if (k === "c") return s.mode.kind === "sketch" ? "sketch-copy" : "copy-steps";
+    if (k === "x" && s.mode.kind === "sketch") return "sketch-cut";
+    if (k === "v") return s.mode.kind === "sketch" ? "sketch-paste" : "paste-steps";
     return null;
   }
   if (e.altKey) return null;

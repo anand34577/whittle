@@ -16,6 +16,7 @@ import {
   newDocument,
   serializeDocument,
   uid,
+  mergeParameterCsv,
 } from "@whittle/core";
 import type { ExportFormat } from "@whittle/kernel";
 import { importFile } from "./actions";
@@ -25,7 +26,7 @@ import { deleteStored, listStored, readStored, writeStored } from "./stored";
 import { getKernel } from "./kernel";
 import { addLocalVersion, listLocalVersions } from "./localHistory";
 import { ApiError, api, apiJson, ask, invoke, tauri } from "./platform";
-import { commitSession, replaceDocument, toast, useApp } from "./store";
+import { commitSession, mutate, replaceDocument, toast, useApp } from "./store";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type FileHandle = any;
@@ -85,6 +86,23 @@ export function exportParametersCsv(rows: string[][], designName: string) {
   const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
   const csv = [["Name", "Formula", "Kind", "Value", "Note"], ...rows].map((r) => r.map(cell).join(",")).join("\r\n");
   download(new TextEncoder().encode(csv), `${safeName(designName)}-parameters.csv`, "text/csv");
+}
+
+/** Read a parameter table and merge it in: existing names get the new value, new names are added. */
+export async function importParametersCsv() {
+  let file: File;
+  try {
+    file = await pickFileFallback(".csv,text/csv,text/plain");
+  } catch {
+    return;
+  }
+  const text = await file.text();
+  let result: ReturnType<typeof mergeParameterCsv> | null = null;
+  mutate(`Import parameters from ${file.name}`, (d) => void (result = mergeParameterCsv(d.parameters, text, () => uid("p"))));
+  const r = result as ReturnType<typeof mergeParameterCsv> | null;
+  if (!r || r.updated.length + r.added.length === 0) return toast("warn", "No parameters found. The file needs a Name column and a Formula or Value column.");
+  const parts = [r.updated.length && `${r.updated.length} updated`, r.added.length && `${r.added.length} added`, r.skipped.length && `skipped ${r.skipped.join(", ")}`].filter(Boolean);
+  toast(r.skipped.length ? "warn" : "info", `Parameters: ${parts.join(", ")}.`);
 }
 
 export function safeName(name: string) {
@@ -369,6 +387,28 @@ export async function exportDesign(format: ExportFormat, bodyId?: string) {
     if (await saveBytes(file.data, `${name}.${file.ext}`, file.mime, EXPORT_FILTERS[file.ext]!)) toast("ok", `Exported ${format.toUpperCase()}`);
   } catch (e) {
     toast("error", errText(e, "Export failed."));
+  }
+}
+
+/**
+ * Send to slicer: a 3MF (units, colors, every body) straight into the slicer chosen in Settings, or whatever
+ * opens .3mf files. A browser can't start other programs, so there it downloads the file to open.
+ */
+export async function sendToSlicer() {
+  commitSession();
+  const { doc, prefs } = useApp.getState();
+  if (!useApp.getState().regen?.bodies.length) return toast("info", "There's nothing to print yet: make a body first.");
+  try {
+    const file = await withTask("Preparing for the slicer…", () => getKernel().export(doc, "3mf", undefined, prefs.meshQuality === "draft" ? "standard" : prefs.meshQuality));
+    if (tauri()) {
+      await invoke("open_in_slicer", file.data, { headers: { "x-name": encodeURIComponent(safeName(doc.name)), "x-slicer": encodeURIComponent(prefs.slicer ?? "") } });
+      toast("ok", `Opened in ${prefs.slicer || "your slicer"}`);
+    } else {
+      download(file.data, `${safeName(doc.name)}.3mf`, file.mime);
+      toast("info", "Downloaded as 3MF: open it in your slicer (PrusaSlicer, Bambu Studio, OrcaSlicer, Cura). The desktop app opens it there for you.");
+    }
+  } catch (e) {
+    toast("error", errText(e, "Couldn't send it to the slicer."));
   }
 }
 

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable, whyUnavailable } from "../state/commands";
 import { aiAvailable } from "../state/platform";
 import { hintFor } from "../state/hints";
+import { problemsOf } from "../state/problems";
+import { noteClick, noteRun, recentCommands } from "../state/learn";
 import { Activity, ActivityStrip } from "./Activity";
 import { Spinner } from "./feedback";
 import { history, mutate, setTheme, toast, useApp } from "../state/store";
@@ -99,12 +101,32 @@ export function TitleBar() {
         <button className="iconbtn" onClick={() => useApp.setState({ panel: "settings" })} title="Settings (Ctrl+,)">
           <Icon name="settings" size={18} />
         </button>
-        <button className="iconbtn" onClick={() => useApp.setState({ panel: "welcome" })} title="Start screen, your designs, templates & help">
-          <Icon name="help" size={18} />
-        </button>
+        <HelpMenu />
         <AccountButton />
       </div>
     </header>
+  );
+}
+
+/** "?": lessons, keys, templates and the assistant in one place. */
+function HelpMenu() {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  return (
+    <>
+      <button ref={setAnchor} className={`iconbtn ${open ? "is-on" : ""}`} onClick={() => setOpen(!open)} title="Help, lessons and templates" aria-haspopup="menu" aria-expanded={open}>
+        <Icon name="help" size={18} />
+      </button>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} className="groupmenu__pop" placement="bottom-end">
+        <MenuItems
+          ids={["coach", "shortcuts", "welcome", "palette", "assistant"].filter((id) => COMMANDS.some((c) => c.id === id))}
+          onPick={(c) => {
+            setOpen(false);
+            c.run();
+          }}
+        />
+      </Popover>
+    </>
   );
 }
 
@@ -117,7 +139,10 @@ function ToolButton({ c, active, big }: { c: Command; active?: boolean; big?: bo
   return (
     <button
       className={`tool ${active ? "is-active" : ""} ${big ? "tool--big" : ""}`}
-      onClick={c.run}
+      onClick={() => {
+        noteClick(c);
+        c.run();
+      }}
       disabled={!!why}
       data-tour={c.id}
       aria-pressed={active}
@@ -173,6 +198,7 @@ function SplitTool({ family, ids, activeId }: { family: string; ids: string[]; a
     lastVariant[family] = cmd.id;
     setOpen(false);
     redraw((n) => n + 1);
+    noteClick(cmd);
     cmd.run();
   };
   return (
@@ -250,6 +276,7 @@ function GroupMenu({ label, ids, asTool }: { label: string; ids: string[]; asToo
           ids={ids}
           onPick={(c) => {
             setOpen(false);
+            noteClick(c);
             c.run();
           }}
         />
@@ -324,8 +351,8 @@ function toolsFor(profile: Profile | null) {
   return {
     create: { primary: pro ? ["extrude", "revolve", "sweep", "loft", "hole"] : ["extrude", "revolve", "hole", "box"], more: [...solids, ...primitives, ...curves] },
     modify: pro
-      ? { primary: ["press-pull", "fillet", "chamfer", "shell", "draft", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "align"] }
-      : { primary: ["fillet", "chamfer", "shell", "move", "combine"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "align"] },
+      ? { primary: ["press-pull", "fillet", "chamfer", "shell", "draft", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "bounding-solid", "align"] }
+      : { primary: ["fillet", "chamfer", "shell", "move", "combine"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "bounding-solid", "align"] },
   };
 }
 
@@ -372,7 +399,7 @@ export function Toolbar() {
             </div>
             <GroupMenu
               label="Modify"
-              ids={["#Corners and pieces", ...modifyIds.slice(0, 5), "#Copy and move", ...modifyIds.slice(5), "#A whole shape", "make-constrainable", "duplicate", "rotate-shape", "mirror-shape-y", "mirror-shape-x", "offset-shape", "#Remove", "delete"]}
+              ids={["#Corners and pieces", ...modifyIds.slice(0, 5), "#Copy and move", "sketch-copy", "sketch-paste", ...modifyIds.slice(5), "#A whole shape", "make-constrainable", "duplicate", "rotate-shape", "mirror-shape-y", "mirror-shape-x", "offset-shape", "#Remove", "delete"]}
             />
           </div>
           <div className="toolgroup" role="group" aria-label="Constrain">
@@ -380,7 +407,7 @@ export function Toolbar() {
               <ToolButton c={commandById("tool-dimension")} active={active === "tool-dimension"} />
               <ConstraintGrid ids={SKETCH_CONSTRAINTS} />
             </div>
-            <GroupMenu label="Constrain" ids={["#Size", "tool-dimension", "#Relations", ...SKETCH_CONSTRAINTS, "#Dimensions", "constrain-distance", "constrain-diameter", "constrain-radius", "constrain-angle"]} />
+            <GroupMenu label="Constrain" ids={["#Size", "tool-dimension", "#Relations", "auto-constrain", ...SKETCH_CONSTRAINTS, "#Dimensions", "constrain-distance", "constrain-diameter", "constrain-radius", "constrain-angle"]} />
           </div>
           <Group
             label="Insert"
@@ -412,7 +439,7 @@ export function Toolbar() {
       </div>
       <div className="toolbar__fixed">
         <Group label="Insert" ids={["parts"]} more={["#Ready-made", "parts", "#From a file", "import"]} />
-        <Group label="Export" ids={["export"]} more={["export-step", "export-3mf", "export-stl", "screenshot", "history"]} />
+        <Group label="Export" ids={["export"]} more={["send-to-slicer", "export-step", "export-3mf", "export-stl", "screenshot", "history"]} />
       </div>
     </div>
   );
@@ -448,9 +475,87 @@ export function StatusBar() {
         ) : (
           <span className="status-dot status-dot--ok">{r ? `Built in ${Math.max(1, Math.round(r.ms))} ms` : "Ready"}</span>
         )}
+        <ProblemsButton />
         <span className="mono">{state.doc.units}</span>
       </span>
     </footer>
+  );
+}
+
+const SEVERITY_ICON = { error: "error", warning: "warning", info: "info" } as const;
+
+/** IDE-style problem counts in the status bar; click for the list, each with where it is and a fix. */
+function ProblemsButton() {
+  const state = useApp();
+  const list = problemsOf(state);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const count = (sev: string) => list.filter((p) => p.severity === sev).length;
+  const [errors, warnings, infos] = [count("error"), count("warning"), count("info")];
+  const glow = (id?: string) => {
+    const f = state.doc.features.find((x) => x.id === id);
+    useApp.setState({ hover: !f ? null : f.type === "sketch" ? { kind: "sketch", sketchId: f.id } : state.doc.bodies[f.id] ? { kind: "body", bodyId: f.id } : null });
+  };
+  return (
+    <>
+      <button
+        ref={setAnchor}
+        className={`problems-btn ${errors ? "has-errors" : warnings ? "has-warnings" : ""}`}
+        onClick={() => setOpen((o) => !o)}
+        title={list.length ? "Problems and things left to finish" : "No problems found"}
+        aria-label={`Problems: ${errors} errors, ${warnings} warnings, ${infos} notes`}
+        aria-expanded={open}
+      >
+        <span className="problems-btn__n problems-btn__n--error">
+          <Icon name="error" size={13} />
+          {errors}
+        </span>
+        <span className="problems-btn__n problems-btn__n--warning">
+          <Icon name="warning" size={13} />
+          {warnings}
+        </span>
+        {infos > 0 && (
+          <span className="problems-btn__n">
+            <Icon name="info" size={13} />
+            {infos}
+          </span>
+        )}
+      </button>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" className="problems">
+        <header className="problems__head">
+          <b>Problems</b>
+          <span className="muted">{list.length ? `${list.length} item${list.length > 1 ? "s" : ""}` : ""}</span>
+        </header>
+        {list.length === 0 && (
+          <p className="problems__empty">
+            <Icon name="check" size={16} /> Everything builds and nothing is left unfinished.
+          </p>
+        )}
+        <ul className="problems__list" onPointerLeave={() => useApp.setState({ hover: null })}>
+          {list.map((p) => (
+            <li key={p.key} className={`problems__item problems__item--${p.severity}`} onPointerEnter={() => glow(p.featureId)}>
+              <Icon name={SEVERITY_ICON[p.severity]} size={16} />
+              <div className="problems__text">
+                <b>{p.title}</b>
+                {p.detail && <span>{p.detail}</span>}
+              </div>
+              {p.fix && (
+                <button
+                  className="btn btn--small"
+                  onClick={() => {
+                    setOpen(false);
+                    useApp.setState({ hover: null });
+                    p.fix!.run();
+                  }}
+                >
+                  {p.fix.label}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Popover>
+    </>
   );
 }
 
@@ -476,18 +581,24 @@ export function Toasts() {
 
 /* ───────────────────────────── Command palette ───────────────────────────── */
 
+/** Whole words beat word starts, which beat letters inside a word ("round" finds Fillet before Ground). */
 function score(c: Command, q: string): number {
   if (!q) return 1;
-  const hay = `${c.label} ${c.keywords ?? ""} ${c.group}`.toLowerCase();
+  const label = c.label.toLowerCase();
+  const labelWords = label.split(/[^a-z0-9]+/);
+  const keyWords = `${c.keywords ?? ""} ${c.group}`.toLowerCase().split(/[^a-z0-9]+/);
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   let s = 0;
   for (const w of words) {
-    if (c.label.toLowerCase().startsWith(w)) s += 5;
-    else if (c.label.toLowerCase().includes(w)) s += 3;
-    else if (hay.includes(w)) s += 1;
+    if (label.startsWith(w)) s += 8;
+    else if (labelWords.some((x) => x.startsWith(w))) s += 6;
+    else if (keyWords.includes(w)) s += 5;
+    else if (keyWords.some((x) => x.startsWith(w))) s += 3;
+    else if (label.includes(w) || keyWords.some((x) => x.includes(w))) s += 1;
     else return 0;
   }
-  return s;
+  const recent = recentCommands().indexOf(c.id);
+  return s + (recent >= 0 ? 1.5 - recent * 0.15 : 0);
 }
 
 export function CommandPalette() {
@@ -495,9 +606,12 @@ export function CommandPalette() {
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
   // What can't run yet still shows (after what can), with the reason, so a search never comes up empty-handed.
+  // With nothing typed, what you used lately comes first.
+  const recent = q ? [] : recentCommands();
+  const rank = (id: string) => (recent.includes(id) ? recent.indexOf(id) : recent.length);
   const list = COMMANDS.map((c) => ({ c, s: score(c, q), why: q ? whyUnavailable(c, state) : null }))
     .filter((x) => x.s > 0 && (q ? true : isAvailable(x.c, state)))
-    .sort((a, b) => Number(!!a.why) - Number(!!b.why) || b.s - a.s)
+    .sort((a, b) => Number(!!a.why) - Number(!!b.why) || rank(a.c.id) - rank(b.c.id) || b.s - a.s)
     .slice(0, 12);
   const listRef = useRef<HTMLUListElement>(null);
   useEffect(() => setI(0), [q]);
@@ -506,6 +620,7 @@ export function CommandPalette() {
     if (!x) return;
     if (x.why) return toast("info", `${x.c.label}: ${x.why}`);
     close();
+    noteRun(x.c.id);
     setTimeout(x.c.run, 0);
   };
   return (
@@ -548,7 +663,7 @@ export function CommandPalette() {
               <Icon name={c.icon ?? "more"} size={18} />
               <span className="palette__label">{c.label}</span>
               {x.why ? <span className="palette__hint palette__why">{x.why}</span> : c.hint && <span className="palette__hint">{c.hint}</span>}
-              <span className="palette__group">{c.group}</span>
+              <span className="palette__group">{recent.includes(c.id) ? "Recent" : c.group}</span>
               {c.keys && <kbd>{c.keys}</kbd>}
             </li>
             );

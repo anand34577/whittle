@@ -27,11 +27,12 @@ import {
   recentFiles,
   restoreVersion,
 } from "../state/files";
-import { apiJson, ask } from "../state/platform";
-import { exportParametersCsv } from "../state/files";
+import { apiJson, ask, invoke } from "../state/platform";
+import { exportParametersCsv, importParametersCsv, sendToSlicer } from "../state/files";
 import { mutate, selectedBodyId, setPrefs, useApp } from "../state/store";
 import { promptDialog } from "../state/dialogs";
 import { TEMPLATES } from "../state/templates";
+import { LESSONS, lessonById } from "../state/lessons";
 import { Icon } from "./icons";
 import { Checkbox, Select } from "./controls";
 import { ProfilePicker } from "./Settings";
@@ -128,6 +129,16 @@ export function ParamsDialog() {
                 {v?.ok ? formatQuantity(v.value, p.kind, doc.units) : v?.error ?? ""}
               </span>
               <input className="input" placeholder={n ? `Used ${n}\u00d7` : "Unused"} value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
+              <span className="ptable__acts">
+              <button
+                className={`iconbtn ${p.favorite ? "is-on" : ""}`}
+                aria-label={p.favorite ? `Unstar ${p.name}` : `Star ${p.name}`}
+                aria-pressed={!!p.favorite}
+                title={p.favorite ? "Starred: listed first and editable from the properties panel" : "Star: list it first and edit it from the properties panel"}
+                onClick={() => update(p.id, { favorite: !p.favorite || undefined })}
+              >
+                <Icon name={p.favorite ? "starOn" : "star"} size={16} />
+              </button>
               <button
                 className="iconbtn"
                 aria-label={`Delete ${p.name}`}
@@ -141,6 +152,7 @@ export function ParamsDialog() {
               >
                 <Icon name="trash" size={16} />
               </button>
+              </span>
             </div>
           );
         })}
@@ -219,9 +231,12 @@ export function ParamsDialog() {
           </div>
         </div>
       )}
-      {doc.parameters.length > 0 && (
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
-          <button
+      {
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+          <button className="btn btn--small" onClick={() => void importParametersCsv()} title="Update and add parameters from a CSV file (Name, Formula or Value, Kind, Note)">
+            <Icon name="import" size={16} /> Import CSV
+          </button>
+          {doc.parameters.length > 0 && <button
             className="btn btn--small"
             onClick={() =>
               exportParametersCsv(
@@ -234,14 +249,55 @@ export function ParamsDialog() {
             }
           >
             <Icon name="export" size={16} /> Export CSV
-          </button>
+          </button>}
         </div>
-      )}
+      }
     </Modal>
   );
 }
 
 /* ───────────────────────────── Export ───────────────────────────── */
+
+/** One click to the slicer; on the desktop, which slicer (the ones found on this computer). */
+function SlicerCard() {
+  const desktop = useApp((s) => s.platform.kind === "desktop");
+  const slicer = useApp((s) => s.prefs.slicer ?? "");
+  const [found, setFound] = useState<string[]>([]);
+  useEffect(() => {
+    if (desktop) void invoke<string[]>("installed_slicers").then(setFound, () => setFound([]));
+  }, [desktop]);
+  return (
+    <div className="export-card export-card--slicer">
+      <span className="export-card__fmt mono">.3mf</span>
+      <span className="export-card__title">
+        Send to slicer <small>Print it now</small>
+      </span>
+      <span className="export-card__body">
+        {desktop ? "Opens the design in your slicer as a 3MF with units and colors." : "Downloads a 3MF to open in your slicer (the desktop app opens it there for you)."}
+      </span>
+      <span className="btnrow">
+        {desktop && (
+          <Select
+            size="sm"
+            ariaLabel="Slicer"
+            value={found.includes(slicer) ? slicer : ""}
+            onChange={(v) => setPrefs({ slicer: v })}
+            options={[{ value: "", label: "Default app for .3mf" }, ...found.map((n) => ({ value: n, label: n }))]}
+          />
+        )}
+        <button
+          className="btn btn--accent btn--small"
+          onClick={() => {
+            useApp.setState({ panel: null });
+            void sendToSlicer();
+          }}
+        >
+          <Icon name="print" size={14} /> Send
+        </button>
+      </span>
+    </div>
+  );
+}
 
 export function ExportDialog() {
   const bodies = useApp((s) => s.regen?.bodies.length ?? 0);
@@ -283,6 +339,7 @@ export function ExportDialog() {
               ))}
             </div>
           </div>
+          <SlicerCard />
           {items.map((it) => (
             <button
               key={it.f}
@@ -321,6 +378,7 @@ export function ShortcutsDialog() {
     ["Right-drag / middle-drag", "Pan"],
     ["Wheel", "Zoom to cursor"],
     ["Click", "Select (Shift adds)"],
+    ["Alt+click", "Select what's behind (again: further back)"],
     ["Double-click", "Edit the feature"],
     ["Right-click", "Quick actions (radial menu)"],
     ["Drop a file", "Open .whittle, import STEP / STL"],
@@ -573,12 +631,31 @@ export function Welcome() {
       </Modal>
     );
   }
+  // Newcomers and classes see the guided start first.
+  const guided = profile === "beginner" || profile === "educator";
+  const firstPart = (
+    <button
+      className={`start-card start-card--learn ${guided ? "start-card--primary" : ""}`}
+      onClick={() =>
+        void newDesign("mm", "My first part").then((ok) => {
+          if (ok) useApp.setState({ coach: "first", panel: null });
+        })
+      }
+    >
+      <Icon name="sparkStep" />
+      <span>
+        <b>Make your first part</b>
+        <small>A 2-minute guided start · 3 more lessons in Help</small>
+      </span>
+    </button>
+  );
   return (
     <Modal title="Welcome to Whittle" wide onClose={close}>
       <div className="welcome">
         <section className="welcome__start">
           <h3 className="eyebrow">Start</h3>
-          <button className="start-card start-card--primary" onClick={() => void newDesign("mm")}>
+          {guided && firstPart}
+          <button className={`start-card ${guided ? "" : "start-card--primary"}`} onClick={() => void newDesign("mm")}>
             <Icon name="file" />
             <span>
               <b>New design</b>
@@ -617,20 +694,7 @@ export function Welcome() {
               <small>Gears, fasteners, brackets, enclosures…</small>
             </span>
           </button>
-          <button
-            className="start-card start-card--learn"
-            onClick={() =>
-              void newDesign("mm", "My first part").then((ok) => {
-                if (ok) useApp.setState({ coach: true, panel: null });
-              })
-            }
-          >
-            <Icon name="sparkStep" />
-            <span>
-              <b>Make your first part</b>
-              <small>A 2-minute guided start</small>
-            </span>
-          </button>
+          {!guided && firstPart}
         </section>
         <div className="welcome__right">
           {platform === "server" && <ServerLibrary />}
@@ -725,36 +789,63 @@ export function VersionsDialog() {
 
 /* ───────────────────────────── Guided first part ───────────────────────────── */
 
+/** Steps stay ticked once done in order (closing a panel never unticks one). */
+const ticked = new Set<string>();
+
+const startLesson = (id: string) =>
+  void newDesign("mm", lessonById(id)?.title).then((ok) => {
+    if (ok) useApp.setState({ coach: id, panel: null });
+  });
+
 export function Coach() {
   const s = useApp();
   if (!s.coach) return null;
-  const doc = s.doc;
-  const sketches = doc.features.filter((f) => f.type === "sketch");
-  const hasShape = sketches.some((f) => f.type === "sketch" && f.entities.length > 0);
-  const extruded = doc.features.some((f) => f.type === "extrude");
-  const filleted = doc.features.some((f) => f.type === "fillet" && f.edges.length > 0) && !s.session;
-  const exported = false;
-  const steps = [
-    { done: sketches.length > 0 || s.mode.kind === "pickPlane", title: "Start a sketch", body: "Press S (or the Sketch button), then click the flat XY plane." },
-    { done: hasShape, title: "Draw a rectangle", body: "Click one corner, then the other. Or type 60, Tab, 40, Enter for an exact size." },
-    { done: hasShape && s.mode.kind !== "sketch", title: "Finish the sketch", body: "Press Esc or click Finish sketch (top right)." },
-    { done: extruded && !(s.session && doc.features.find((f) => f.id === s.session?.featureId)?.type === "extrude"), title: "Extrude it", body: "Press E, type a height (try 12), press Enter." },
-    { done: filleted, title: "Round the edges", body: "Click an edge (Shift-click for more), press F, set a radius, press Enter." },
-    { done: exported, title: "Share or make it", body: "Export: STEP for other CAD and machining, 3MF or STL for 3D printing." },
-  ];
-  const current = steps.findIndex((x) => !x.done);
+  const close = (
+    <button className="iconbtn" onClick={() => useApp.setState({ coach: false })} aria-label="Close lessons">
+      <Icon name="close" size={16} />
+    </button>
+  );
+  const lesson = lessonById(s.coach);
+  if (!lesson) {
+    return (
+      <aside className="coach" aria-label="Lessons">
+        <header>
+          <b>Lessons</b>
+          {close}
+        </header>
+        <p className="coach__intro">Hands-on and short. Each step ticks itself off when you do it.</p>
+        <div className="coach__lessons">
+          {LESSONS.map((l) => (
+            <button key={l.id} className="coach__lesson" onClick={() => startLesson(l.id)}>
+              <b>{l.title}</b>
+              <small>
+                {l.blurb} · {l.minutes} min
+              </small>
+            </button>
+          ))}
+        </div>
+      </aside>
+    );
+  }
+  let before = true;
+  const done = lesson.steps.map((st, i) => {
+    const key = `${lesson.id}:${i}`;
+    if (!ticked.has(key) && before && st.done(s)) ticked.add(key);
+    before = ticked.has(key);
+    return before;
+  });
+  const current = done.indexOf(false);
+  const next = LESSONS[LESSONS.indexOf(lesson) + 1];
   return (
-    <aside className="coach" aria-label="Guided first part">
+    <aside className="coach" aria-label={lesson.title}>
       <header>
-        <b>Your first part</b>
-        <button className="iconbtn" onClick={() => useApp.setState({ coach: false })} aria-label="Close guide">
-          <Icon name="close" size={16} />
-        </button>
+        <b>{lesson.title}</b>
+        {close}
       </header>
       <ol>
-        {steps.map((st, i) => (
-          <li key={st.title} className={st.done ? "is-done" : i === current ? "is-current" : ""}>
-            <span className="coach__dot">{st.done ? <Icon name="check" size={12} /> : i + 1}</span>
+        {lesson.steps.map((st, i) => (
+          <li key={st.title} className={done[i] ? "is-done" : i === current ? "is-current" : ""}>
+            <span className="coach__dot">{done[i] ? <Icon name="check" size={12} /> : i + 1}</span>
             <div>
               <b>{st.title}</b>
               {i === current && <p>{st.body}</p>}
@@ -762,10 +853,29 @@ export function Coach() {
           </li>
         ))}
       </ol>
-      {current === steps.length - 1 && (
-        <button className="btn btn--accent btn--small" onClick={() => useApp.setState({ panel: "export", coach: false })}>
+      {lesson.id === "first" && current === lesson.steps.length - 1 && (
+        <button className="btn btn--accent btn--small" onClick={() => useApp.setState({ panel: "export" })}>
           Export now
         </button>
+      )}
+      {current === -1 && (
+        <div className="coach__done">
+          <p>
+            <Icon name="check" size={14} /> Lesson complete. Nicely done.
+          </p>
+          {next ? (
+            <button className="btn btn--accent btn--small" onClick={() => startLesson(next.id)}>
+              Next: {next.title}
+            </button>
+          ) : (
+            <button className="btn btn--small" onClick={() => useApp.setState({ coach: false })}>
+              Close
+            </button>
+          )}
+          <button className="btn btn--ghost btn--small" onClick={() => useApp.setState({ coach: "pick" })}>
+            All lessons
+          </button>
+        </div>
       )}
     </aside>
   );

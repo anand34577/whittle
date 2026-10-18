@@ -57,6 +57,8 @@ export function featureInputs(f: Feature): Id[] {
     case "offset":
     case "scale":
       return f.bodyId ? [f.bodyId] : [];
+    case "boundingSolid":
+      return f.bodies;
     case "joint":
       return [...(f.bodyId ? [f.bodyId] : []), ...(f.fixedId ? [f.fixedId] : []), ...(f.axisRef ? [f.axisRef] : []), ...(f.originRef ? [f.originRef] : []), ...(f.link ? [f.link.joint] : [])];
     case "draft":
@@ -118,6 +120,8 @@ export function createsBody(f: Feature): boolean {
     case "offset":
     case "scale":
       return f.copy;
+    case "boundingSolid":
+      return true;
     case "mirror":
     case "pattern":
       return !f.merge;
