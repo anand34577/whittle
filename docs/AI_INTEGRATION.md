@@ -10,12 +10,12 @@ with a JSON Schema, that read and change the open design:
 
 | Tool | What it does |
 |---|---|
-| `get_design` | Units, parameters (formula and value), the timeline (every feature, its settings and build status) and bodies (size, bounding box, volume). |
+| `get_design` | Units, parameters (formula and value), the timeline (every feature, its settings and build status; sketches with several enclosed areas list a point inside each as `regions`), bodies (size, bounding box, volume) and the person's current `selection` (faces, edges, bodies, sketches, sketch areas), so "round these edges" means what they picked. |
 | `set_parameter` | Create or change a named parameter; any field can then use it in formulas. |
 | `add_sketch` | A sketch on an origin plane (offset, tilted) or a flat face of a body (`top`, `front`...), with shapes: rect, circle, polygon, slot, ellipse, polyline, open path, text, gear. Outline and path points can be `[x, y, "arc"]` (the middle of a three-point arc). |
-| `add_feature` | Extrude (one/two sides, through all, taper, twist, thin walls and ribs), revolve (about a sketch axis or a drawn line), loft, sweep, primitive, coil/thread, fillet/chamfer (edge selectors), shell, hole (standards-sized, counterbore/countersink), draft, mirror (offset plane), pattern (row, grid, circular), move,
+| `add_feature` | Extrude (one/two sides, through all, taper, twist, thin walls and ribs, or only some areas of the sketch with `regions`), revolve (about a sketch axis or a drawn line), loft, sweep, primitive, coil/thread, fillet/chamfer (edge selectors), shell, hole (standards-sized, counterbore/countersink), draft, mirror (offset plane), pattern (row, grid, circular), move,
  combine, split, offset, scale. |
-| `constrain_sketch` | Professional sketching on an existing sketch: add points, lines, arcs and circles (rough positions in mm), then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric `[point, point, line or centre point]`, midpoint `[point, line]`, collinear `[line, line]`) and driving dimensions (distance, radius, angle) whose values may be formulas. Refer to points as `"L1.start"`, `"A1.center"`, `"origin"`; axes as `"xaxis"`, `"yaxis"`. Also `trim` / `extend` (`{curve, at: [x, y]}`) and `delete`. Answers with the ids of named items and the solver state (`full`, `under` with `dof`, `over` with a message naming the conflicting constraints, or `error`). `add_sketch` accepts an empty `shapes` list for this. |
+| `constrain_sketch` | Professional sketching on an existing sketch: add points, lines, arcs and circles (rough positions in mm), then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric `[point, point, line or centre point]`, midpoint `[point, line]`, collinear `[line, line]`) and driving dimensions (distance, radius, diameter of a circle, angle) whose values may be formulas. Refer to points as `"L1.start"`, `"A1.center"`, `"origin"`; axes as `"xaxis"`, `"yaxis"`. Also `trim` / `extend` (`{curve, at: [x, y]}`) and `delete`. Answers with the ids of named items and the solver state (`full`, `under` with `dof`, `over` with a message naming the conflicting constraints, or `error`). `add_sketch` accepts an empty `shapes` list for this. |
 | `update_feature` | Change settings of any feature or replace a sketch's shapes. |
 | `delete_feature` | Remove a step. |
 | `set_body_appearance` | Rename, color, finish, visibility. |
@@ -29,7 +29,8 @@ Rules every operation follows:
   (`ok`, `warning`, `error`, `incomplete`), the kernel's message and, where there is one, a
   `suggested_fix` (for example the largest fillet radius that fits). Models use this to self-correct.
 - **Selectors, not fingerprints.** Faces and edges are chosen semantically (`face: "top"`,
-  `edges: "vertical"`), so a model never handles geometric hashes.
+  `edges: "vertical"`), or as `"selected"` for exactly what the person picked in the view, so a model
+  never handles geometric hashes.
 - **Formulas everywhere.** Any number may be a formula (`"width / 2 + 3 mm"`), so designs stay editable.
 
 Scripts and other tools can use the same API from the browser console or an embedding page:
@@ -77,10 +78,17 @@ await whittle.api.run("constrain_sketch", {
 People add providers in **Settings → AI assistant**. On a Whittle server the settings and keys are kept in
 your account in the server's database (nothing is stored in the browser); without a server they stay on
 that device. Requests go directly from the browser to the chosen provider. Local servers need to allow the app's origin (Ollama:
-`OLLAMA_ORIGINS`; LM Studio: enable CORS). On a self-hosted server, `WHITTLE_AI=false` hides the
+`OLLAMA_ORIGINS`; LM Studio: enable CORS).
+
+A model server on another computer of your network (`http://192.168.1.20:11434/v1`) works too: the
+server must listen on the network (Ollama: `OLLAMA_HOST=0.0.0.0`), and the app must be opened over
+`http://`, because browsers never let an HTTPS page call a plain-HTTP address other than `localhost`.
+If Whittle is served over HTTPS, put the model server behind HTTPS as well. On a self-hosted server, `WHITTLE_AI=false` hides the
 assistant and keeps the strict browser security policy.
-The desktop app does not offer the assistant: its security policy blocks connections to outside
-servers, so it would not work there.
+The desktop app offers the assistant too, and is the simplest way to use a model running on the same
+computer. Its requests come from the app's own origin (`http://tauri.localhost` on Windows,
+`tauri://localhost` elsewhere), so a local server must allow it: set `OLLAMA_ORIGINS=*` for Ollama, or
+enable CORS in LM Studio.
 
 
 The loop is capped at 24 turns per request, every step is shown in the panel (expand a step to see the

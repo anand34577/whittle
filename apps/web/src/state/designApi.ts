@@ -27,6 +27,8 @@ import {
   SKETCH_REFS,
   addArc,
   addCircle,
+  addEllipse,
+  pointAt,
   addConstraint,
   addLine,
   addPoint,
@@ -81,7 +83,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
   {
     name: "get_design",
     description:
-      "Read the open design: units, parameters, every feature in timeline order (with its settings and build status), and every body (size, volume, bounding box). Call this first, and again after changes when you need ids.",
+      "Read the open design: units, parameters, every feature in timeline order (with its settings and build status; sketches with several enclosed areas list a point inside each as `regions`), every body (size, volume, bounding box), and what the person has selected in the view (`selection`: when they say \"this\" or \"these\", they mean it). Call this first, and again after changes when you need ids.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -154,7 +156,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
   {
     name: "constrain_sketch",
     description:
-      "Professional parametric sketching on an existing sketch: add points, lines, arcs and circles that a constraint solver positions, then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric, midpoint, collinear) and driving dimensions (distance, radius, angle) whose values may be formulas using parameters. Positions you give are rough guesses in mm; constraints and dimensions make them exact. Closed loops of lines/arcs become solid profiles (inner loops become holes). Also trims and extends. Returns the ids of what you named and the solver state: 'full' (fully defined), 'under' (dof = freedoms left), 'over' (conflicting/redundant, with a message naming them) or 'error'.",
+      "Professional parametric sketching on an existing sketch: add points, lines, arcs and circles that a constraint solver positions, then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric, midpoint, collinear) and driving dimensions (distance, radius, diameter of a circle, angle) whose values may be formulas using parameters. Positions you give are rough guesses in mm; constraints and dimensions make them exact. Closed loops of lines/arcs become solid profiles (inner loops become holes). Also trims and extends. Returns the ids of what you named and the solver state: 'full' (fully defined), 'under' (dof = freedoms left), 'over' (conflicting/redundant, with a message naming them) or 'error'.",
     input_schema: {
       type: "object",
       properties: {
@@ -162,8 +164,8 @@ export const DESIGN_TOOLS: ToolDef[] = [
         geometry: {
           type: "array",
           description:
-            'Geometry to add, in order. Each item: {name, type: "point", at: [x, y]} | {name, type: "line", from, to} | {name, type: "arc", from, to, through: [x, y]} | {name, type: "circle", center, radius}. from / to / center are [x, y] or a reference to an existing point: a point name, or "<line or arc>.start", ".end", ".center", or "origin". Reusing a point joins the curves there.',
-          items: { type: "object", properties: { name: { type: "string" }, type: { type: "string", enum: ["point", "line", "arc", "circle"] } }, required: ["type"] },
+            'Geometry to add, in order. Each item: {name, type: "point", at: [x, y]} | {name, type: "line", from, to} | {name, type: "arc", from, to, through: [x, y]} | {name, type: "circle", center, radius} | {name, type: "ellipse", center, major: [x, y] (the end of its longer axis), minor (the shorter radius)}. from / to / center are [x, y] or a reference to an existing point: a point name, or "<line or arc>.start", ".end", ".center", "<ellipse>.major", or "origin". Reusing a point joins the curves there. The major radius of an ellipse is a distance from its .center to its .major point; its minor radius is a radius dimension on it.',
+          items: { type: "object", properties: { name: { type: "string" }, type: { type: "string", enum: ["point", "line", "arc", "circle", "ellipse"] } }, required: ["type"] },
         },
         constraints: {
           type: "array",
@@ -172,7 +174,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
           items: {
             type: "object",
             properties: {
-              type: { type: "string", enum: ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear", "distance", "radius", "angle"] },
+              type: { type: "string", enum: ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear", "distance", "radius", "diameter", "angle"] },
               refs: { type: "array", items: { type: "string" } },
               value: num,
             },
@@ -189,8 +191,8 @@ export const DESIGN_TOOLS: ToolDef[] = [
   {
     name: "add_feature",
     description: `Add a 3D feature at the end of the timeline. Types: ${[
-      "extrude {sketch, distance, extent: one|symmetric|two|through|face (through = all bodies; face = stop exactly at to_face: {body, face: top|bottom|front|back|left|right}), distance2, flip, taper, twist, thin (wall thickness: walls along outlines, open paths become ribs), thinSide: center|inside|outside, op}",
-      "revolve {sketch, axis: x|y|line (line = the sketch's first path or construction line), angle, op}",
+      "extrude {sketch, distance, extent: one|symmetric|two|through|face (through = all bodies; face = stop exactly at to_face: {body, face: top|bottom|front|back|left|right}), distance2, flip, taper, twist, thin (wall thickness: walls along outlines, open paths become ribs), thinSide: center|inside|outside, op, regions: [[x, y], ...] (optional: only the sketch areas holding these points, e.g. just the circle inside a rectangle; unset = the whole sketch with inner shapes as holes)}",
+      "revolve {sketch, axis: x|y|line (line = the sketch's first path or construction line), angle, op, regions}",
       "loft {sketches: [ids], ruled, op}",
       "sweep {profile, path, orientation: fixed|frenet, op}",
       "primitive {shape: box|cylinder|sphere|cone|torus|tube, width, depth, height, radius, radius2, position: [x,y,z], op}",
@@ -207,7 +209,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
       "split {body, plane, offset, keep: both|above|below}",
       "offset {body, distance, copy}",
       "scale {body, factor, center: body|origin, copy}",
-    ].join("; ")}. op is new|join|cut|intersect (with optional target body). Bodies and sketches can be named or given by id. Returns the feature id and whether it built.`,
+    ].join("; ")}. op is new|join|cut|intersect (with optional target body). Bodies and sketches can be named or given by id. Edge selectors: all, top, bottom, vertical, circular, or selected (what the person picked in the view); face selectors: top, bottom, front, back, left, right, or selected. Returns the feature id and whether it built.`,
     input_schema: {
       type: "object",
       properties: {
@@ -301,8 +303,14 @@ function bodyMesh(id: Id): BodyResult {
 const DIRS: Record<string, [number, number, number]> = { top: [0, 0, 1], bottom: [0, 0, -1], front: [0, -1, 0], back: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0] };
 
 function faceBySelector(id: Id, sel: unknown): FaceRef {
+  if (sel === "selected") {
+    const p = useApp.getState().selection.find((x) => x.kind === "face" && x.bodyId === id);
+    const f = p?.kind === "face" ? bodyMesh(id).faces[p.index] : undefined;
+    if (!f) throw new ApiInputError("No face of that body is selected. Ask the person to click one, or use top, bottom, front, back, left or right.");
+    return { bodyId: id, ...f };
+  }
   const dir = DIRS[String(sel)];
-  if (!dir) throw new ApiInputError(`Face selector must be one of ${Object.keys(DIRS).join(", ")}.`);
+  if (!dir) throw new ApiInputError(`Face selector must be one of ${Object.keys(DIRS).join(", ")}, selected.`);
   const b = bodyMesh(id);
   let best: { i: number; d: number } | null = null;
   b.faces.forEach((f, i) => {
@@ -318,6 +326,16 @@ function faceBySelector(id: Id, sel: unknown): FaceRef {
 
 function edgesBySelector(id: Id, sel: unknown): EdgeRef[] {
   const b = bodyMesh(id);
+  if (sel === "selected") {
+    // The edges the person picked, plus every edge of a picked face.
+    const idx = new Set<number>();
+    for (const p of useApp.getState().selection) {
+      if (p.kind === "edge" && p.bodyId === id) idx.add(p.index);
+      if (p.kind === "face" && p.bodyId === id) for (const i of b.faceEdges[p.index] ?? []) idx.add(i);
+    }
+    if (!idx.size) throw new ApiInputError("No edges of that body are selected. Ask the person to click them, or use a selector such as vertical.");
+    return [...idx].map((i) => b.edges[i]!).map((e) => ({ bodyId: id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length }));
+  }
   const [lo, hi] = b.bbox;
   const tol = Math.max(1e-3, (hi[2] - lo[2]) * 1e-4);
   const pick = b.edges.filter((e) => {
@@ -334,7 +352,7 @@ function edgesBySelector(id: Id, sel: unknown): EdgeRef[] {
       case "circular":
         return e.curve === "CIRCLE";
       default:
-        throw new ApiInputError(`Edge selector must be one of all, top, bottom, vertical, circular.`);
+        throw new ApiInputError(`Edge selector must be one of all, top, bottom, vertical, circular, selected.`);
     }
   });
   if (!pick.length) throw new ApiInputError(`No ${String(sel)} edges on that body.`);
@@ -421,6 +439,13 @@ function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
       if (!o || typeof o !== "object" || !o.body) throw new ApiInputError('to_face is {body, face}, e.g. {"body": "Body 1", "face": "bottom"}.');
       rec.toFace = faceBySelector(bodyRef(o.body), String(o.face ?? "top"));
     }
+    else if (k === "regions") {
+      if (f.type !== "extrude" && f.type !== "revolve") throw new ApiInputError(`"regions" is a setting of extrude and revolve.`);
+      if (!Array.isArray(v) || !v.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number"))) {
+        throw new ApiInputError("regions is a list of [x, y] points in the sketch, one inside each area to use (see the sketch's regions in get_design).");
+      }
+      rec.regions = v.length ? v : undefined;
+    }
     else if (k === "features") {
       if (f.type !== "pattern" && f.type !== "mirror") throw new ApiInputError(`"features" is a setting of pattern and mirror.`);
       if (!Array.isArray(v) || v.length === 0) throw new ApiInputError("features is a list of feature names or ids to repeat.");
@@ -445,9 +470,9 @@ function applySketchEdits(sk: SketchFeature, input: Record<string, unknown>): Re
     const g = geomById(sk, gid) ?? sk.constraints?.find((c) => c.id === gid);
     if (!g) throw new ApiInputError(`There's no geometry called "${base}" in ${sk.name}.`);
     if (!part) return g.id;
-    const key = ({ start: "a", end: "b", center: "c" } as const)[part as "start" | "end" | "center"];
+    const key = g.type === "ellipse" ? ({ center: "c", major: "a" } as const)[part as "center" | "major"] : ({ start: "a", end: "b", center: "c" } as const)[part as "start" | "end" | "center"];
     const p = key && (g as unknown as Record<string, unknown>)[key];
-    if (typeof p !== "string") throw new ApiInputError(`"${r}": use .start or .end on a line or arc, .center on an arc or circle.`);
+    if (typeof p !== "string") throw new ApiInputError(`"${r}": use .start or .end on a line or arc, .center on an arc, circle or ellipse, .major on an ellipse.`);
     return p;
   };
   const xy = (v: unknown, what: string): Vec2 => {
@@ -475,8 +500,18 @@ function applySketchEdits(sk: SketchFeature, input: Record<string, unknown>): Re
         gid = addCircle(sk, at(raw.center, `${label}.center`), r, !!raw.construction);
         break;
       }
+      case "ellipse": {
+        const minor = Number(raw.minor);
+        if (!(minor > 0)) throw new ApiInputError(`Ellipse "${label}" needs a minor radius greater than zero (mm).`);
+        const c = at(raw.center, `${label}.center`);
+        const major = xy(raw.major, `${label}.major`);
+        const cp = typeof c === "string" ? pointAt(sk, c) : c;
+        if (Math.hypot(major[0] - cp[0], major[1] - cp[1]) < 1e-9) throw new ApiInputError(`Ellipse "${label}": its major point is on its center.`);
+        gid = addEllipse(sk, c, major, minor, !!raw.construction);
+        break;
+      }
       default:
-        throw new ApiInputError(`Geometry type is point, line, arc or circle (got "${String(raw.type)}").`);
+        throw new ApiInputError(`Geometry type is point, line, arc, circle or ellipse (got "${String(raw.type)}").`);
     }
     if (raw.name) names[String(raw.name)] = gid;
   }
@@ -574,9 +609,12 @@ export function describeDesign() {
           return [k, v];
         }),
       );
-      const sol = f.type === "sketch" ? useApp.getState().regen?.sketches.find((x) => x.id === id)?.solution : undefined;
+      const built = f.type === "sketch" ? useApp.getState().regen?.sketches.find((x) => x.id === id) : undefined;
+      const sol = built?.solution;
       const solver = sol ? { solver: { state: sol.state, dof: sol.dof, ...(sol.message ? { message: sol.message } : {}) } } : {};
-      return { id, type, name, ...(i >= end ? { rolled_back: true } : {}), status: statusOf(id), ...solver, settings };
+      // Separate enclosed areas, each named by a point inside it: pass some of them as an extrude's `regions`.
+      const regions = built?.regions && built.regions.length > 1 ? { regions: built.regions.map((r) => r.at) } : {};
+      return { id, type, name, ...(i >= end ? { rolled_back: true } : {}), status: statusOf(id), ...solver, ...regions, settings };
     }),
     bodies: bodies().map((b) => ({
       id: b.id,
@@ -589,7 +627,38 @@ export function describeDesign() {
       faces: b.faces.length,
       edges: b.edges.length,
     })),
+    selection: describeSelection(),
   };
+}
+
+/** What the person has selected in the view, so "round these edges" or "extrude this" can be taken literally. */
+function describeSelection(): Record<string, unknown>[] {
+  const s = useApp.getState();
+  const name = (id: Id) => s.doc.bodies[id]?.name ?? s.doc.features.find((f) => f.id === id)?.name ?? id;
+  const r3 = (v: number[]) => v.map((x) => Math.round(x * 1000) / 1000);
+  return s.selection.map((p) => {
+    const body = "bodyId" in p ? bodies().find((b) => b.id === p.bodyId) : undefined;
+    switch (p.kind) {
+      case "face": {
+        const f = body?.faces[p.index];
+        return { kind: "face", body: name(p.bodyId), ...(f ? { surface: f.surface, center: r3(f.center), normal: r3(f.normal) } : {}) };
+      }
+      case "edge": {
+        const e = body?.edges[p.index];
+        return { kind: "edge", body: name(p.bodyId), ...(e ? { curve: e.curve, mid: r3(e.mid), length: Math.round(e.length * 1000) / 1000 } : {}) };
+      }
+      case "body":
+        return { kind: "body", body: name(p.bodyId) };
+      case "sketch":
+        return { kind: "sketch", sketch: name(p.sketchId) };
+      case "region":
+        return { kind: "sketch area", sketch: name(p.sketchId), point: p.at };
+      case "plane":
+        return { kind: "origin plane", plane: p.plane };
+      case "cplane":
+        return { kind: "construction plane", plane: name(p.id) };
+    }
+  });
 }
 
 /* ───────────────────────────── Execution ───────────────────────────── */

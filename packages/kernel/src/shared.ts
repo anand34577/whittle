@@ -87,7 +87,23 @@ function penPath(pts: [number, number][], arcs: boolean[], closed: boolean, spli
   return closed ? pen.close() : pen.done();
 }
 
-function entityDrawing(r: ResolvedEntity): Drawing {
+/** Closed loops of points along a drawing's outlines (curves sampled), for 2D export. */
+export function drawingLoops(d: Drawing, perCurve = 10): [number, number][][] {
+  type Bp = { curves?: { firstParameter: number; lastParameter: number; geomType: string; value(t: number): [number, number] }[]; blueprints?: Bp[] };
+  const loops = (bp: Bp): [number, number][][] => {
+    if (!bp.curves) return (bp.blueprints ?? []).flatMap(loops);
+    const out: [number, number][] = [];
+    for (const c of bp.curves) {
+      const n = c.geomType === "LINE" ? 1 : perCurve;
+      for (let i = 0; i < n; i++) out.push(c.value(c.firstParameter + ((c.lastParameter - c.firstParameter) * i) / n));
+    }
+    return out.length >= 3 ? [out] : [];
+  };
+  // `blueprint` only gives a drawing of one outline; text has many, so read the shape it wraps.
+  return loops((d as unknown as { innerShape: Bp }).innerShape);
+}
+
+export function entityDrawing(r: ResolvedEntity): Drawing {
   switch (r.type) {
     case "rect": {
       const d = drawRoundedRectangle(r.w, r.h, r.corner > 0 ? r.corner : 0).translate(r.x + r.w / 2, r.y + r.h / 2);
@@ -280,6 +296,65 @@ export function sketchDrawing(f: SketchFeature, ev: Evaluator, notes: SketchNote
   const parts = clusters(outlines).map((idx) => clusterDrawing(resolved, outlines, isHole, idx, notes)).filter((d): d is Drawing => d !== null);
   if (parts.length === 1) return parts[0]!;
   return joinDrawings(parts);
+}
+
+/** The separate pieces of a drawing: each one outline with its holes. */
+export function drawingPieces(d: Drawing): Drawing[] {
+  const inner = (d as unknown as { innerShape: unknown }).innerShape;
+  if (!inner) return [];
+  if (inner instanceof Blueprints) return inner.blueprints.map((b) => new Drawing(b));
+  return [d];
+}
+
+// ponytail: the arrangement costs a boolean per shape pair in a cluster; past this many shapes the cluster stays one region.
+const REGION_LIMIT = 40;
+
+/**
+ * Every enclosed area of a sketch as its own region, the way the sketch reads on screen: a circle inside a
+ * rectangle gives the ring and the disc, two overlapping circles give three pieces. Construction shapes and
+ * open paths don't enclose anything. Null when the sketch has no closed shapes.
+ */
+export function sketchRegionDrawings(f: SketchFeature, ev: Evaluator): Drawing[] | null {
+  const resolved: ResolvedEntity[] = [];
+  for (const e of f.entities) {
+    try {
+      const r = resolveEntity(e, ev);
+      if (!r.construction && !(r.type === "polyline" && r.open)) resolved.push(r);
+    } catch {
+      /* the sketch's own build reports it */
+    }
+  }
+  if (!resolved.length) return null;
+  const shape = (r: ResolvedEntity) => {
+    const d = entityDrawing(r);
+    return r.type === "gear" && r.bore > 0 ? d.cut(drawCircle(r.bore / 2).translate(r.cx, r.cy)) : d;
+  };
+  const outlines = resolved.map((r) => entityOutline(r, 48));
+  const out: Drawing[] = [];
+  for (const idx of clusters(outlines)) {
+    if (idx.length > REGION_LIMIT) {
+      out.push(...drawingPieces(idx.map((i) => shape(resolved[i]!)).reduce((a, b) => a.fuse(b))));
+      continue;
+    }
+    let regions: Drawing[] = [];
+    for (const i of idx) {
+      const s = shape(resolved[i]!);
+      const next: Drawing[] = [];
+      let rest: Drawing | null = s;
+      for (const r of regions) {
+        if (r.boundingBox.isOut(s.boundingBox)) {
+          next.push(r);
+          continue;
+        }
+        next.push(...drawingPieces(r.intersect(s)), ...drawingPieces(r.cut(s)));
+        if (rest) rest = drawingPieces(rest).length ? rest.cut(r) : null;
+      }
+      if (rest) next.push(...drawingPieces(rest));
+      regions = next;
+    }
+    out.push(...regions);
+  }
+  return out.length ? out : null;
 }
 
 export function bodyForRefs(bodies: Map<Id, Shape3D>, bodyId: Id): Shape3D {

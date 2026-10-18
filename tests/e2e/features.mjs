@@ -119,8 +119,13 @@ await step("06-sketch-new-tools", async () => {
   await page.mouse.click(cx + 110, cy);
   await page.mouse.click(cx + 170, cy);
   await waitBuilt();
-  const ents = await state(() => window.whittle.useApp.getState().doc.features.find((f) => f.type === "sketch").entities.map((e) => e.type));
-  if (ents.join() !== "rect,ellipse,gear") throw new Error("entities: " + ents.join());
+  // Rectangles and ellipses are drawn as constraint-ready geometry; gears stay whole shapes.
+  const sk = await state(() => {
+    const f = window.whittle.useApp.getState().doc.features.find((x) => x.type === "sketch");
+    const count = (t) => (f.geometry ?? []).filter((g) => g.type === t).length;
+    return { ents: f.entities.map((e) => e.type), lines: count("line"), ellipses: count("ellipse") };
+  });
+  if (sk.ents.join() !== "gear" || sk.lines !== 4 || sk.ellipses !== 1) throw new Error("sketch: " + JSON.stringify(sk));
   await expectOk("sketch");
 });
 
@@ -136,17 +141,18 @@ await step("07-text-tool", async () => {
 });
 
 await step("08-arrange-copies", async () => {
-  await state(() => {
+  const before = await state(() => {
     const s = window.whittle.useApp.getState();
     const sk = s.doc.features.find((f) => f.type === "sketch");
-    window.whittle.useApp.setState({ selectedEntity: sk.entities[1].id });
+    window.whittle.useApp.setState({ selectedEntity: sk.entities.find((e) => e.type === "gear").id });
+    return sk.entities.length;
   });
   await page.waitForTimeout(200);
   await page.locator(".shape-actions").getByRole("button", { name: "Duplicate", exact: true }).click();
   await page.locator(".shape-actions").getByRole("button", { name: /Mirror ↔/ }).click();
   await waitBuilt();
   const n = await state(() => window.whittle.useApp.getState().doc.features.find((f) => f.type === "sketch").entities.length);
-  if (n !== 6) throw new Error("expected 6 shapes, got " + n);
+  if (n !== before + 2) throw new Error(`expected ${before + 2} shapes, got ${n}`);
 });
 
 await step("09-extrude", async () => {

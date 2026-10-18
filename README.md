@@ -47,7 +47,7 @@ why and suggests a fix.
 - **Precise when it matters.** Type exact sizes while you draw, constrain sketches, drive everything from named parameters and formulas such as `width / 2 + 3 mm`. Change one number and the whole part follows.
 - **Live, visual feedback.** Every feature previews as you edit it: blue for a new body, green where it adds material, red where it cuts. Drag the on-canvas arrows or type a value; the model updates as you go.
 - **Nothing is lost.** Unlimited undo, autosave, crash recovery and a version history with restore, on every platform.
-- **Yours to keep.** Free and open source under MPL-2.0. No account, no telemetry, works fully offline.
+- **Yours to keep.** Free and open source under MPL-2.0. No account, no telemetry, works fully offline (the web app too, once opened). The desktop app checks once a day for a new version; switch that off in Settings.
 
 ## Install
 
@@ -83,7 +83,7 @@ Step-by-step guides, configuration, single sign-on and troubleshooting are in th
 **Sketch**
 - Draw on the origin planes (offset or tilted) or on any flat face: lines and outlines, open paths, rectangles, circles, ellipses, polygons, slots, splines, text and involute spur gears.
 - Type exact sizes while drawing. Snapping to points, centers, the grid and alignments.
-- Shapes inside shapes become holes automatically.
+- Shapes inside shapes become holes automatically, or click just the areas you want to extrude (only the inner circle, only the ring).
 - Constrain and dimension: coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, symmetric and more, with formulas in every dimension. Trim, extend, fillet and chamfer sketch corners.
 - Duplicate, mirror, rotate, and copy shapes around a circle or in a row.
 - Bring in artwork: SVG logos and lettering, DXF drawings, or a photo to trace.

@@ -12,6 +12,7 @@ import {
   addArc,
   addCircle,
   addConstraint,
+  addEllipse,
   addLine,
   addPoint,
   createEvaluator,
@@ -173,6 +174,76 @@ describe("constraint solving", () => {
     extrude(doc, sk, "4");
     const r = run(doc);
     expect(volume(r)).toBeCloseTo((20 * 10 + Math.PI * 25) * 4, 3);
+  });
+
+  it("sizes a circle by its diameter, and arcs only by radius", () => {
+    const { doc, sk } = setup();
+    rectangle(sk, "40", "20");
+    const c = addCircle(sk, [18, 9], 3);
+    ok(addConstraint(sk, "diameter", [c], "8"));
+    extrude(doc, sk);
+    expect(volume(run(doc))).toBeCloseTo((800 - Math.PI * 16) * 10, 3);
+    const arc = addArc(sk, [0, 30], [10, 30], [5, 35]);
+    expect("error" in addConstraint(sk, "diameter", [arc!])).toBe(true);
+  });
+
+  it("solves ellipses: sized by center-to-end distance and minor radius, cut as a hole", () => {
+    const { doc, sk } = setup();
+    rectangle(sk, "40", "20");
+    const c = addPoint(sk, [20, 10]);
+    const e = addEllipse(sk, c, [26, 11], 3);
+    const g = sk.geometry!.find((x) => x.id === e)!;
+    if (g.type !== "ellipse") throw new Error("no ellipse");
+    ok(addConstraint(sk, "distance", [c, g.a], "8"));
+    ok(addConstraint(sk, "radius", [e], "4"));
+    ok(addConstraint(sk, "horizontal", [c, g.a]));
+    extrude(doc, sk);
+    expect(volume(run(doc))).toBeCloseTo((800 - Math.PI * 8 * 4) * 10, 2);
+    const sol = solveSketch(sk, createEvaluator([], "mm"))!;
+    const r = resolveGeometry(sk, sol).find((x) => x.id === e)!;
+    expect(r.type === "ellipse" && [r.rx, r.ry, Math.abs(r.angle)].map((v) => +v.toFixed(4))).toEqual([8, 4, 0]);
+    expect(sol.state).not.toBe("over");
+  });
+
+  it("keeps an origin-centered ellipse an ellipse when its major radius shrinks", () => {
+    // Shrinking the major axis must not flatten the ellipse into a line (a solution the solver could pick).
+    const sk = setup().sk;
+    const e = addEllipse(sk, "origin", [0, 60], 5);
+    const g = sk.geometry!.find((x) => x.id === e)!;
+    if (g.type !== "ellipse") throw new Error("no ellipse");
+    ok(addConstraint(sk, "vertical", [g.c, g.a]));
+    ok(addConstraint(sk, "distance", [g.c, g.a], "50"));
+    let sol = solveSketch(sk, createEvaluator([], "mm"))!;
+    expect(sol.radii[e]).toBeGreaterThan(3);
+    ok(addConstraint(sk, "radius", [e], "6"));
+    sol = solveSketch(sk, createEvaluator([], "mm"))!;
+    expect(sol.state).toBe("full");
+    expect(sol.radii[e]).toBeCloseTo(6, 6);
+    expect(sol.points[g.a]![1]).toBeCloseTo(50, 6);
+  });
+
+  it("puts points on an ellipse and lines tangent to it", () => {
+    const { doc, sk } = setup();
+    const e = addEllipse(sk, [0, 0], [10, 0], 5);
+    const g = sk.geometry!.find((x) => x.id === e)!;
+    if (g.type !== "ellipse") throw new Error("no ellipse");
+    ok(addConstraint(sk, "coincident", [g.c, "origin"]));
+    ok(addConstraint(sk, "coincident", [g.a, "xaxis"]));
+    const p = addPoint(sk, [3, 6]);
+    ok(addConstraint(sk, "coincident", [p, e]));
+    const l = addLine(sk, [-12, 7], [12, 7]);
+    ok(addConstraint(sk, "horizontal", [l]));
+    ok(addConstraint(sk, "tangent", [l, e]));
+    const sol = solveSketch(sk, createEvaluator([], "mm"))!;
+    expect(sol.state).not.toBe("error");
+    const r = resolveGeometry(sk, sol);
+    const el = r.find((x) => x.id === e)!;
+    const pt = r.find((x) => x.id === p)!;
+    const ln = r.find((x) => x.id === l)!;
+    if (el.type !== "ellipse" || pt.type !== "point" || ln.type !== "line") throw new Error("types");
+    const [x, y] = [pt.p[0] - el.c[0], pt.p[1] - el.c[1]];
+    expect((x / el.rx) ** 2 + (y / el.ry) ** 2).toBeCloseTo(1, 5);
+    expect(Math.abs(ln.a[1] - el.c[1])).toBeCloseTo(el.ry, 4);
   });
 
   it("cuts a constrained circle as a hole and revolves about a construction line", () => {

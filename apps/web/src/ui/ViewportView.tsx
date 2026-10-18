@@ -13,6 +13,7 @@ import {
   activeEnd,
   documentEvaluator,
   entityLoops,
+  ellipsePoint,
   geomOutline,
   isSketchConsumed,
   measureDimension,
@@ -23,6 +24,7 @@ import {
   trim,
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace } from "../state/actions";
+import { regionAt } from "../state/regions";
 import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
@@ -74,21 +76,23 @@ function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, uni
   const geo = new Map(resolveGeometry(sk, sol).map((g) => [g.id, g]));
   const mid = (a: Vec2, b: Vec2): Vec2 => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   // ponytail: the axes get no label of their own; a dimension to one sits at the other end.
-  const anchor = (id: Id): Vec2 | null => {
+  const anchor = (id: Id, dim = false): Vec2 | null => {
     const g = geo.get(id);
     if (!g) return id === "origin" ? [0, 0] : null;
     if (g.type === "point") return g.p;
     if (g.type === "line") return mid(g.a, g.b);
     if (g.type === "spline") return g.pts[Math.floor(g.pts.length / 2)] ?? null;
+    // An ellipse's minor radius reads at the end of its minor axis; relations a little round from it.
+    if (g.type === "ellipse") return ellipsePoint(g, dim ? Math.PI / 2 : Math.PI / 4);
     const t = g.type === "arc" ? g.a0 + g.sweep / 2 : Math.PI / 4;
     return [g.c[0] + g.r * Math.cos(t), g.c[1] + g.r * Math.sin(t)];
   };
   const out: ConstraintMark[] = [];
   for (const c of sk.constraints ?? []) {
     if (c.value !== undefined) {
-      const pts = c.refs.map(anchor).filter((p): p is Vec2 => !!p);
+      const pts = c.refs.map((r) => anchor(r, true)).filter((p): p is Vec2 => !!p);
       if (!pts.length) continue;
-      const prefix = c.type === "radius" ? "R" : c.type === "angle" ? "∠" : "";
+      const prefix = c.type === "radius" ? "R" : c.type === "diameter" ? "⌀" : c.type === "angle" ? "∠" : "";
       // A reference dimension reads out what the sketch measures, in brackets.
       const measured = c.driven ? trim(c.type === "angle" ? (measureDimension(sk, c.type, c.refs, sol) * 180) / Math.PI : measureDimension(sk, c.type, c.refs, sol) / LENGTH_TO_MM[units], 3) : null;
       out.push({ key: c.id, id: c.id, at: pts.length > 1 ? mid(pts[0]!, pts[1]!) : pts[0]!, text: measured !== null ? `(${prefix}${measured})` : prefix + c.value, dim: true, driven: !!c.driven });
@@ -100,10 +104,10 @@ function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, uni
     if (c.type === "symmetric") {
       // Halfway between the mirrored points, which is on the mirror.
       const mirror = c.refs.find((r) => geomType(sk, r) === "line") ?? c.refs[2];
-      const [a, b] = c.refs.filter((r) => r !== mirror).map(anchor);
+      const [a, b] = c.refs.filter((r) => r !== mirror).map((r) => anchor(r));
       at = [a && b ? mid(a, b) : null];
-    } else if (c.type === "midpoint") at = c.refs.filter((r) => geomType(sk, r) === "point").map(anchor);
-    else at = c.refs.map(anchor);
+    } else if (c.type === "midpoint") at = c.refs.filter((r) => geomType(sk, r) === "point").map((r) => anchor(r));
+    else at = c.refs.map((r) => anchor(r));
     at.forEach((p, i) => p && out.push({ key: `${c.id}.${i}`, id: c.id, at: p, text: glyph, dim: false }));
   }
   return out;
@@ -360,8 +364,8 @@ export function ViewportView() {
           return s.mode.kind === "sketch" ? findFeature(s.doc, s.mode.sketchId, "sketch")?.entities ?? [] : [];
         },
         evaluator: () => documentEvaluator(useApp.getState().doc),
-        add: (e, select) => {
-          if (!select && addShapeAsGeometry(e)) return;
+        add: (e, select, sizes) => {
+          if (!select && addShapeAsGeometry(e, sizes)) return;
           sketchMutate("Add shape", (s) => {
             s.entities.push(e);
           });
@@ -398,9 +402,9 @@ export function ViewportView() {
           const o = openSketch();
           return o ? resolveGeometry(o.sk, o.sol) : [];
         },
-        addLines: (pts, closed) => {
+        addLines: (pts, closed, relations) => {
           const o = openSketch();
-          addLines(pts, closed, (p) => (typeof p === "string" ? pointAt(o!.sk, p, o!.sol) : p));
+          addLines(pts, closed, (p) => (typeof p === "string" ? pointAt(o!.sk, p, o!.sol) : p), relations);
         },
         addArc: addArcGeometry,
         addTangentArc: addTangentArcGeometry,
@@ -424,8 +428,10 @@ export function ViewportView() {
           makeConstrainable(id);
           toast("info", "Converted to lines and arcs, so it takes dimensions and constraints.");
         },
-        selectGeom: (id, additive) => {
-          const cur = useApp.getState().sketchSel;
+        selectGeom: (id, shift) => {
+          const { sketchSel: cur, pendingConstraint } = useApp.getState();
+          // A constraint waiting for its geometry collects every click.
+          const additive = shift || !!pendingConstraint;
           if (!id) return useApp.setState({ sketchSel: additive ? cur : [] });
           useApp.setState({ sketchSel: additive ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id], selectedEntity: null });
         },
@@ -452,7 +458,7 @@ export function ViewportView() {
         for (const p of picks) handlePick(p, true);
       },
       onDoubleClick: (p) => {
-        if (p?.kind === "sketch") editFeature(p.sketchId);
+        if (p?.kind === "sketch" || p?.kind === "region") editFeature(p.sketchId);
         else if (p && (p.kind === "face" || p.kind === "edge" || p.kind === "body")) editFeature(p.bodyId);
       },
       onSketchPointer: (e) => {
@@ -542,6 +548,9 @@ export function ViewportView() {
     else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
     else if (f?.type === "loft") filter = { faces: false, edges: false, planes: false, sketches: true };
+    // Areas of the sketch go in and out of the profile; "up to a face" also takes a face.
+    else if (f?.type === "extrude") filter = { faces: f.extent === "face", edges: false, planes: false, sketches: true };
+    else if (f?.type === "revolve") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     else if (mode.kind === "model" && priority !== "all") filter = { faces: priority === "face", edges: priority === "edge", planes: false, sketches: priority === "body" };
     vp.setPickFilter(filter);
@@ -591,7 +600,10 @@ export function ViewportView() {
         (sessionFeature?.type === "loft" && sessionFeature.sketches.includes(f.id)) ||
         (sessionFeature?.type === "sweep" && (sessionFeature.profile === f.id || sessionFeature.path === f.id));
       const hovered = hover?.kind === "sketch" && hover.sketchId === f.id;
-      if (!active && !selected && !hovered && !showAll && isSketchConsumed(doc, f.id)) continue;
+      // The sketch an extrude or revolve is using stays in view, so its areas can be clicked in and out.
+      const profileOf = (sessionFeature?.type === "extrude" || sessionFeature?.type === "revolve") && sessionFeature.sketch === f.id ? sessionFeature : undefined;
+      const picked = selection.some((p) => p.kind === "region" && p.sketchId === f.id);
+      if (!active && !selected && !hovered && !showAll && !profileOf && !picked && isSketchConsumed(doc, f.id)) continue;
       const shapes: SketchDrawable["shapes"] = [];
       for (const e of f.entities) {
         try {
@@ -625,7 +637,15 @@ export function ViewportView() {
         }
         shapes.push({ id: g.id, pts: geomOutline(g), closed: false, construction: g.construction, selected: isSel, hovered: isHover, tone });
       }
-      list.push({ id: f.id, frame: fr, active, shapes, markers, fill: active || selected || inLoft || !isSketchConsumed(doc, f.id) ? fr.fill : undefined });
+      const chosen = new Set((profileOf?.regions ?? []).map((q) => regionAt(fr, q)));
+      const regions = active
+        ? undefined
+        : fr.regions?.map((r, i) => ({
+            fill: r.fill,
+            selected: chosen.has(i) || selection.some((p) => p.kind === "region" && p.sketchId === f.id && p.index === i),
+            hovered: hover?.kind === "region" && hover.sketchId === f.id && hover.index === i,
+          }));
+      list.push({ id: f.id, frame: fr, active, shapes, markers, regions, profile: !!profileOf, fill: active || selected || inLoft || (!!profileOf && !profileOf.regions?.length) || !isSketchConsumed(doc, f.id) ? fr.fill : undefined });
     }
     vp.setSketches(list);
   }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature]);
@@ -761,7 +781,7 @@ export function ViewportView() {
     const p = picks[picks.length - 1];
     const anchor: Vec3 | undefined = seg
       ? [(seg[0][0] + seg[1][0]) / 2, (seg[0][1] + seg[1][1]) / 2, (seg[0][2] + seg[1][2]) / 2]
-      : p && "at" in p
+      : p && "at" in p && p.kind !== "region"
         ? p.at
         : undefined;
     return anchor ? vp.worldToScreen(anchor) : null;
@@ -777,6 +797,8 @@ export function ViewportView() {
           ? ["fillet", "chamfer", "measure"]
           : p.kind === "sketch"
             ? ["extrude", "revolve", "loft"]
+            : p.kind === "region"
+              ? ["extrude", "revolve"]
             : p.kind === "body"
               ? ["move", "mirror", "pattern", "combine", "hide"]
               : [];

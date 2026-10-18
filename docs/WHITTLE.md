@@ -129,14 +129,16 @@ Buttons are greyed out when they don't apply, and say why: hover a greyed button
 
 ### Toolbar (sketch mode)
 
-The toolbar turns orange-tinted and shows sketch tools:
+The toolbar turns orange-tinted and shows sketch tools. Each kind of shape is **one button**: it draws the way you
+used last, and the small arrow beside it lists the other ways (Rectangle: 2-point, center, 3-point).
 
-| Group | Tools |
+| Group | Buttons (arrow lists the variants) |
 |---|---|
-| Draw | Line, Rectangle, Circle, Ellipse, Polygon, Slot |
-| Special | Text, Gear, Picture to trace, Import SVG (menu adds: Calibrate picture, Flatten photo, Trace whole picture, Trace one area, Export sketch as SVG, Export sketch as DXF) |
-| Arrange | Select, Duplicate, Mirror, Rotate 90°, Construction (menu adds: Mirror up/down, Delete) |
-| Constrain | Constrained lines (engineer and designer profiles also show Arc, Circle, Trim, Extend; the menu has all of them plus every constraint) |
+| Select | Select, Construction |
+| Create | Line (line, connected line, open path) · Rectangle (2-point, center, 3-point) · Circle (center, 2-point, 3-point, tangent to 2 or 3) · Arc (3-point, center, tangent) · Polygon (inscribed, circumscribed, edge) · Ellipse (ellipse, elliptical arc) · Slot · Spline (fit-point, control-point, conic). The group menu adds Point, Text and Gear. |
+| Modify | Fillet (fillet, chamfer) · Trim (trim, extend, break) · Offset · Mirror (about a line, left/right, up/down) · Move (move, copy, stretch, scale, grid pattern). The group menu adds whole-shape tools and Delete. |
+| Constrain | Dimension, then every constraint as a small icon: coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric, midpoint, collinear. Click a constraint first and then the geometry (it stays on for the next pair; Esc stops), or select first and then click it. |
+| Insert | Project, Intersect, Text, Gear, pictures to trace, SVG and DXF, and saving the sketch as SVG or DXF |
 | | **Finish sketch** button on the right |
 
 ### Browser (left panel)
@@ -247,22 +249,37 @@ Every tool works with **two clicks** or **press, drag, release**. While drawing,
 
 ### Snapping
 
-- Snaps to endpoints, midpoints, centres, the origin and the grid (half the grid spacing).
+- Snaps to endpoints, midpoints, centres, the origin, where two curves cross, anywhere along a line, arc or circle,
+  and the grid (half the grid spacing).
 - Horizontal and vertical alignment guides appear when the cursor lines up with existing points.
-- The snap marker's shape shows what it snapped to.
+- While drawing a line, it also lines up **parallel** or **perpendicular** to any slanted line of the sketch (or of
+  the outline being drawn), and **tangent** to an arc it starts from. A dashed guide shows the line it lines up with.
+- The badge beside the cursor names the snap (Endpoint, Midpoint, Intersection, On curve, Perpendicular…) and the
+  marker's shape shows it too.
+- What you snap to is kept. A point placed on another point, a curve, a crossing or the origin stays joined to it
+  (Coincident, or Midpoint on a line's middle), and a line drawn parallel, perpendicular or tangent keeps that
+  relation. Moving things later keeps them together.
 - Hold **Alt** to place freely, without snapping.
 
-### Solids and holes
+### Profiles: solids, holes and single areas
 
-Each shape has a **Solid or hole** mode:
+Every enclosed area of a sketch is its own **profile**: a circle inside a rectangle gives the ring and the disc,
+two overlapping circles give three pieces.
 
-- **Automatic** (default): a shape that lies inside another shape becomes a hole. Shapes that touch the outer shape's edge count as inside.
-- **Solid:** always adds material.
-- **Hole:** always removes material.
+- **Extrude or Revolve without picking** uses the shaded area: a shape that lies inside another shape becomes a hole
+  (each shape's **Solid or hole** mode can override that: Automatic, Solid, Hole).
+- **Pick areas** to use only those: click an area in the view (Shift+click for more) and press **E**, or click areas
+  in and out while the Extrude is open. The panel says how many areas are used; **Clear** goes back to the whole sketch.
+- If the sketch later changes so a picked area is gone, the nearest area is used and the feature shows a warning.
 
-A gear's bore is always a hole in that gear. The **shaded area** in the sketch shows exactly what will become solid.
+A gear's bore is always a hole in that gear. If a hole touches its outline in two separate places (which would split
+the shape in two), the sketch shows a warning suggesting a slightly smaller hole.
 
-If a hole touches its outline in two separate places (which would split the shape in two), the sketch shows a warning suggesting a slightly smaller hole.
+### Sizes typed while drawing
+
+Shapes are drawn as lines and arcs you can dimension, constrain, trim and fillet (**Settings → Constraint-ready
+shapes**, on by default). Sizes typed while drawing (a rectangle's width and height, a circle's diameter) stay as
+dimensions, and a shape drawn on the origin stays tied to it, so a centred part is fully defined by its sizes.
 
 ### Construction shapes
 
@@ -270,8 +287,8 @@ If a hole touches its outline in two separate places (which would split the shap
 
 ### Constraint-driven sketching
 
-Beside the whole shapes above, a sketch can hold **solver geometry**: points, lines, arcs and circles that a
-constraint solver (PlaneGCS, the open-source solver from the FreeCAD project, compiled to WebAssembly) positions from the relations you give it.
+Beside the whole shapes above, a sketch can hold **solver geometry**: points, lines, arcs, circles, ellipses and splines that a
+constraint solver (PlaneGCS, an open-source 2D solver, compiled to WebAssembly) positions from the relations you give it.
 Both kinds live in the same sketch, so the quick tools stay exactly as they were.
 
 | Tool | Use |
@@ -298,9 +315,10 @@ picked too). The right panel lists every constraint that fits the selection:
 | Collinear | two lines: both lie on one infinite line |
 | Distance | a line (its length), two points, a point and a line, or two parallel lines |
 | Radius | a circle or arc |
+| Diameter | a circle (the Dimension tool sizes circles by diameter and arcs by radius) |
 | Angle | a line (from horizontal) or two lines |
 
-Dimensions (Distance, Radius, Angle) take a number or a **formula**, e.g. `width / 2`; changing the parameter
+Dimensions (Distance, Radius, Diameter, Angle) take a number or a **formula**, e.g. `width / 2`; changing the parameter
 re-solves the sketch and everything built from it. Edit or scrub a dimension in the panel's constraint list.
 
 **On the canvas.** Each dimension shows its value (or formula) beside what it measures; **double-click** it to edit.
@@ -672,6 +690,8 @@ The format is plain JSON, open and readable. Format 2 (Whittle 0.4) adds optiona
 - Desktop app: double-clicking a `.whittle` file opens it.
 - **Version history** (Export ▸ Version history, or Ctrl+K "history"): every save keeps the previous version, on your computer (desktop app), in the browser (web), or on the server (self-hosted). Restore one, or open it as a copy.
 - **Self-hosted server:** Save stores the design in your library on the server; if it was saved elsewhere in the meantime, you're asked before anything is overwritten.
+- **Install and work offline (web):** served over HTTPS (or from `localhost`), the web app keeps a copy of itself after the first visit, so it opens and models without a network; the browser's **Install** button adds it like a desktop program, and `.whittle` files open in it. When a newer build is published, a notice offers **Reload**. Designs on a server still need the server.
+- **New versions (desktop):** once a day the app asks the project's release page for the latest version and offers its download page. Settings ▸ About has **Check now** and a switch to turn the check off; nothing else is sent.
 
 ### Export
 
@@ -681,7 +701,7 @@ The format is plain JSON, open and readable. Format 2 (Whittle 0.4) adds optiona
 | **STL** | Any slicer or mesh tool | Binary |
 | **STEP** | Any other CAD app, CNC and manufacturing | Exact geometry |
 | **SVG** | One sketch, for laser and vinyl cutters, plotters and vector editors | True size, in millimetres |
-| **DXF** | One sketch, for laser cutters, CNC and CAM, AutoCAD | Units set to millimetres |
+| **DXF** | One sketch, for laser cutters, CNC and CAM, and other CAD programs | Units set to millimetres |
 | **PNG** | Pictures | Save image |
 | **2D drawing (SVG)** | Drawings and documentation | Export dialog. Front, top and right views in third-angle projection plus an isometric view on an A3 sheet, hidden lines dashed, overall dimensions, standard scale (1:50 to 10:1) and a title block. Opens in any browser or vector editor; print to PDF |
 
@@ -816,7 +836,7 @@ docs/              Architecture notes and this reference
 | Layer | Technology |
 |---|---|
 | Geometry kernel | OpenCascade (OCCT) compiled to WebAssembly, used through replicad; runs in a Web Worker |
-| Sketch solver | PlaneGCS (the FreeCAD project's 2D constraint solver) compiled to WebAssembly (`@salusoft89/planegcs`); runs in the same worker as part of each rebuild |
+| Sketch solver | PlaneGCS (an open-source 2D constraint solver) compiled to WebAssembly (`@salusoft89/planegcs`); runs in the same worker as part of each rebuild |
 | UI | React 19, Zustand (state), Immer (immutable edits and undo patches) |
 | 3D view | Three.js with on-demand rendering, fat lines for edges, raycast and screen-space picking |
 | Language / build | TypeScript (strict), Vite, Vitest |
@@ -843,21 +863,29 @@ Newer rebuild requests replace older pending ones.
 
 | Suite | Command | Covers |
 |---|---|---|
-| Unit and geometry | `npm test` | 214 tests, including constraint solving (solved profiles extrude to exact volumes, a dimension or parameter change re-solves, named conflicts, tangent slots, revolve about a construction line) and trim / extend; also expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part |
+| Unit and geometry | `npm test` | 278 tests, including constraint solving (solved profiles extrude to exact volumes, a dimension or parameter change re-solves, named conflicts, tangent slots, revolve about a construction line) and trim / extend; also expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part |
 | Core browser flow | `node tests/e2e/smoke.mjs [url]` | Start screen, template, parameter change, sketch with typed size, extrude, fillet, 3MF export, theme |
 | Feature tour | `node tests/e2e/features.mjs [url]` | Parts library, vase and print check, section, X-ray, new sketch tools, text, arrange tools, extrude, counterbore hole, measure, radial menu, box + combine cut, move copy, image export |
 | Modelling depth | `node tests/e2e/modeling.mjs [url]` | Arcs drawn with the mouse, offset, thin extrude, through all, grid, offset mirror, revolve about a line, ribs |
 | Constraints | `node tests/e2e/constraints.mjs [url]` | Solver lines drawn with the mouse, automatic Horizontal/Vertical, a distance typed as a formula, degrees of freedom, fully defined (green), a named conflict (red), the `constrain_sketch` API, a parameter change re-solving the extrusion, trimming a circle |
 | Audit regressions | `node tests/e2e/audit.mjs [url]` | Rib tool opens, a cut on a face removes material, Q shortcut, selected face brings its edges into Fillet, tangent chains, feature patterns, exploded view, variants, 2D drawing export |
 | Pictures | `node tests/e2e/pictures.mjs [url]` | Add a picture, trace all (exact circles), trace one area, calibrate, flatten a photo, extrude the traced shapes |
+| Advanced tools | `node tests/e2e/advanced.mjs [url]` | Sweep, draft, settings and the design API |
+| Shapes | `node tests/e2e/shapes.mjs [url]` | Rectangle and circle variants drawn as solver geometry, corner fillet and chamfer, Make constrainable |
+| Sketch editing | `node tests/e2e/sketching.mjs [url]` | Offset, mirror, patterns, the Dimension tool, Project |
+| Direct editing | `node tests/e2e/direct.mjs [url]` | Drag handles, on-canvas values, reference dimensions, first-dimension scaling, box select |
+| Drawing guidance | `node tests/e2e/guidance.mjs [url]` | Perpendicular and midpoint snaps, starting on an end, a curve or a crossing; the relations are kept, redundant ones tidied in the same undo step |
+| Curves | `node tests/e2e/curves.mjs [url]` | Ellipse drawn to typed sizes is fully defined and extrudes exactly; Dimension tool sets its major then minor radius; the assistant draws one |
+| Previews | `node tests/e2e/previews.mjs [url]` | Resting on an edge in Fillet previews it (simulated and with a real mouse) without picking it; moving off restores |
 
-Both browser suites pass against the dev server and the production build with no console errors.
+`npm run test:e2e` runs them all against the dev server (`npm run dev`); they pass with no console errors. The offline web app
+is checked by hand against `whittle-server`: after one visit, the app reopens and builds with the network off, and a new build is offered with a Reload notice.
 
 ---
 
 ## 19. Known limitations
 
-- **Sketch constraints** work on solver geometry (points, lines, arcs, circles), not on whole shapes such as rectangles or text; there are no symmetric, midpoint or collinear constraints yet (use two Coincident-on-line constraints for collinear). Outlines where three or more lines meet at one point are treated as open paths. Sketches with more than 80 points are coloured as a whole rather than piece by piece.
+- **Sketch constraints** work on solver geometry (points, lines, arcs, circles, ellipses, splines). New rectangles, circles, ellipses, polygons, slots and outlines are drawn as solver geometry (switch that off in Settings); text and gears stay whole shapes, as do outlines that mix spline points or rounding with arcs. Ellipses can't be trimmed (draw an elliptical arc instead), and a tangent on an ellipse works with lines only. Outlines where three or more lines meet at one point are treated as open paths. Sketches with more than 80 points are coloured as a whole rather than piece by piece.
 - **Not yet available:** Form (T-spline) sculpting, sheet metal (bent parts can be modelled with a thin extrude of a filleted path, but there is no flat pattern yet), plastic features (snap fit, lip), mesh repair and conversion, surface fillets, drawings with section views and per-feature dimensions (the drawing export has overall dimensions only), and Delete Face on an opening that isn't flat.
 - **Assemblies:** components, ground, joints and an **Exploded view** (Inspect menu; display only, picking is paused while parts are apart) exist, but there is no contact-driven motion study (collisions only warn).
 - **STL import:** limited to 40,000 triangles; very dense meshes should be simplified first.
@@ -865,7 +893,6 @@ Both browser suites pass against the dev server and the production build with no
 - **Fonts:** one family (IBM Plex Sans, regular and bold), Latin characters.
 - **Face sketches from v0.1:** they are now measured from the projected world origin rather than the face centre, so older v0.1 face sketches with offsets may shift.
 - **Desktop and server builds:** require platform build tools (on Windows: Visual Studio "Desktop development with C++").
-- **Name:** "Whittle" is also the name of a mining software product (GEOVIA); check trademarks before a public launch.
 
 ---
 
@@ -878,7 +905,7 @@ Both browser suites pass against the dev server and the production build with no
 | 2. Sketcher | Tools, snapping, typed sizes, text, gears, splines, arrange, arcs, constraints (PlaneGCS) with DOF colouring, trim / extend | Done |
 | 3. Part features | Extrude, revolve, loft, holes, fillet, chamfer, shell, move, combine, patterns ✅ · sweep, threads, draft | In progress |
 | 4. I/O & polish | Export, STEP/STL import, measure, section, print check, parts library | Done |
-| 5. Beta 0.9 | Signed installers, auto-update, docs site, installable web app | Next |
+| 5. Beta 0.9 | Installable, offline web app ✅ · signing in the release workflow (needs certificates) ✅ · new-version notice in the desktop app ✅ · docs site | In progress |
 | 6. v1.0 | Performance, accessibility audit, translations | |
 | 7. v1.x | Assemblies, drawings, sheet metal, direct editing | |
 | 8. v2 | Collaboration, plugins, scripting | |

@@ -6,6 +6,7 @@
 import { promptDialog } from "./dialogs";
 import { type Evaluator, type ResolvedEntity, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, parseDxf, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
 import { exportText } from "./files";
+import { getKernel } from "./kernel";
 import { simplify } from "./simplify";
 export { simplify };
 import { findFeature, sketchMutate, toast, useApp } from "./store";
@@ -18,7 +19,7 @@ export interface DrawingShape {
   loop?: Vec2[];
 }
 
-/** The closed shapes of a sketch, in millimetres (construction geometry and text are skipped). */
+/** The closed shapes of a sketch, in millimetres (construction geometry is skipped; text is outlined by the geometry engine). */
 export function sketchShapes(entities: SketchEntity[], ev: Evaluator): { shapes: DrawingShape[]; skipped: number } {
   const shapes: DrawingShape[] = [];
   let skipped = 0;
@@ -30,11 +31,8 @@ export function sketchShapes(entities: SketchEntity[], ev: Evaluator): { shapes:
       skipped++;
       continue;
     }
-    if (r.construction) continue;
-    if (r.type === "text") {
-      skipped++;
-      continue;
-    }
+    // Text outlines come from the geometry engine (exportSketch adds them).
+    if (r.construction || r.type === "text") continue;
     if (r.type === "circle") {
       shapes.push({ circle: { cx: r.cx, cy: r.cy, r: r.r } });
       continue;
@@ -123,9 +121,18 @@ export async function exportSketch(sketchId: string, format: "svg" | "dxf") {
   // Constraint-driven geometry exports at its solved positions.
   const sol = useApp.getState().regen?.sketches.find((x) => x.id === sk.id)?.solution;
   const { shapes, skipped } = sketchShapes(expandSketch(sk, sol).entities, documentEvaluator(doc));
+  if (sk.entities.some((e) => e.type === "text" && !e.construction)) {
+    try {
+      const r = await getKernel().inspect(doc, "text");
+      const loops = r.kind === "text" ? (r.items.find((x) => x.sketchId === sk.id)?.loops ?? []) : [];
+      for (const loop of loops) shapes.push({ loop });
+    } catch (e) {
+      return toast("error", `The text couldn't be outlined for export: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   if (shapes.length === 0) return toast("info", "This sketch has no closed shapes to export.");
   await exportText(format === "svg" ? shapesToSvg(shapes, `${doc.name} - ${sk.name}`) : shapesToDxf(shapes), `${doc.name} - ${sk.name}`, format);
-  if (skipped) toast("info", `${skipped} shape${skipped > 1 ? "s" : ""} (text, or with errors) couldn't be exported as outlines.`);
+  if (skipped) toast("info", `${skipped} shape${skipped > 1 ? "s" : ""} with errors couldn't be exported.`);
 }
 
 /** The sketch an export command should use: the one being edited, else the selected one. */

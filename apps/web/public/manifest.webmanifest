@@ -1,0 +1,24 @@
+{
+  "name": "Whittle",
+  "short_name": "Whittle",
+  "description": "Open-source parametric 3D CAD: sketch, model and export precise parts.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1b1a18",
+  "theme_color": "#1b1a18",
+  "categories": ["productivity", "graphics", "design"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": { "application/vnd.whittle+zip": [".whittle"] }
+    }
+  ]
+}

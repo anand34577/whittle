@@ -1,8 +1,9 @@
-/** Model checks that need the real solids: interference between bodies and tight inside corners. */
-import type { Id, Vec3 } from "@whittle/core";
+/** Model checks that need the real solids (interference between bodies, tight inside corners), and text outlines for 2D export. */
+import { type Id, type Vec3, type WhittleDocument, documentEvaluator, resolveEntity } from "@whittle/core";
 import { type Edge, type Shape3D, measureShapeVolumeProperties } from "replicad";
 import { circleOf } from "./construct";
 import { dot, sub } from "./refs";
+import { drawingLoops, entityDrawing } from "./shared";
 import type { InterferenceItem, RadiusItem } from "./protocol";
 
 const volume = (s: Shape3D) => measureShapeVolumeProperties(s).volume;
@@ -48,6 +49,26 @@ export function radii(shapes: Map<Id, Shape3D>): RadiusItem[] {
         /* skip faces we can't sample */
       }
     }
+  }
+  return out;
+}
+
+/** The outlines of every text shape, sketch by sketch (for exporting a sketch to DXF or SVG). */
+export function textOutlines(doc: WhittleDocument): { sketchId: Id; loops: [number, number][][] }[] {
+  const ev = documentEvaluator(doc);
+  const out: { sketchId: Id; loops: [number, number][][] }[] = [];
+  for (const f of doc.features) {
+    if (f.type !== "sketch") continue;
+    const loops: [number, number][][] = [];
+    for (const e of f.entities) {
+      if (e.type !== "text" || e.construction) continue;
+      try {
+        loops.push(...drawingLoops(entityDrawing(resolveEntity(e, ev))));
+      } catch {
+        /* a text with a bad value is skipped, as it is when building */
+      }
+    }
+    if (loops.length) out.push({ sketchId: f.id, loops });
   }
   return out;
 }

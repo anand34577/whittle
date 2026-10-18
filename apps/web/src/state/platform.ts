@@ -53,9 +53,9 @@ interface TauriGlobal {
   event: { listen<T>(event: string, cb: (e: { payload: T }) => void): Promise<() => void> };
 }
 
-/** The AI assistant needs to reach AI providers: the desktop app's security policy blocks outside connections, and a server can switch it off. */
+/** The AI assistant reaches AI providers straight from the app; a server can switch it off. */
 export function aiAvailable(p: Platform): boolean {
-  return p.kind === "browser" || (p.kind === "server" && p.config.ai !== false);
+  return p.kind !== "server" || p.config.ai !== false;
 }
 
 export function tauri(): TauriGlobal | null {

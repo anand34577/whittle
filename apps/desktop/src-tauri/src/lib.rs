@@ -4,7 +4,9 @@
 //! system webview. This shell adds what a desktop app needs: native open/save
 //! dialogs, reading and writing files, a recent-files list, local version
 //! history (every save keeps the previous copy), file associations and a
-//! single running instance. No account or network is involved.
+//! single running instance, and opening a newer release's download page. No
+//! account is involved; the app only goes online for the daily check for a new
+//! version (which can be switched off) and for an AI assistant the person sets up.
 
 use std::{
     collections::HashSet,
@@ -21,6 +23,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 const MAX_HISTORY: usize = 50;
 const MAX_RECENT: usize = 20;
 const OPEN_EVENT: &str = "whittle://open";
+const RELEASES: &str = "https://github.com/anand34577/whittle/releases/tag/v";
 
 #[derive(Default)]
 struct AppData {
@@ -328,6 +331,40 @@ fn open_from_os(app: &AppHandle, paths: Vec<String>) {
     }
 }
 
+/// A release version as the app compares them: three plain numbers (1.2.3).
+fn release_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.len() <= 6 && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Open a release's download page in the default browser. Only that page can be opened this way.
+#[tauri::command]
+fn open_release(version: String) -> Result<(), String> {
+    if !release_version(&version) {
+        return Err("That isn't a version number.".into());
+    }
+    let url = format!("{RELEASES}{version}");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", &url]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&url);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&url);
+        c
+    };
+    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open the browser: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -355,7 +392,8 @@ pub fn run() {
             recent_files,
             forget_recent,
             list_history,
-            read_history
+            read_history,
+            open_release
         ])
         .setup(|app| {
             let state = app.state::<AppData>();
@@ -399,6 +437,15 @@ mod tests {
         assert_eq!(percent_decode("C%3A%5CUsers%5CAda%20L%5Cpart.whittle").unwrap(), "C:\\Users\\Ada L\\part.whittle");
         assert_eq!(percent_decode("/home/ada/caf%C3%A9.whittle").unwrap(), "/home/ada/café.whittle");
         assert!(percent_decode("%zz").is_err());
+    }
+
+    #[test]
+    fn only_release_versions_open_a_page() {
+        assert!(release_version("0.11.0"));
+        assert!(release_version("12.3.45"));
+        for bad in ["0.11", "0.11.0-beta", "1.2.3/../../x", "v1.2.3", "1..3", "", "1.2.3.4"] {
+            assert!(!release_version(bad), "{bad}");
+        }
     }
 
     #[test]

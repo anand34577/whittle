@@ -59,7 +59,7 @@ await step("01-start", async () => {
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).getByRole("button", { name: /New design/ }).first().click();
   await waitBuilt();
   // Engineers get labelled tools too: icon-only toolbars are the steepest part of the learning curve.
-  await page.locator(".toolbar").getByRole("button", { name: "Fillet" }).waitFor();
+  await page.locator(".toolbar").getByRole("button", { name: "Fillet", exact: true }).waitFor();
 });
 
 await step("02-rib-tool-opens", async () => {

@@ -52,7 +52,7 @@ describe("entity to geometry", () => {
     expect(Math.abs(u[0]! * v[0]! + u[1]! * v[1]!)).toBeLessThan(1e-3);
   });
 
-  it("converts circles, polygons, slots and rounded rectangles; refuses ellipses", () => {
+  it("converts circles, polygons, slots, rounded rectangles and ellipses; refuses text", () => {
     const sk = sketch();
     expect(addEntityGeometry(sk, resolveEntity(makeEntity("circle", [0, 0], [5, 0]), ev))).toBeUndefined();
     expect(addEntityGeometry(sk, resolveEntity(makeEntity("polygon", [0, 0], [5, 0]), ev))).toBeUndefined();
@@ -62,7 +62,34 @@ describe("entity to geometry", () => {
     if (rr.type === "rect") rr.corner = "4";
     addEntityGeometry(sk, resolveEntity(rr, ev));
     expect(arcs(sk).length).toBe(6);
-    expect(addEntityGeometry(sk, resolveEntity(makeEntity("ellipse", [0, 0], [5, 3]), ev))).toMatch(/can't be converted/);
+    expect(addEntityGeometry(sk, resolveEntity(makeEntity("text", [0, 0], [5, 3]), ev))).toMatch(/whole shapes/);
+  });
+
+  it("converts an outline with rounded corners into lines and tangent arcs", () => {
+    const sk = sketch();
+    const l = makeEntity("polyline", [0, 0], [40, 0]);
+    if (l.type !== "polyline") throw new Error("no outline");
+    l.points = [["0", "0"], ["40", "0"], ["40", "10"], ["15", "10"], ["15", "30"], ["0", "30"]];
+    l.corner = "3";
+    expect(addEntityGeometry(sk, resolveEntity(l, ev))).toBeUndefined();
+    expect(arcs(sk).length).toBe(6);
+    const sol = solveSketch(sk, ev)!;
+    expect(sol.state).not.toBe("over");
+    expect(sk.constraints!.filter((c) => c.type === "radius").map((c) => c.value)).toEqual(Array(6).fill("3"));
+  });
+
+  it("converts an ellipse with its long axis as the major one, kept level", () => {
+    const sk = sketch();
+    // 3 across and 5 up: the major axis is the upright one.
+    expect(addEntityGeometry(sk, resolveEntity(makeEntity("ellipse", [0, 0], [3, 5]), ev))).toBeUndefined();
+    const sol = solveSketch(sk, ev)!;
+    expect(sol.state).toBe("under");
+    const e = resolveGeometry(sk, sol).find((g) => g.type === "ellipse")!;
+    expect(e.type === "ellipse" && [e.rx, e.ry].map((v) => +v.toFixed(3))).toEqual([5, 3]);
+    expect(e.type === "ellipse" && Math.abs(Math.cos(e.angle))).toBeLessThan(1e-6);
+    expect(sk.constraints!.map((c) => c.type)).toEqual(["vertical"]);
+    const out = expandSketch(sk, sol).entities.find((x) => x.type === "ellipse");
+    expect(out).toBeDefined();
   });
 });
 

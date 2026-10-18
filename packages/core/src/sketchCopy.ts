@@ -24,6 +24,7 @@ function closure(sk: Geo, ids: Id[]): { curves: Exclude<SketchGeom, { type: "poi
       if (g.type === "line") points.add(g.a).add(g.b);
       else if (g.type === "spline") g.pts.forEach((p) => points.add(p));
       else if (g.type === "arc") points.add(g.a).add(g.b).add(g.c);
+      else if (g.type === "ellipse") points.add(g.c).add(g.a);
       else points.add(g.c);
     }
   }
@@ -52,14 +53,15 @@ function copyThrough(sk: Geo, ids: Id[], map: (p: Vec2) => Vec2, opts: { flip?: 
     added.push(n);
   }
   for (const g of curves) {
-    const id = uid(g.type === "line" ? "l" : g.type === "arc" ? "a" : g.type === "spline" ? "s" : "c");
+    const id = uid(g.type === "line" ? "l" : g.type === "arc" ? "a" : g.type === "spline" ? "s" : g.type === "ellipse" ? "e" : "c");
     const construction = g.construction ? { construction: true } : {};
     if (g.type === "line") sk.geometry!.push({ id, type: "line", a: idMap.get(g.a)!, b: idMap.get(g.b)!, ...construction });
     else if (g.type === "spline") sk.geometry!.push({ id, type: "spline", pts: g.pts.map((p) => idMap.get(p)!), ...(g.closed ? { closed: true } : {}), ...construction });
     else if (g.type === "arc") {
       const [a, b] = opts.flip ? [g.b, g.a] : [g.a, g.b];
       sk.geometry!.push({ id, type: "arc", c: idMap.get(g.c)!, a: idMap.get(a)!, b: idMap.get(b)!, ...construction });
-    } else sk.geometry!.push({ id, type: "circle", c: idMap.get(g.c)!, r: g.r, ...construction });
+    } else if (g.type === "ellipse") sk.geometry!.push({ id, type: "ellipse", c: idMap.get(g.c)!, a: idMap.get(g.a)!, r: g.r, ...construction });
+    else sk.geometry!.push({ id, type: "circle", c: idMap.get(g.c)!, r: g.r, ...construction });
     idMap.set(g.id, id);
     added.push(id);
   }
@@ -162,9 +164,9 @@ export function scaleGeometry(sk: Geo, ids: Id[], k: number, base: Vec2): string
     }
   }
   const inside = new Set<Id>([...points, ...curves.map((c) => c.id)]);
-  for (const c of curves) if (c.type === "circle") c.r *= k;
+  for (const c of curves) if (c.type === "circle" || c.type === "ellipse") c.r *= k;
   for (const c of sk.constraints ?? []) {
-    if ((c.type === "distance" || c.type === "radius") && c.value !== undefined && c.refs.every((r) => inside.has(r) || r === "origin")) c.value = `(${c.value})*${k}`;
+    if ((c.type === "distance" || c.type === "radius" || c.type === "diameter") && c.value !== undefined && c.refs.every((r) => inside.has(r) || r === "origin")) c.value = `(${c.value})*${k}`;
   }
   return undefined;
 }

@@ -45,8 +45,8 @@ await step("01-first-run-profile", async () => {
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).getByRole("button", { name: /New design/ }).first().click();
   await waitBuilt();
   // The professional profile puts Sweep and Draft on the toolbar.
-  await page.locator(".toolbar").getByRole("button", { name: "Sweep" }).waitFor();
-  await page.locator(".toolbar").getByRole("button", { name: "Draft" }).waitFor();
+  await page.locator(".toolbar").getByRole("button", { name: "Sweep", exact: true }).waitFor();
+  await page.locator(".toolbar").getByRole("button", { name: "Draft", exact: true }).waitFor();
 });
 
 await step("02-settings-themes", async () => {

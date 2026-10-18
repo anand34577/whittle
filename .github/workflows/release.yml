@@ -9,9 +9,13 @@
 #   SHA256SUMS for every file
 #
 # Optional signing (add these repository secrets and they are used automatically):
-#   macOS:   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
-#   Windows: sign the .msi/.exe afterwards with your code-signing tool, or configure bundle.windows in tauri.conf.json
-# Without them, macOS builds are ad-hoc signed (users right-click → Open the first time).
+#   macOS:   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#            and for notarization APPLE_ID, APPLE_PASSWORD (an app-specific password), APPLE_TEAM_ID
+#   Windows: WINDOWS_CERTIFICATE (base64 .pfx), WINDOWS_CERTIFICATE_PASSWORD; the .msi and .exe are signed
+#            and timestamped (WINDOWS_TIMESTAMP_URL overrides the timestamp server)
+# Without them, macOS builds are ad-hoc signed (users right-click → Open the first time) and Windows
+# shows an "unknown publisher" prompt. The app itself checks the latest release once a day (it can be
+# switched off) and offers its download page; there is no silent self-update.
 
 name: Release
 
@@ -162,6 +166,40 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev xdg-utils
       - run: npm ci
+      - name: macOS signing (when the repository has a certificate)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Only pass on what is set: an empty APPLE_CERTIFICATE would make the build try to import nothing.
+          pass() { for v in "$@"; do printf '%s<<WHITTLE_EOF\n%s\nWHITTLE_EOF\n' "$v" "${!v}" >> "$GITHUB_ENV"; done; }
+          if [ -z "$APPLE_CERTIFICATE" ]; then echo "No certificate: the app is ad-hoc signed."; exit 0; fi
+          pass APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY
+          if [ -n "$APPLE_ID" ]; then pass APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; else echo "No Apple ID: signed but not notarized."; fi
+      - name: Windows signing (when the repository has a certificate)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) { "No certificate: the installers are not signed."; exit 0 }
+          $pfx = Join-Path $env:RUNNER_TEMP "whittle.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          $timestamp = if ($env:WINDOWS_TIMESTAMP_URL) { $env:WINDOWS_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
+          $config = Join-Path $env:RUNNER_TEMP "tauri.sign.json"
+          @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = $timestamp } } } | ConvertTo-Json -Depth 5 | Set-Content -Path $config -Encoding utf8NoBOM
+          "SIGN_ARGS=--config $config" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -169,7 +207,7 @@ jobs:
           projectPath: apps/desktop
           tauriScript: node ../../node_modules/@tauri-apps/cli/tauri.js
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ env.SIGN_ARGS }}
 
   server:
     name: Server (Linux ${{ matrix.arch }})

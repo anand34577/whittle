@@ -25,12 +25,22 @@ import {
 } from "@whittle/core";
 import type { SketchTool } from "../state/store";
 import type { SketchPointerEvent } from "./Viewport";
+import { type Relation, curveIntersections, directionsFrom, lineUp, nearestOnCurve, rayMeetsLine } from "./inference";
 
 export interface SnapInfo {
   p: Vec2;
-  kind: "grid" | "end" | "mid" | "center" | "origin" | "align" | "free";
+  kind: "grid" | "end" | "mid" | "center" | "origin" | "align" | "free" | "intersection" | "on" | Relation;
   /** The solver point (or "origin") snapped to: new geometry joins it instead of just touching it. */
   ref?: Id;
+  /** The line being drawn lines up with this line or arc (`ref` "#k" is the k-th line of the chain being drawn). */
+  rel?: { type: Relation; ref: Id };
+}
+
+/** A relation a drawn line keeps: line `seg` of the new chain is parallel / perpendicular / tangent to `ref`. */
+export interface DrawnRelation {
+  seg: number;
+  type: Relation;
+  ref: Id;
 }
 
 /** Tools that draw constraint-driven geometry. */
@@ -125,15 +135,15 @@ export interface SketchEnv {
   gridSpacing(): number;
   entities(): SketchEntity[];
   evaluator(): Evaluator;
-  /** Add a shape; `select` selects it and switches back to the Select tool. */
-  add(e: SketchEntity, select?: boolean): void;
+  /** Add a shape; `select` selects it and switches back to the Select tool. `sizes` were typed (mm) and become dimensions. */
+  add(e: SketchEntity, select?: boolean, sizes?: { width?: number; height?: number; diameter?: number; rx?: number; ry?: number; relations?: DrawnRelation[] }): void;
   select(id: Id | null): void;
   selected(): Id | null;
   move(id: Id, dx: number, dy: number, live: boolean): void;
   emit(s: SketchUIState): void;
   /** Constraint-driven geometry of the open sketch, at its solved positions. */
   geometry(): GeomResolved[];
-  addLines(pts: (Vec2 | Id)[], closed: boolean): void;
+  addLines(pts: (Vec2 | Id)[], closed: boolean, relations?: DrawnRelation[]): void;
   addArc(a: Vec2 | Id, b: Vec2 | Id, through: Vec2): void;
   /** An arc leaving the end of a line or arc smoothly, ending at the point. */
   addTangentArc(from: Id | undefined, to: Vec2): void;
@@ -172,6 +182,8 @@ export class SketchController {
   private dragging: { id: Id; last: Vec2; moved: boolean; geom?: Id[] } | null = null;
   /** Solver points the placed points snapped to (parallel to `points`). */
   private refs: (Id | undefined)[] = [];
+  /** What the line ending at each placed point lined up with (parallel to `points`, sparse). */
+  private rels: (SnapInfo["rel"] | undefined)[] = [];
   /** Tangent-circle tools: the curves picked so far. */
   private tanRefs: Id[] = [];
   private hoverEntity: Id | null = null;
@@ -194,6 +206,7 @@ export class SketchController {
   reset() {
     this.points = [];
     this.refs = [];
+    this.rels = [];
     this.tanRefs = [];
     this.arcFlags = [];
     this.arcMode = false;
@@ -244,7 +257,8 @@ export class SketchController {
     const cands: SnapInfo[] = [{ p: [0, 0], kind: "origin", ref: "origin" }];
     // Solver points first, so geometry joins them rather than just landing on them.
     const moving = new Set(this.dragging?.geom ?? []);
-    for (const g of this.env.geometry()) {
+    const geo = this.env.geometry();
+    for (const g of geo) {
       if (g.type === "point" && !moving.has(g.id)) cands.push({ p: g.p, kind: g.construction ? "center" : "end", ref: g.id });
       if (g.type === "line" && !moving.has(g.id)) cands.push({ p: [(g.a[0] + g.b[0]) / 2, (g.a[1] + g.b[1]) / 2], kind: "mid" });
     }
@@ -255,6 +269,8 @@ export class SketchController {
     // A rectangle's second corner must not lock onto the first one's row or column (that makes it flat).
     const skipFirst = (this.tool === "rect" || this.tool === "crect" || this.tool === "ellipse") && this.points.length === 1;
     if (!skipFirst) this.points.forEach((p, i) => cands.push({ p, kind: "end", ref: this.refs[i] }));
+    // Where curves cross (the new point then sits on both).
+    if (!this.dragging) for (const p of curveIntersections(geo)) cands.push({ p, kind: "intersection" });
     for (const c of cands) {
       const d = Math.hypot(c.p[0] - raw[0], c.p[1] - raw[1]);
       if (d < bestD) {
@@ -264,6 +280,25 @@ export class SketchController {
     }
     this.guides = [];
     if (best) return best;
+
+    // On a curve, or lined up with an existing line (parallel, perpendicular) or the arc the line leaves (tangent).
+    const from = this.lineStart();
+    const on = this.dragging ? null : nearestOnCurve(geo, raw, tol, moving);
+    const lined = from ? lineUp(from, raw, this.directions(geo, from), 6 * px) : null;
+    if (lined && on) {
+      // Dropping a perpendicular (or a parallel) onto the line under the pointer: both hold.
+      const g = geo.find((x) => x.id === on.curve);
+      const q = g?.type === "line" ? rayMeetsLine(from!, lined.d.dir, g.a, g.b) : null;
+      if (q && Math.hypot(q[0] - raw[0], q[1] - raw[1]) < tol) {
+        this.guides.push(lined.d.guide, [from!, q]);
+        return { p: q, kind: lined.d.type, rel: { type: lined.d.type, ref: lined.d.ref } };
+      }
+    }
+    if (on) return { p: on.p, kind: "on" };
+    if (lined) {
+      this.guides.push(lined.d.guide, [from!, lined.p]);
+      return { p: lined.p, kind: lined.d.type, rel: { type: lined.d.type, ref: lined.d.ref } };
+    }
 
     // Horizontal / vertical alignment with existing points, otherwise the grid.
     const atol = 6 * px;
@@ -275,6 +310,35 @@ export class SketchController {
     if (alignX) this.guides.push([alignX.p, [x, y]]);
     if (alignY) this.guides.push([alignY.p, [x, y]]);
     return { p: [x, y], kind: alignX || alignY ? "align" : "grid" };
+  }
+
+  /** Where the line being drawn starts, for the line tools (null otherwise). */
+  private lineStart(): Vec2 | null {
+    const lineTool = this.tool === "segment" || this.tool === "polyline" || this.tool === "path";
+    return lineTool && !this.arcMode && this.points.length ? this.points[this.points.length - 1]! : null;
+  }
+
+  /** Directions a new line from `from` can line up with: the sketch's lines, the chain drawn so far, and arcs ending at `from`. */
+  private directions(geo: GeomResolved[], from: Vec2) {
+    const lines: { id: Id; a: Vec2; b: Vec2 }[] = [];
+    for (const g of geo) if (g.type === "line") lines.push(g);
+    for (let k = 0; k + 1 < this.points.length; k++) if (!this.arcFlags[k] && !this.arcFlags[k + 1]) lines.push({ id: `#${k}`, a: this.points[k]!, b: this.points[k + 1]! });
+    return directionsFrom(lines, geo, from);
+  }
+
+  /** The relations kept by the chain's lines, numbered by line (none once arcs are mixed in). */
+  private relations(): DrawnRelation[] {
+    if (this.arcFlags.some(Boolean)) return [];
+    const out: DrawnRelation[] = [];
+    this.rels.forEach((r, i) => {
+      if (r && i > 0) out.push({ seg: i - 1, ...r });
+    });
+    return out;
+  }
+
+  /** Remember what the next placed point's line lined up with (a typed angle overrides it). */
+  private noteRelation() {
+    this.rels[this.points.length] = this.typed.b === undefined ? this.snap?.rel : undefined;
   }
 
   /* ───────────────────────── Shape construction ───────────────────────── */
@@ -544,7 +608,7 @@ export class SketchController {
   private hint(): string | null {
     const s = this.snap;
     if (!s || !this.cursor || this.tool === "select" || this.tool === "dimension") return null;
-    const label = { end: "Endpoint", mid: "Midpoint", center: "Center", origin: "Origin", align: "Aligned" }[s.kind as string];
+    const label = { end: "Endpoint", mid: "Midpoint", center: "Center", origin: "Origin", align: "Aligned", intersection: "Intersection", on: "On curve", parallel: "Parallel", perpendicular: "Perpendicular", tangent: "Tangent" }[s.kind as string];
     const a = this.points[this.points.length - 1];
     if (a && s.kind !== "free") {
       const tol = 1e-6;
@@ -576,7 +640,10 @@ export class SketchController {
     if (this.tool === "select" || this.multi || this.tool === "text") return;
     const e = this.build([a, end]);
     if (!e) return;
-    this.env.add(e);
+    const t = this.typed;
+    const box = this.tool === "rect" || this.tool === "crect";
+    const round = this.tool === "circle" || this.tool === "circle2";
+    this.env.add(e, false, box ? { width: t.a, height: t.b } : round ? { diameter: t.a } : this.tool === "ellipse" ? { rx: t.a, ry: t.b } : undefined);
     this.points = [];
     this.typed = {};
   }
@@ -596,8 +663,9 @@ export class SketchController {
     return this.tool === "polyline" || this.tool === "path" || this.tool === "cspline";
   }
 
-  private commitPolyline() {
-    const open = this.tool === "path" || this.tool === "cspline";
+  /** `leaveOpen`: the Line tool was stopped (Esc, Enter, last point again) rather than closed, so its lines stay as drawn. */
+  private commitPolyline(leaveOpen = false) {
+    const open = leaveOpen || this.tool === "path" || this.tool === "cspline";
     if (this.points.length >= (this.tool === "cspline" ? 3 : open ? 2 : 3)) {
       const e = makeEntity("polyline", this.points[0]!, this.points[1]!);
       if (e.type === "polyline") {
@@ -605,9 +673,10 @@ export class SketchController {
         if (open) e.open = true;
         if (this.tool === "cspline") e.ctrl = true;
       }
-      this.env.add(e);
+      this.env.add(e, false, this.tool === "cspline" ? undefined : { relations: this.relations() });
     }
     this.points = [];
+    this.rels = [];
     this.arcFlags = [];
     this.arcEnd = null;
     this.typed = {};
@@ -687,6 +756,7 @@ export class SketchController {
       // Clicking the first point closes the outline; clicking the last point again finishes an open chain.
       if (n >= 3 && near(this.points[0])) return this.commitSegments(true);
       if (n >= 2 && near(this.points[n - 1])) return this.commitSegments(false);
+      this.noteRelation();
       this.points.push(n ? this.secondPoint(this.points[n - 1]!, c) : c);
       this.refs.push(typed ? undefined : ref);
       this.typed = {};
@@ -765,7 +835,7 @@ export class SketchController {
   }
 
   private commitSegments(closed: boolean) {
-    if (this.points.length >= 2) this.env.addLines(this.points.map((p, i) => this.refs[i] ?? p), closed && this.points.length >= 3);
+    if (this.points.length >= 2) this.env.addLines(this.points.map((p, i) => this.refs[i] ?? p), closed && this.points.length >= 3, this.relations());
     this.reset();
   }
 
@@ -867,9 +937,12 @@ export class SketchController {
           this.arcClick(this.cursor, first, near(first));
         } else if ((this.tool === "polyline" && this.points.length >= 3 && near(first)) || ((this.tool === "path" || this.tool === "cspline") && this.points.length >= (this.tool === "cspline" ? 3 : 2) && near(last))) {
           this.commitPolyline();
+        } else if (this.tool === "polyline" && this.points.length >= 2 && near(last)) {
+          this.commitPolyline(true);
         } else {
           const last = this.points[this.points.length - 1];
           const p = last ? this.secondPoint(last, this.cursor) : this.cursor;
+          this.noteRelation();
           this.points.push(p);
           this.arcFlags.push(false);
           this.typed = {};
@@ -1007,15 +1080,15 @@ export class SketchController {
     }
     if (e.key === "Escape") {
       if (this.points.length) {
-        if (this.multi && this.points.length >= (this.tool === "path" ? 2 : 3)) this.commitPolyline();
+        if (this.multi && this.points.length >= (this.tool === "cspline" ? 3 : 2)) this.commitPolyline(this.tool === "polyline");
         else this.reset();
         this.publish();
         return true;
       }
       return false;
     }
-    if (e.key === "Enter" && this.multi && this.points.length >= (this.tool === "path" ? 2 : 3)) {
-      this.commitPolyline();
+    if (e.key === "Enter" && this.multi && this.points.length >= (this.tool === "cspline" ? 3 : 2)) {
+      this.commitPolyline(this.tool === "polyline");
       this.publish();
       return true;
     }

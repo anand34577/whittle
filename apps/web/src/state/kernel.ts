@@ -1,6 +1,10 @@
 /** Keeps the geometry kernel in sync with the document. */
+import { produce } from "immer";
+import type { EdgeRef, WhittleDocument } from "@whittle/core";
 import { WorkerKernel } from "@whittle/kernel";
-import { findFeature, useApp } from "./store";
+import { edgeRefFromPick, pickableBodies } from "./actions";
+import { tangentChain } from "./edgeChain";
+import { type Session, findFeature, useApp } from "./store";
 
 let kernel: WorkerKernel | null = null;
 let scheduled = false;
@@ -28,11 +32,11 @@ function schedule() {
   scheduled = true;
   requestAnimationFrame(async () => {
     scheduled = false;
-    const { doc, session } = useApp.getState();
+    const { doc, session, hoverEdges } = useApp.getState();
     pending++;
     useApp.setState({ regenBusy: true, regenProgress: null });
     try {
-      const result = await kernel!.regen(doc, session ? "preview" : "final", pickBeforeFor(), session?.featureId);
+      const result = await kernel!.regen(withHoverEdges(doc, session, hoverEdges), session ? "preview" : "final", pickBeforeFor(), session?.featureId);
       if (result) useApp.setState({ regen: result, builtDoc: doc, kernelError: null });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -42,6 +46,64 @@ function schedule() {
       pending--;
       if (pending === 0) useApp.setState({ regenBusy: false, regenProgress: null });
     }
+  });
+}
+
+const near = (a: number[], b: number[]) => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!) < 1e-6;
+
+/** The document with the hovered edges added to the open fillet or chamfer (what clicking would give). */
+function withHoverEdges(doc: WhittleDocument, session: Session | null, edges: EdgeRef[] | null): WhittleDocument {
+  if (!session || !edges?.length) return doc;
+  const f = findFeature(doc, session.featureId);
+  if (f?.type !== "fillet" && f?.type !== "chamfer") return doc;
+  const add = edges.filter((r) => !f.edges.some((e) => near(e.mid, r.mid)));
+  if (!add.length) return doc;
+  return produce(doc, (d) => {
+    const x = d.features.find((y) => y.id === f.id);
+    if (x?.type === "fillet" || x?.type === "chamfer") x.edges.push(...add);
+  });
+}
+
+// ponytail: a preview costs a rebuild of the fillet step, so it waits until the pointer rests on an edge.
+const HOVER_DELAY = 250;
+
+/** While a fillet or chamfer is open, an edge the pointer rests on is previewed as if it were picked. */
+function watchHoverEdges() {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let last = useApp.getState().hover;
+  let lastSession = useApp.getState().session?.featureId;
+  useApp.subscribe((s) => {
+    // A preview never outlives the tool it was for.
+    if (s.session?.featureId !== lastSession) {
+      lastSession = s.session?.featureId;
+      clearTimeout(timer);
+      if (s.hoverEdges) useApp.setState({ hoverEdges: null });
+    }
+    const f = s.session && findFeature(s.doc, s.session.featureId);
+    // Once clicked, the previewed edges are part of the feature.
+    if (s.hoverEdges && (f?.type === "fillet" || f?.type === "chamfer") && s.hoverEdges.every((r) => f.edges.some((e) => near(e.mid, r.mid)))) useApp.setState({ hoverEdges: null });
+    if (s.hover === last) return;
+    last = s.hover;
+    clearTimeout(timer);
+    const p = s.hover;
+    if (!p || p.kind !== "edge" || (f?.type !== "fillet" && f?.type !== "chamfer")) {
+      if (s.hoverEdges) useApp.setState({ hoverEdges: null });
+      return;
+    }
+    timer = setTimeout(() => {
+      const st = useApp.getState();
+      if (st.hover !== p) return;
+      const body = pickableBodies().find((b) => b.id === p.bodyId);
+      if (!body) return;
+      const idx = st.prefs.tangentChain ? tangentChain(body.edges, p.index) : [p.index];
+      const cur = st.session && findFeature(st.doc, st.session.featureId);
+      const have = cur?.type === "fillet" || cur?.type === "chamfer" ? cur.edges : [];
+      // Edges already picked add nothing new to show.
+      const refs = idx
+        .map((i) => edgeRefFromPick({ kind: "edge", bodyId: p.bodyId, index: i }, [body]))
+        .filter((x): x is EdgeRef => !!x && !have.some((e) => near(e.mid, x.mid)));
+      useApp.setState({ hoverEdges: refs.length ? refs : null });
+    }, HOVER_DELAY);
   });
 }
 
@@ -58,11 +120,14 @@ export function startKernel() {
 
   let lastDoc = useApp.getState().doc;
   let lastSession = useApp.getState().session;
+  let lastHover = useApp.getState().hoverEdges;
   useApp.subscribe((s) => {
-    if (s.doc !== lastDoc || s.session !== lastSession) {
+    if (s.doc !== lastDoc || s.session !== lastSession || s.hoverEdges !== lastHover) {
       lastDoc = s.doc;
       lastSession = s.session;
+      lastHover = s.hoverEdges;
       schedule();
     }
   });
+  watchHoverEdges();
 }

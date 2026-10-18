@@ -32,6 +32,8 @@ export type GeomResolved =
   /** Counter-clockwise from angle a0 by `sweep` (radians). */
   | { id: Id; type: "arc"; c: Vec2; r: number; a0: number; sweep: number; a: Vec2; b: Vec2; construction: boolean }
   | { id: Id; type: "circle"; c: Vec2; r: number; construction: boolean }
+  /** `rx` along the major axis (at `angle`, radians, through the major end `a`), `ry` across it. */
+  | { id: Id; type: "ellipse"; c: Vec2; a: Vec2; rx: number; ry: number; angle: number; construction: boolean }
   /** Through the fit points; `closed` joins the last back to the first. */
   | { id: Id; type: "spline"; pts: Vec2[]; closed: boolean; construction: boolean };
 
@@ -72,6 +74,11 @@ export function resolveGeometry(sk: Pick<SketchFeature, "geometry">, sol?: Sketc
         return { id: g.id, type: "circle", c: P(g.c), r: sol?.radii[g.id] ?? g.r, construction };
       case "spline":
         return { id: g.id, type: "spline", pts: g.pts.map(P), closed: !!g.closed && g.pts.length >= 3, construction };
+      case "ellipse": {
+        const c = P(g.c);
+        const a = P(g.a);
+        return { id: g.id, type: "ellipse", c, a, rx: dist(c, a), ry: sol?.radii[g.id] ?? g.r, angle: Math.atan2(a[1] - c[1], a[0] - c[0]), construction };
+      }
       case "arc": {
         const c = P(g.c);
         const a = P(g.a);
@@ -96,6 +103,11 @@ export function geomOutline(g: GeomResolved, segments = 64): Vec2[] {
       for (let i = 0; i <= segments; i++) out.push(polar(g.c, g.r, (i / segments) * TAU));
       return out;
     }
+    case "ellipse": {
+      const out: Vec2[] = [];
+      for (let i = 0; i <= segments; i++) out.push(ellipsePoint(g, (i / segments) * TAU));
+      return out;
+    }
     case "spline": {
       if (g.pts.length < 3) return g.pts;
       const per = Math.max(4, Math.round(segments / 6));
@@ -108,6 +120,13 @@ export function geomOutline(g: GeomResolved, segments = 64): Vec2[] {
       return out;
     }
   }
+}
+
+/** The point at parameter `t` (radians from the major end, counter-clockwise) of an ellipse. */
+export function ellipsePoint(g: { c: Vec2; rx: number; ry: number; angle: number }, t: number): Vec2 {
+  const [x, y] = [g.rx * Math.cos(t), g.ry * Math.sin(t)];
+  const [cs, sn] = [Math.cos(g.angle), Math.sin(g.angle)];
+  return [g.c[0] + x * cs - y * sn, g.c[1] + x * sn + y * cs];
 }
 
 /* ───────────────────────── Profiles ───────────────────────── */
@@ -157,6 +176,8 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
     const src = byId.get(g.id)!;
     if (g.type === "circle") {
       out.push({ id: g.id, type: "circle", cx: n(g.c[0]), cy: n(g.c[1]), r: n(g.r), construction: g.construction || undefined });
+    } else if (g.type === "ellipse") {
+      out.push({ id: g.id, type: "ellipse", cx: n(g.c[0]), cy: n(g.c[1]), rx: n(g.rx), ry: n(g.ry), angle: n(g.angle), construction: g.construction || undefined });
     } else if (g.type === "line" && src.type === "line") {
       if (g.construction) out.push({ id: g.id, type: "polyline", points: [[n(g.a[0]), n(g.a[1])], [n(g.b[0]), n(g.b[1])]], open: true, construction: true });
       else segs.push({ id: g.id, ends: [root(src.a), root(src.b)], at: [g.a, g.b] });
@@ -229,13 +250,15 @@ export const CONSTRAINT_LABELS: Record<ConstraintType, string> = {
   collinear: "Collinear",
   distance: "Distance",
   radius: "Radius",
+  diameter: "Diameter",
   angle: "Angle",
 };
 
 /** Dimensions carry a value; the rest are relations. */
-export const DIMENSIONS: ConstraintType[] = ["distance", "radius", "angle"];
+export const DIMENSIONS: ConstraintType[] = ["distance", "radius", "diameter", "angle"];
 
 const round = (k: GeomType) => k === "arc" || k === "circle";
+const isEllipse = (k: GeomType) => k === "ellipse";
 
 /**
  * The fit point next to the end where a spline meets another curve, and that end
@@ -270,9 +293,9 @@ export function constraintFits(type: ConstraintType, kinds: GeomType[]): boolean
     case "perpendicular":
       return pair(is("line"), is("line"));
     case "tangent":
-      return pair(is("line"), round) || pair(round, round) || pair(is("spline"), is("line")) || pair(is("spline"), is("arc"));
+      return pair(is("line"), round) || pair(round, round) || pair(is("spline"), is("line")) || pair(is("spline"), is("arc")) || pair(is("line"), isEllipse);
     case "equal":
-      return pair(is("line"), is("line")) || pair(round, round);
+      return pair(is("line"), is("line")) || pair(round, round) || pair(isEllipse, isEllipse);
     case "fixed":
       return kinds.length === 1;
     case "symmetric": {
@@ -287,7 +310,10 @@ export function constraintFits(type: ConstraintType, kinds: GeomType[]): boolean
     case "distance":
       return (kinds.length === 1 && a === "line") || pair(is("point"), is("point")) || pair(is("point"), is("line")) || pair(is("line"), is("line"));
     case "radius":
-      return kinds.length === 1 && round(a!);
+      // On an ellipse: its minor radius (the major one is the distance from its center to its major end).
+      return kinds.length === 1 && (round(a!) || a === "ellipse");
+    case "diameter":
+      return kinds.length === 1 && a === "circle";
     case "angle":
       return (kinds.length === 1 && a === "line") || pair(is("line"), is("line"));
   }
@@ -300,7 +326,7 @@ export function constraintsFor(sk: Pick<SketchFeature, "geometry">, refs: Id[]):
   return (Object.keys(CONSTRAINT_LABELS) as ConstraintType[]).filter((t) => constraintFits(t, kinds as GeomType[]));
 }
 
-/** Current value of a dimension: mm for distance and radius, radians for angles. */
+/** Current value of a dimension: mm for distance, radius and diameter, radians for angles. */
 export function measureDimension(sk: Pick<SketchFeature, "geometry">, type: ConstraintType, refs: Id[], sol?: SketchSolution): number {
   const geo = new Map(resolveGeometry(sk, sol).map((g) => [g.id, g]));
   const line = (id: Id): [Vec2, Vec2] => {
@@ -312,9 +338,10 @@ export function measureDimension(sk: Pick<SketchFeature, "geometry">, type: Cons
   const point = (id: Id) => pointAt(sk, id, sol);
   const kind = (id: Id) => SKETCH_REFS[id] ?? geo.get(id)?.type;
   const dir = ([a, b]: [Vec2, Vec2]) => Math.atan2(b[1] - a[1], b[0] - a[0]);
-  if (type === "radius") {
+  if (type === "radius" || type === "diameter") {
     const g = geo.get(refs[0]!);
-    return g && (g.type === "circle" || g.type === "arc") ? g.r : 0;
+    if (g?.type === "ellipse") return g.ry;
+    return g && (g.type === "circle" || g.type === "arc") ? (type === "diameter" ? 2 * g.r : g.r) : 0;
   }
   if (type === "angle") {
     if (refs.length === 1) return dir(line(refs[0]!));
@@ -338,6 +365,16 @@ function pointLineDistance(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.abs((b[0] - a[0]) * (a[1] - p[1]) - (a[0] - p[0]) * (b[1] - a[1])) / l;
 }
 
+/** What a constraint is called in a sketch: an ellipse's sizes read as its major and minor radius. */
+export function constraintLabel(sk: Pick<SketchFeature, "geometry">, c: SketchConstraint): string {
+  if (c.type === "radius" && geomById(sk, c.refs[0]!)?.type === "ellipse") return "Minor radius";
+  if (c.type === "distance" && c.refs.length === 2) {
+    const major = sk.geometry?.some((g) => g.type === "ellipse" && c.refs.includes(g.c) && c.refs.includes(g.a));
+    if (major) return "Major radius";
+  }
+  return CONSTRAINT_LABELS[c.type];
+}
+
 /** A short readable name for a constraint, e.g. "Horizontal" or "Distance 25". */
 export function describeConstraint(c: SketchConstraint): string {
   return CONSTRAINT_LABELS[c.type] + (c.value !== undefined ? ` ${c.value}` : "");
@@ -356,7 +393,7 @@ export function bakeSolution(sk: Geo, sol: SketchSolution | undefined) {
       g.x = p[0];
       g.y = p[1];
     }
-    if (g.type === "circle" && sol.radii[g.id] !== undefined) g.r = sol.radii[g.id]!;
+    if ((g.type === "circle" || g.type === "ellipse") && sol.radii[g.id] !== undefined) g.r = sol.radii[g.id]!;
   }
 }
 
@@ -372,14 +409,31 @@ export function addLine(sk: Geo, a: Vec2 | Id, b: Vec2 | Id, construction = fals
   const id = uid("l");
   const pa = pointId(sk, a);
   const pb = pointId(sk, b);
-  sk.geometry!.push({ id, type: "line", a: pa, b: pb, ...(construction ? { construction } : {}) });
+  (sk.geometry ??= []).push({ id, type: "line", a: pa, b: pb, ...(construction ? { construction } : {}) });
   return id;
 }
 
 export function addCircle(sk: Geo, c: Vec2 | Id, r: number, construction = false): Id {
   const id = uid("c");
   const pc = pointId(sk, c);
-  sk.geometry!.push({ id, type: "circle", c: pc, r, ...(construction ? { construction } : {}) });
+  (sk.geometry ??= []).push({ id, type: "circle", c: pc, r, ...(construction ? { construction } : {}) });
+  return id;
+}
+
+/**
+ * An ellipse centered on `c` through the major-axis end `a`, with minor radius `r`.
+ * A minor radius longer than the major one swaps the axes, so `a` always ends the longer one.
+ */
+export function addEllipse(sk: Geo, c: Vec2 | Id, a: Vec2, r: number, construction = false): Id {
+  const pc = pointId(sk, c);
+  const cp = pointAt(sk, pc);
+  const rx = dist(cp, a);
+  // Keep the axes a little apart: the solver places the focus between them.
+  const end: Vec2 = r > rx ? [cp[0] - ((a[1] - cp[1]) / (rx || 1)) * r, cp[1] + ((a[0] - cp[0]) / (rx || 1)) * r] : a;
+  const minor = Math.min(r > rx ? rx : r, Math.max(r, rx) * 0.9999);
+  const id = uid("e");
+  const pa = addPoint(sk, end);
+  (sk.geometry ??= []).push({ id, type: "ellipse", c: pc, a: pa, r: minor, ...(construction ? { construction } : {}) });
   return id;
 }
 
@@ -388,7 +442,7 @@ export function addSpline(sk: Geo, pts: (Vec2 | Id)[], closed = false, construct
   if (pts.length < 2 || (closed && pts.length < 3)) return null;
   const id = uid("s");
   const ids = pts.map((p) => pointId(sk, p));
-  sk.geometry!.push({ id, type: "spline", pts: ids, ...(closed ? { closed: true } : {}), ...(construction ? { construction } : {}) });
+  (sk.geometry ??= []).push({ id, type: "spline", pts: ids, ...(closed ? { closed: true } : {}), ...(construction ? { construction } : {}) });
   return id;
 }
 
@@ -487,6 +541,7 @@ export function deleteGeometry(sk: Geo, ids: Id[]) {
   for (const g of sk.geometry ?? []) {
     if ((g.type === "line" || g.type === "arc") && (gone.has(g.a) || gone.has(g.b))) gone.add(g.id);
     if ((g.type === "arc" || g.type === "circle") && gone.has(g.c)) gone.add(g.id);
+    if (g.type === "ellipse" && (gone.has(g.c) || gone.has(g.a))) gone.add(g.id);
     // A spline just loses a deleted fit point; it goes when fewer than two are left.
     if (g.type === "spline" && g.pts.some((p) => gone.has(p))) {
       g.pts = g.pts.filter((p) => !gone.has(p));
@@ -512,6 +567,7 @@ export function usedPoints(sk: Geo): Set<Id> {
     if (g.type === "arc") used.add(g.a).add(g.b).add(g.c);
     if (g.type === "spline") g.pts.forEach((p) => used.add(p));
     if (g.type === "circle") used.add(g.c);
+    if (g.type === "ellipse") used.add(g.c).add(g.a);
   }
   return used;
 }
@@ -524,7 +580,7 @@ function pruneConstraints(sk: Geo) {
 
 /* ───────────────────────── Trim and extend ───────────────────────── */
 
-type Curve = Exclude<GeomResolved, { type: "point" | "spline" }>;
+type Curve = Exclude<GeomResolved, { type: "point" | "spline" | "ellipse" }>;
 const EPS = 1e-7;
 
 export function lineLine(a: Vec2, b: Vec2, c: Vec2, d: Vec2): Vec2[] {
@@ -598,7 +654,7 @@ function param(g: Curve, p: Vec2): number {
 function crossings(g: Curve, geo: GeomResolved[]): { t: number; p: Vec2; by: Id }[] {
   const out: { t: number; p: Vec2; by: Id }[] = [];
   for (const o of geo) {
-    if (o.type === "point" || o.type === "spline" || o.id === g.id) continue;
+    if (o.type === "point" || o.type === "spline" || o.type === "ellipse" || o.id === g.id) continue;
     for (const p of meet(g, o)) out.push({ t: param(g, p), p, by: o.id });
   }
   return out.sort((x, y) => x.t - y.t);
@@ -627,7 +683,8 @@ export function trimGeometry(sk: Geo, id: Id, click: Vec2): string | undefined {
   const g = geo.find((x) => x.id === id);
   const src = geomById(sk, id);
   if (src?.type === "spline") return "Splines can't be trimmed. Delete the spline, or move its points.";
-  if (!g || !src || g.type === "point" || g.type === "spline" || src.type === "point") return "Pick a line, arc or circle to trim.";
+  if (src?.type === "ellipse") return "Ellipses can't be trimmed. Draw an elliptical arc instead.";
+  if (!g || !src || g.type === "point" || g.type === "spline" || g.type === "ellipse" || src.type === "point") return "Pick a line, arc or circle to trim.";
   const before = usedPoints(sk);
   const span = g.type === "line" ? 1 : g.type === "arc" ? g.sweep : TAU;
   const cuts = crossings(g, geo).filter((c) => g.type === "circle" || (c.t > EPS && c.t < span - EPS));

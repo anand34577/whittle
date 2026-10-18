@@ -819,6 +819,158 @@ const P = {
       <rect x="9" y="15" width="2" height="2" opacity=".7" />
     </>
   ),
+  // ── Sketch tool variants ─────────────────────────────
+  rectCenter: (
+    <>
+      <rect x="3.5" y="5.5" width="13" height="9" rx=".5" />
+      <path d="M10 10 L16.5 14.5" opacity=".5" strokeDasharray="1.2 1.4" />
+      <circle cx="10" cy="10" r="1.3" fill="currentColor" />
+      <circle cx="16.5" cy="14.5" r="1.3" fill="currentColor" />
+    </>
+  ),
+  rect3: (
+    <>
+      <path d="M3 12.5 L11.5 4 L17 9.5 L8.5 18 Z" />
+      <circle cx="3" cy="12.5" r="1.3" fill="currentColor" />
+      <circle cx="11.5" cy="4" r="1.3" fill="currentColor" />
+      <circle cx="17" cy="9.5" r="1.3" fill="currentColor" />
+    </>
+  ),
+  circle2: (
+    <>
+      <circle cx="10" cy="10" r="6.5" />
+      <path d="M3.5 10 H16.5" opacity=".5" strokeDasharray="1.2 1.4" />
+      <circle cx="3.5" cy="10" r="1.3" fill="currentColor" />
+      <circle cx="16.5" cy="10" r="1.3" fill="currentColor" />
+    </>
+  ),
+  circle3: (
+    <>
+      <circle cx="10" cy="10" r="6.5" />
+      <circle cx="3.5" cy="10" r="1.3" fill="currentColor" />
+      <circle cx="13.3" cy="4.4" r="1.3" fill="currentColor" />
+      <circle cx="13.3" cy="15.6" r="1.3" fill="currentColor" />
+    </>
+  ),
+  circleTangent: (
+    <>
+      <circle cx="10" cy="11" r="4.5" />
+      <path d="M2.5 15.5 H17.5 M3 3 L16 16" opacity=".55" />
+    </>
+  ),
+  arcCenter: (
+    <>
+      <path d="M16.5 10 A6.5 6.5 0 0 0 10 3.5" />
+      <path d="M10 10 L16.5 10 M10 10 L10 3.5" opacity=".5" strokeDasharray="1.2 1.4" />
+      <circle cx="10" cy="10" r="1.3" fill="currentColor" />
+    </>
+  ),
+  arcTangent: (
+    <>
+      <path d="M2.5 15 H9 A5 5 0 0 0 14 10 V4" />
+      <circle cx="9" cy="15" r="1.3" fill="currentColor" />
+    </>
+  ),
+  polygonOut: (
+    <>
+      <path d="M10 3.2 L16.3 6.6 V13.4 L10 16.8 L3.7 13.4 V6.6 Z" />
+      <circle cx="10" cy="10" r="5.5" opacity=".5" strokeDasharray="1.2 1.4" />
+    </>
+  ),
+  polygonEdge: (
+    <>
+      <path d="M10 3.2 L16.3 6.6 V13.4 L10 16.8 L3.7 13.4 V6.6 Z" opacity=".55" />
+      <path d="M3.7 13.4 L10 16.8" strokeWidth="2.2" />
+      <circle cx="3.7" cy="13.4" r="1.3" fill="currentColor" />
+      <circle cx="10" cy="16.8" r="1.3" fill="currentColor" />
+    </>
+  ),
+  ellipseArc: (
+    <>
+      <path d="M2.5 10 A7.5 4.5 0 0 1 17.5 10" />
+      <ellipse cx="10" cy="10" rx="7.5" ry="4.5" opacity=".35" strokeDasharray="1.2 1.4" />
+    </>
+  ),
+  splineControl: (
+    <>
+      <path d="M3 15 L7 4 L13 16 L17 5" opacity=".45" strokeDasharray="1.2 1.4" />
+      <path d="M3 15 C 6 6, 12 14, 17 5" />
+      <rect x="6" y="3" width="2" height="2" />
+      <rect x="12" y="15" width="2" height="2" />
+    </>
+  ),
+  conic: (
+    <>
+      <path d="M3 16 Q 10 -1 17 16" />
+      <path d="M3 16 L10 4 L17 16" opacity=".4" strokeDasharray="1.2 1.4" />
+    </>
+  ),
+  extend: (
+    <>
+      <path d="M16.5 2.5 V17.5" opacity=".6" />
+      <path d="M3 10 H9" />
+      <path d="M9 10 H16.5" strokeDasharray="1.4 1.6" />
+      <path d="M13 7.5 L15.5 10 L13 12.5" />
+    </>
+  ),
+  breakLine: (
+    <>
+      <path d="M3 13 L8.5 10.2 M11.5 8.8 L17 6" />
+      <path d="M10 3 V17" opacity=".5" />
+      <circle cx="10" cy="9.5" r="1.4" fill="currentColor" />
+    </>
+  ),
+  // ── Constraints ─────────────────────────────────────
+  coincident: (
+    <>
+      <path d="M3 15 L10 10 M10 10 L17 13" />
+      <circle cx="10" cy="10" r="2.2" fill="currentColor" />
+    </>
+  ),
+  horizontal: (
+    <>
+      <path d="M3 10 H17" />
+      <path d="M5 7.5 V12.5 M15 7.5 V12.5" opacity=".5" />
+    </>
+  ),
+  vertical: (
+    <>
+      <path d="M10 3 V17" />
+      <path d="M7.5 5 H12.5 M7.5 15 H12.5" opacity=".5" />
+    </>
+  ),
+  parallel: <path d="M5 16 L11 4 M9.5 16 L15.5 4" />,
+  perpendicular: (
+    <>
+      <path d="M4 16 H16 M8 16 V4" />
+      <path d="M8 12.5 H11.5 V16" opacity=".55" />
+    </>
+  ),
+  tangent: (
+    <>
+      <circle cx="10" cy="11" r="4.5" />
+      <path d="M2.5 6.5 H17.5" />
+    </>
+  ),
+  equal: <path d="M4 7.5 H16 M4 12.5 H16" />,
+  symmetric: (
+    <>
+      <path d="M10 2.5 V17.5" strokeDasharray="1.4 1.6" opacity=".6" />
+      <path d="M7 6 L4 10 L7 14 M13 6 L16 10 L13 14" />
+    </>
+  ),
+  midpoint: (
+    <>
+      <path d="M3 14 L17 6" />
+      <path d="M10 10 L8 6.4 H12 Z" fill="currentColor" />
+    </>
+  ),
+  collinear: (
+    <>
+      <path d="M2.5 14.5 L8 11.3 M12 9 L17.5 5.8" />
+      <path d="M8 11.3 L12 9" strokeDasharray="1.2 1.4" opacity=".5" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="10" cy="10" r="2.6" />

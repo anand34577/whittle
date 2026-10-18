@@ -10,6 +10,7 @@ import { Modal } from "./Modal";
 import { type Tab, takeStartTab } from "./settingsTab";
 import { Icon } from "./icons";
 import { MATERIALS } from "./PropertiesPanel";
+import { checkForUpdate } from "../state/updates";
 
 
 const UNITS: { value: LengthUnit; label: string; hint: string }[] = [
@@ -174,6 +175,7 @@ function Navigation() {
 
 function About() {
   const platform = useApp((s) => s.platform);
+  const prefs = useApp((s) => s.prefs);
   const where = platform.kind === "desktop" ? "Desktop app" : platform.kind === "server" ? `Server ${platform.config.version}` : "Web browser";
   return (
     <div className="settings__section">
@@ -197,6 +199,21 @@ function About() {
         <dt>License</dt>
         <dd>MPL-2.0</dd>
       </dl>
+      {platform.kind === "desktop" && (
+        <>
+          <Switch
+            label="Check for new versions"
+            hint="Once a day, ask the project's release page for the latest version. Nothing else is sent."
+            checked={prefs.updateCheck}
+            onChange={(v) => setPrefs({ updateCheck: v })}
+          />
+          <div className="btnrow">
+            <button className="btn btn--small" onClick={() => void checkForUpdate(true)}>
+              Check now
+            </button>
+          </div>
+        </>
+      )}
       <div className="btnrow">
         <button className="btn btn--small" onClick={() => useApp.setState({ panel: "shortcuts" })}>
           <Icon name="keyboard" size={15} /> Keyboard shortcuts

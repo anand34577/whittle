@@ -3,6 +3,8 @@ import { commandById, commandForKey, isAvailable } from "./state/commands";
 import { openDroppedFile, startAutosave, startDesktop } from "./state/files";
 import { aiAvailable, apiHooks, detectPlatform } from "./state/platform";
 import { startKernel } from "./state/kernel";
+import { startOffline } from "./state/offline";
+import { checkForUpdate } from "./state/updates";
 import { forgetUserSettings, loadUserSettings } from "./state/userSettings";
 import { cancelSession, commitSession, finishSketch, setSketchTool, toast, useApp } from "./state/store";
 import { Browser } from "./ui/Browser";
@@ -61,7 +63,10 @@ function onKey(e: KeyboardEvent) {
     if (s.radial) useApp.setState({ radial: null });
     else if (s.mode.kind === "measure") useApp.setState({ mode: { kind: "model" }, measure: [] });
     else if (s.mode.kind === "sketch") {
+      // One step back at a time: the tool, then a constraint waiting for picks, then the selection, then the sketch itself.
       if (s.mode.tool !== "select") setSketchTool("select");
+      else if (s.pendingConstraint) useApp.setState({ pendingConstraint: null });
+      else if (s.sketchSel.length || s.selectedEntity) useApp.setState({ sketchSel: [], selectedEntity: null });
       else finishSketch();
     } else if (s.mode.kind === "pickPlane") useApp.setState({ mode: { kind: "model" } });
     else if (s.session) cancelSession();
@@ -106,6 +111,7 @@ export function App() {
   useEffect(() => {
     startKernel();
     startAutosave();
+    startOffline();
     // Every launch opens on the start screen (new, open, recover, templates),
     // unless the desktop app was started by double-clicking a design.
     useApp.setState({ panel: "welcome" });
@@ -120,7 +126,10 @@ export function App() {
     void detectPlatform().then(async (platform) => {
       useApp.setState({ platform, platformReady: true });
       void loadUserSettings();
-      if (platform.kind === "desktop") await startDesktop();
+      if (platform.kind === "desktop") {
+        await startDesktop();
+        void checkForUpdate();
+      }
       const err = new URLSearchParams(window.location.search).get("login_error");
       if (err) {
         toast("error", err);

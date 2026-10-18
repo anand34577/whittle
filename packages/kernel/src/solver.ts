@@ -1,5 +1,5 @@
 /**
- * Sketch constraint solving with PlaneGCS (FreeCAD's solver, compiled to WASM;
+ * Sketch constraint solving with PlaneGCS (an open-source 2D solver, compiled to WASM;
  * LGPL-2.1, loaded as a separate file). It runs inside the kernel worker as
  * part of every rebuild, so changing a parameter re-solves the sketches that
  * use it, and the UI thread never solves.
@@ -86,6 +86,7 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
         else if (kq === "line") add({ type: "point_on_line_pl", p_id: p, l_id: q });
         else if (kq === "circle") add({ type: "point_on_circle", p_id: p, c_id: q });
         else if (kq === "arc") add({ type: "point_on_arc", p_id: p, a_id: q });
+        else if (kq === "ellipse") add({ type: "point_on_ellipse", p_id: p, e_id: q });
         break;
       case "horizontal":
       case "vertical":
@@ -108,6 +109,10 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
           else if (j && o?.type === "arc") add({ type: "perpendicular_pppp", l1p1_id: j.end, l1p2_id: j.next, l2p1_id: o.c, l2p2_id: j.end });
           break;
         }
+        if (kq === "ellipse") {
+          add({ type: "tangent_le", l_id: p, e_id: q });
+          break;
+        }
         const end = sharedEnd(p, q);
         if (end) {
           // Tangent where they meet: the curves leave the point in the same (or opposite) direction.
@@ -123,6 +128,7 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
       }
       case "equal":
         if (kp === "line") add({ type: "equal_length", l1_id: p, l2_id: q });
+        else if (kp === "ellipse") add({ type: "equal_radii_ee", e1_id: p, e2_id: q });
         else if (kp === "circle" && kq === "circle") add({ type: "equal_radius_cc", c1_id: p, c2_id: q });
         else if (kp === "arc" && kq === "arc") add({ type: "equal_radius_aa", a1_id: p, a2_id: q });
         else add({ type: "equal_radius_ca", c1_id: kp === "circle" ? p : q, a2_id: kp === "circle" ? q : p });
@@ -157,6 +163,10 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
           fixed.add(g.c);
           add({ type: "circle_radius", c_id: g.id, radius: radius(g.id) });
         }
+        if (g?.type === "ellipse") {
+          fixed.add(g.c).add(g.a);
+          add(minorRadius(g.id, radius(g.id)));
+        }
         break;
       }
       case "distance": {
@@ -179,7 +189,15 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
       case "radius": {
         const r = val(c, "length");
         if (r <= 0) throw new Error(`${describeConstraint(c)}: a radius must be greater than zero`);
-        add(kp === "circle" ? { type: "circle_radius", c_id: p, radius: r } : { type: "arc_radius", a_id: p, radius: r });
+        const g = geomById(sk, p);
+        if (g?.type === "ellipse") add(minorRadius(g.id, r));
+        else add(kp === "circle" ? { type: "circle_radius", c_id: p, radius: r } : { type: "arc_radius", a_id: p, radius: r });
+        break;
+      }
+      case "diameter": {
+        const d = val(c, "length");
+        if (d <= 0) throw new Error(`${describeConstraint(c)}: a diameter must be greater than zero`);
+        add({ type: "circle_radius", c_id: p, radius: d / 2 });
         break;
       }
       case "angle": {
@@ -206,7 +224,10 @@ function geometryPrims(sk: SketchFeature, pos: (id: Id) => Vec2, radius: (id: Id
       continue; // fit points are solver points; the curve is drawn through them
     } else if (g.type === "line") curves.push({ id: g.id, type: "line", p1_id: g.a, p2_id: g.b });
     else if (g.type === "circle") curves.push({ id: g.id, type: "circle", c_id: g.c, radius: radius(g.id) });
-    else {
+    else if (g.type === "ellipse") {
+      points.push(...ellipseHelpers(g, pos, radius(g.id)));
+      curves.push(...ellipseRules(g, radius(g.id)));
+    } else {
       const c = pos(g.c);
       const a = pos(g.a);
       const b = pos(g.b);
@@ -219,6 +240,35 @@ function geometryPrims(sk: SketchFeature, pos: (id: Id) => Vec2, radius: (id: Id
   }
   return [...REFS, ...points, ...curves];
 }
+
+type Ellipse = Extract<NonNullable<SketchFeature["geometry"]>[number], { type: "ellipse" }>;
+
+/**
+ * An ellipse is solved from its center, a focus and its minor radius. The focus and the far end of the
+ * major axis are helper points of the solver only: the sketch keeps the center, the major end and the minor radius.
+ */
+function ellipseHelpers(g: Ellipse, pos: (id: Id) => Vec2, rmin: number): Prim[] {
+  const c = pos(g.c);
+  const a = pos(g.a);
+  const rmaj = Math.hypot(a[0] - c[0], a[1] - c[1]) || 1;
+  const f = Math.sqrt(Math.max(rmaj * rmaj - rmin * rmin, (rmaj * 1e-3) ** 2));
+  return [
+    { id: `${g.id}#f`, type: "point", x: c[0] + ((a[0] - c[0]) / rmaj) * f, y: c[1] + ((a[1] - c[1]) / rmaj) * f, fixed: false },
+    { id: `${g.id}#n`, type: "point", x: 2 * c[0] - a[0], y: 2 * c[1] - a[1], fixed: false },
+  ];
+}
+
+/** The ellipse, with the major end and its opposite held at the two ends of the major axis. */
+function ellipseRules(g: Ellipse, rmin: number): Prim[] {
+  return [
+    { id: g.id, type: "ellipse", c_id: g.c, focus1_id: `${g.id}#f`, radmin: rmin },
+    // (Point-on-ellipse plus on-axis allows a flat ellipse as a solution; the diameter alignment doesn't.)
+    { id: `${g.id}#axis`, type: "internal_alignment_ellipse_major_diameter", e_id: g.id, p1_id: g.a, p2_id: `${g.id}#n` },
+  ];
+}
+
+/** Holds an ellipse's minor radius. */
+const minorRadius = (id: Id, r: number): Record<string, unknown> => ({ type: "equal", param1: { o_id: id, prop: "radmin" }, param2: r });
 
 interface Run {
   status: number;
@@ -247,6 +297,7 @@ export function solveSketch(sk: SketchFeature, ev: Evaluator): SketchSolution | 
   const radii: Record<Id, number> = {};
   for (const g of sk.geometry) if (g.type === "point") start.set(g.id, [g.x, g.y]);
   for (const g of stored) if (g.type === "circle") radii[g.id] = g.r;
+  for (const g of stored) if (g.type === "ellipse") radii[g.id] = g.ry;
 
   const { prims: cons, fixed } = constraintPrims(sk, ev, (id) => radii[id] ?? 1, (id) => start.get(id) ?? [0, 0]);
   const geo = (pos: (id: Id) => Vec2, extra: Set<Id> = new Set()) =>
@@ -264,6 +315,7 @@ export function solveSketch(sk: SketchFeature, ev: Evaluator): SketchSolution | 
     for (const p of gcs.sketch_index.get_primitives()) {
       if (p.type === "point" && start.has(p.id)) points[p.id] = [p.x, p.y];
       if (p.type === "circle") radii[p.id] = p.radius;
+      if (p.type === "ellipse") radii[p.id] = p.radmin;
     }
   } else for (const [id, p] of start) points[id] = p;
 
@@ -299,13 +351,14 @@ export function solveSketch(sk: SketchFeature, ev: Evaluator): SketchSolution | 
       if (run([...geo(at, new Set([id])), ...cons]).dof < base.dof) free.add(id);
     }
     for (const g of sk.geometry) {
-      if (g.type !== "circle") continue;
-      const probe = run([...geo(at), ...cons, { id: "probe", type: "circle_radius", c_id: g.id, radius: radii[g.id]! } as Prim]);
+      if (g.type !== "circle" && g.type !== "ellipse") continue;
+      const hold = g.type === "circle" ? { type: "circle_radius", c_id: g.id, radius: radii[g.id]! } : minorRadius(g.id, radii[g.id]!);
+      const probe = run([...geo(at), ...cons, { id: "probe", ...hold } as Prim]);
       if (probe.dof < base.dof) free.add(g.id);
     }
   } else if (base.dof > 0) pointIds.forEach((id) => !fixed.has(id) && free.add(id));
   for (const g of sk.geometry) {
-    const needs = g.type === "point" ? [g.id] : g.type === "line" ? [g.a, g.b] : g.type === "arc" ? [g.a, g.b, g.c] : g.type === "spline" ? g.pts : [g.c, g.id];
+    const needs = g.type === "point" ? [g.id] : g.type === "line" ? [g.a, g.b] : g.type === "arc" ? [g.a, g.b, g.c] : g.type === "spline" ? g.pts : g.type === "ellipse" ? [g.c, g.a, g.id] : [g.c, g.id];
     if (needs.every((x) => !free.has(x))) sol.defined.push(g.id);
   }
   return sol;

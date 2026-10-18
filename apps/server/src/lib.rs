@@ -150,8 +150,9 @@ async fn require_app_header(req: Request, next: Next) -> Response {
 }
 
 const CSP: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data:; frame-ancestors 'none'";
-/// With the AI assistant on, the browser may also reach AI providers (HTTPS) and model servers on the same computer.
-const CSP_AI: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data: https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'";
+/// With the AI assistant on, the browser may also reach AI providers: any HTTPS service, and model servers on
+/// this computer or the local network, which usually speak plain HTTP (http://192.168.1.20:11434/v1).
+const CSP_AI: &str = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data: https: http:; frame-ancestors 'none'";
 /// The geometry worker runs OpenCascade, whose WebAssembly bindings compile JS at
 /// start-up, so only that script may use eval. A worker gets the policy sent with its own script.
 const WORKER_CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; connect-src 'self' blob: data:; font-src 'self' data:";
@@ -161,6 +162,19 @@ async fn content_security_policy(State(s): State<Shared>, req: Request, next: Ne
     let mut res = next.run(req).await;
     let page = if s.config.ai { CSP_AI } else { CSP };
     res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(if worker { WORKER_CSP } else { page }));
+    res
+}
+
+/// Built files carry a content hash in their names, so browsers may keep them for good. The page, the
+/// offline service worker and its file list must be checked every time, or a new version would never arrive.
+async fn cache_control(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    let mut res = next.run(req).await;
+    if path.starts_with("/api/") {
+        return res;
+    }
+    let value = if path.contains("/assets/") && res.status().is_success() { "public, max-age=31536000, immutable" } else { "no-cache" };
+    res.headers_mut().entry(header::CACHE_CONTROL).or_insert(HeaderValue::from_static(value));
     res
 }
 
@@ -239,5 +253,6 @@ pub fn router(state: Shared) -> Router {
         .layer(SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, HeaderValue::from_static("same-origin")))
         .layer(SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
         .layer(middleware::from_fn_with_state(state.clone(), content_security_policy))
+        .layer(middleware::from_fn(cache_control))
         .layer(TraceLayer::new_for_http())
 }
