@@ -34,6 +34,10 @@ export interface SketchDrawable {
   active: boolean;
   /** Triangles of the solid regions (world space), drawn as a soft fill. */
   fill?: Float32Array;
+  /** Each enclosed area on its own, pickable as a profile; `at` is a point inside it (sketch coordinates). */
+  regions?: { fill: Float32Array; selected: boolean; hovered: boolean }[];
+  /** The profile of the feature being edited: its areas show and pick through the bodies in front. */
+  profile?: boolean;
   shapes: { id: Id; pts: Vec2[]; closed: boolean; construction: boolean; selected: boolean; hovered: boolean; tone?: SketchTone }[];
   /** Solver points of the sketch being edited. */
   markers?: { p: Vec2; tone: SketchTone; selected: boolean; hovered: boolean }[];
@@ -194,6 +198,8 @@ export class Viewport {
   private sketchFrame: SketchFrame | null = null;
   private filter: PickFilter = { faces: true, edges: true, planes: false, sketches: true };
   private sketchHit: { id: Id; pts: Vec3[][] }[] = [];
+  /** Pickable sketch areas (profiles). */
+  private regionMeshes: THREE.Mesh[] = [];
   private anim: { from: Turntable; to: Turntable; t0: number; dur: number } | null = null;
   private drag: { x: number; y: number; button: number; moved: boolean; mode: "orbit" | "pan" | "zoom" | "none" } | null = null;
   private nav: NavPreset = "whittle";
@@ -1027,7 +1033,31 @@ export class Viewport {
     this.clearGroup(this.sketchGroup);
     this.clearGroup(this.fillGroup);
     this.sketchHit = [];
+    this.regionMeshes = [];
     for (const s of list) {
+      s.regions?.forEach((r, index) => {
+        if (r.fill.length < 9) return;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(r.fill, 3));
+        const lit = r.selected || r.hovered;
+        const mat = new THREE.MeshBasicMaterial({
+          color: r.selected ? this.theme.select : this.theme.hover,
+          transparent: true,
+          opacity: r.selected ? (r.hovered ? 0.5 : 0.38) : lit ? 0.24 : s.profile ? 0.06 : 0,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          depthTest: !s.profile,
+          polygonOffset: true,
+          polygonOffsetFactor: -3,
+          polygonOffsetUnits: -3,
+          toneMapped: false,
+        });
+        const m = new THREE.Mesh(geo, mat);
+        m.renderOrder = s.profile ? 9 : 3;
+        m.userData = { sketchId: s.id, region: index, frame: s.frame, profile: !!s.profile };
+        this.fillGroup.add(m);
+        this.regionMeshes.push(m);
+      });
       if (s.fill && s.fill.length >= 9) {
         const geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.BufferAttribute(s.fill, 3));
@@ -1226,6 +1256,20 @@ export class Viewport {
     const faceHit = this.view.section ? hits.find((h) => this.clip.distanceToPoint(h.point) >= 0) : hits[0];
     const sp = this.screen(e);
 
+    // A sketch area in front of (or lying on) the faces is what the click meant: profiles sit on the faces they were drawn on.
+    const regionHit = this.filter.sketches ? this.raycaster.intersectObjects(this.regionMeshes, false)[0] : undefined;
+    if (regionHit && (!faceHit || regionHit.object.userData.profile || regionHit.distance <= faceHit.distance + this.orbit.distance * 0.002)) {
+      const { sketchId, region, frame } = regionHit.object.userData as { sketchId: Id; region: number; frame: SketchFrame };
+      const d = regionHit.point.clone().sub(new THREE.Vector3(...frame.origin));
+      const r3 = (v: number) => Math.round(v * 1000) / 1000;
+      const at: Vec2 = [r3(d.dot(new THREE.Vector3(...frame.xDir))), r3(d.dot(new THREE.Vector3(...frame.yDir)))];
+      // An edge right under the pointer still wins, so lines stay clickable.
+      const edge = this.filter.edges && !regionHit.object.userData.profile ? this.pickEdge(views, sp, regionHit.distance) : null;
+      if (edge) return edge;
+      const line = this.pickSketch(sp);
+      if (line) return line;
+      return { kind: "region", sketchId, index: region, at };
+    }
     // Edges first: they're thin, so they get a generous screen-space radius.
     if (this.filter.edges) {
       const edge = this.pickEdge(views, sp, faceHit?.distance ?? Infinity);

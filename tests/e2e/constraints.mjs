@@ -72,7 +72,9 @@ await step("02-draw-solver-lines", async () => {
   await page.keyboard.press("s");
   await page.locator(".tree__row", { hasText: "XY plane" }).click();
   await page.waitForTimeout(900);
-  await page.locator('[data-tour="tool-segment"]').click();
+  // Connected lines sit behind the Line button's arrow.
+  await page.locator(".split", { has: page.locator('[data-tour="tool-line"]') }).locator(".split__more").click();
+  await page.getByRole("menuitem", { name: /Constrained line/ }).click();
   box = await page.locator(".viewport").boundingBox();
   await click(-120, 80);
   await click(120, 80);

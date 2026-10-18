@@ -11,8 +11,6 @@ export type Density = "compact" | "comfortable" | "spacious";
 /** Who is using Whittle: tunes defaults, hints and which tools are up front. */
 export type Profile = "beginner" | "maker" | "engineer" | "designer" | "educator";
 export type NavPreset = "whittle" | "middle-pan" | "middle-orbit" | "middle-orbit-shift" | "right-orbit" | "trackpad";
-/** Names used by builds before 0.10, read from saved preferences. */
-const LEGACY_NAV: Record<string, NavPreset> = { fusion: "middle-pan", solidworks: "middle-orbit", blender: "middle-orbit-shift", onshape: "right-orbit" };
 
 export interface Prefs {
   theme: ThemePref;
@@ -40,6 +38,8 @@ export interface Prefs {
   meshQuality: "draft" | "standard" | "fine";
   /** Single-key shortcuts: Whittle's own, or the classic CAD letters (H hole, J joint, T trim, O offset, P project). */
   keys: "whittle" | "classic";
+  /** The desktop app looks for a newer release once a day. */
+  updateCheck: boolean;
 }
 
 export interface ThemeInfo {
@@ -118,6 +118,7 @@ export const DEFAULT_PREFS: Prefs = {
   smartSketch: null,
   meshQuality: "standard",
   keys: "whittle",
+  updateCheck: true,
 };
 
 /** The first look before the person's saved preferences arrive (from this device when there is no server). */
@@ -140,9 +141,9 @@ export function normalizePrefs(p: Partial<Prefs>): Prefs {
   if (!THEMES.some((t) => t.id === out.theme) && out.theme !== "system") out.theme = DEFAULT_PREFS.theme;
   out.scale = Math.min(1.3, Math.max(0.85, Number(out.scale) || 1));
   if (!["draft", "standard", "fine"].includes(out.meshQuality)) out.meshQuality = "standard";
-  out.nav = LEGACY_NAV[out.nav] ?? out.nav;
   if (!NAV_PRESETS.some((n) => n.id === out.nav)) out.nav = DEFAULT_PREFS.nav;
   if (out.keys !== "classic") out.keys = "whittle";
+  out.updateCheck = out.updateCheck !== false;
   return out;
 }
 
@@ -151,9 +152,12 @@ export function savePrefs(p: Prefs) {
   void writeStored("prefs", p, 500).catch(() => {});
 }
 
-/** Whether new shapes become constraint-ready geometry: the person's choice, else on for engineers and designers. */
+/**
+ * Whether new shapes become constraint-ready geometry: the person's choice, else on. Then every line and arc of a
+ * rectangle can be dimensioned, constrained, trimmed and filleted like any other, and sizes typed while drawing stay as dimensions.
+ */
 export function smartSketchOn(p: Prefs): boolean {
-  return p.smartSketch ?? (p.profile === "engineer" || p.profile === "designer");
+  return p.smartSketch ?? true;
 }
 
 /** The concrete theme for a preference ("system" follows the OS). */

@@ -5,7 +5,7 @@
  * Also holds fillet and chamfer for corners of that geometry.
  */
 import type { Id, SketchFeature, SketchGeom, Vec2 } from "./model";
-import { addArc, addCircle, addSpline, addConstraint, addLine, addPoint, dropLengths, dropUnused, geomType, pointAt, usedPoints } from "./constraints";
+import { addArc, addCircle, addEllipse, addSpline, addConstraint, addLine, addPoint, dropLengths, dropUnused, geomType, pointAt, usedPoints } from "./constraints";
 import type { ResolvedEntity } from "./sketch";
 
 type Geo = Pick<SketchFeature, "geometry" | "constraints">;
@@ -123,8 +123,20 @@ export function addEntityGeometry(sk: Geo, r: ResolvedEntity): string | undefine
       return undefined;
     }
     case "polyline": {
-      if (r.corner || (r.smooth && r.arcs.some(Boolean))) return "Outlines with rounded corners, or smooth ones that also have arcs, can't be converted. Turn the rounding off first.";
+      if (r.smooth && r.arcs.some(Boolean)) return "Smooth outlines that also have arcs can't be converted. Turn Smooth off first.";
       if (r.splines.some(Boolean)) return "Outlines that mix lines with spline points can't be converted yet.";
+      if (r.corner && !r.smooth) {
+        if (r.arcs.some(Boolean)) return "Outlines with both arcs and rounded corners can't be converted. Turn the rounding off first.";
+        // Straight lines first, then each corner rounded as a tangent arc with a radius dimension.
+        const lines = addChain(sk, r.points.map((p) => ({ p })), !r.open, { construction });
+        const radius = String(Math.round(r.corner * 1e4) / 1e4);
+        const corners = lines.flatMap((id, i) => {
+          const g = (sk.geometry ?? []).find((x) => x.id === id);
+          return g?.type === "line" && (!r.open || i < lines.length - 1) ? [g.b] : [];
+        });
+        for (const c of corners) filletCorner(sk, c, r.corner, radius);
+        return undefined;
+      }
       if (r.smooth && r.points.length >= 3) {
         addSpline(sk, r.points, !r.open, construction);
         return undefined;
@@ -132,8 +144,19 @@ export function addEntityGeometry(sk: Geo, r: ResolvedEntity): string | undefine
       addChain(sk, r.points.map((p, i) => ({ p, arc: r.arcs[i] })), !r.open, { construction });
       return undefined;
     }
+    case "ellipse": {
+      // The major axis along the longer radius; an unrotated one keeps its axes level.
+      const along = r.rx >= r.ry ? r.angle : r.angle + Math.PI / 2;
+      const major = Math.max(r.rx, r.ry);
+      const c = addPoint(sk, [r.cx, r.cy], construction);
+      const id = addEllipse(sk, c, [r.cx + major * Math.cos(along), r.cy + major * Math.sin(along)], Math.min(r.rx, r.ry), construction);
+      const g = (sk.geometry ?? []).find((x) => x.id === id);
+      const turn = Math.abs(Math.sin(along) * Math.cos(along));
+      if (g?.type === "ellipse" && turn < AXIS_TOL) addConstraint(sk, Math.abs(Math.cos(along)) > 0.5 ? "horizontal" : "vertical", [c, g.a]);
+      return undefined;
+    }
     default:
-      return "This kind of shape (ellipse, text or gear) can't be converted to constrainable geometry.";
+      return "Text and gears stay whole shapes: change them in the properties panel.";
   }
 }
 

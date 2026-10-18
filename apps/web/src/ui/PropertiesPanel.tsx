@@ -1,7 +1,7 @@
 /** Right-hand panel: the active feature's editor, the selected sketch shape, or an inspector. */
 import { useState } from "react";
 import type { Draft } from "immer";
-import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, geomType, trim } from "@whittle/core";
+import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, geomType, trim } from "@whittle/core";
 import { availableConstraints, canConstrain, constrainSelection, geoMutate, makeConstrainable, offsetSelection, patternSelection, mirrorSelection, setDimension } from "../state/constraintOps";
 import { commandById } from "../state/commands";
 import { areaText, volumeText } from "../state/measure";
@@ -492,7 +492,7 @@ function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
           {sketch.constraints!.map((c) => (
             <li key={c.id} className={`${sol?.bad.includes(c.id) ? "is-bad" : ""} ${sel.includes(c.id) ? "is-selected" : ""}`}>
               {c.value !== undefined ? (
-                <ExprInput label={CONSTRAINT_LABELS[c.type]} kind={c.type === "angle" ? "angle" : "length"} value={c.value} onChange={(v) => setDimension(c.id, v)} />
+                <ExprInput label={constraintLabel(sketch, c)} kind={c.type === "angle" ? "angle" : "length"} value={c.value} onChange={(v) => setDimension(c.id, v)} />
               ) : (
                 <button className="constraints__name" onClick={() => useApp.setState({ sketchSel: [c.id], selectedEntity: null })}>
                   {CONSTRAINT_LABELS[c.type]}
@@ -554,7 +554,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
                 <b>Draw:</b> pick a tool above, then click twice. Start typing to enter exact sizes.
               </p>
               <p>
-                <b>Holes:</b> shapes inside other shapes become holes automatically. The shaded area is what will become solid.
+                <b>Profiles:</b> every enclosed area is its own profile. Extrude uses the shaded area (shapes inside shapes are holes), or click just the areas you want, such as only the inner circle.
               </p>
               <p>
                 <b>Snapping:</b> points, centers and the grid. Hold Alt to place freely.

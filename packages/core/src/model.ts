@@ -181,6 +181,8 @@ export type SketchGeom =
   /** Counter-clockwise from `a` to `b` about the center `c`. */
   | { id: Id; type: "arc"; c: Id; a: Id; b: Id; construction?: boolean }
   | { id: Id; type: "circle"; c: Id; r: number; construction?: boolean }
+  /** Centered on `c`; `a` is the end of the major (longer) axis and `r` the minor radius. */
+  | { id: Id; type: "ellipse"; c: Id; a: Id; r: number; construction?: boolean }
   /** A smooth curve through the fit points (solver points, so constraints and dragging move it). */
   | { id: Id; type: "spline"; pts: Id[]; closed?: boolean; construction?: boolean };
 
@@ -200,6 +202,7 @@ export type ConstraintType =
   | "collinear"
   | "distance"
   | "radius"
+  | "diameter"
   | "angle";
 
 /**
@@ -382,6 +385,11 @@ export interface ExtrudeFeature extends FeatureBase {
   /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
   surface?: boolean;
   sketch: Id;
+  /**
+   * The sketch regions to use, each named by a point inside it (sketch coordinates). Unset: the whole sketch,
+   * with shapes inside other shapes as holes.
+   */
+  regions?: Vec2[];
   distance: Expr;
   /** "two" = `distance` one way and `distance2` the other. */
   /** "through" = cut (or add) through everything in that direction; `distance` is ignored. */
@@ -411,6 +419,11 @@ export interface RevolveFeature extends FeatureBase {
   /** Make a surface instead of a solid (sides only, no caps; open lines work too). */
   surface?: boolean;
   sketch: Id;
+  /**
+   * The sketch regions to use, each named by a point inside it (sketch coordinates). Unset: the whole sketch,
+   * with shapes inside other shapes as holes.
+   */
+  regions?: Vec2[];
   /** "line" spins around `axisLine`, a straight path or construction line in the sketch. */
   axis: "x" | "y" | "line";
   axisLine?: Id;

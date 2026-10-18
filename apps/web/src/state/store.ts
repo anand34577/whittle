@@ -7,12 +7,15 @@ import { create } from "zustand";
 import type { Draft } from "immer";
 import { produce } from "immer";
 import {
+  type EdgeRef,
+  type ConstraintType,
   type EntityType,
   type Feature,
   type Id,
   type OriginPlane,
   type SketchEntity,
   type SketchFeature,
+  type Vec2,
   type Vec3,
   type WhittleDocument,
   History,
@@ -36,7 +39,9 @@ export type Pick =
   | { kind: "body"; bodyId: Id; at?: Vec3 }
   | { kind: "plane"; plane: OriginPlane }
   | { kind: "cplane"; id: Id }
-  | { kind: "sketch"; sketchId: Id };
+  | { kind: "sketch"; sketchId: Id }
+  /** One enclosed area of a sketch: `index` into its regions, `at` the clicked point in sketch coordinates. */
+  | { kind: "region"; sketchId: Id; index: number; at: Vec2 };
 
 /**
  * "path" draws an open polyline (for sweeps and guides). "segment", "arc" and
@@ -105,9 +110,13 @@ export interface AppState {
   session: Session | null;
   selection: Pick[];
   hover: Pick | null;
+  /** Edges the pointer rests on while a fillet or chamfer is open: the model previews them as if picked. */
+  hoverEdges: EdgeRef[] | null;
   selectedEntity: Id | null;
   /** Selected constraint-driven geometry and constraints in the open sketch (may hold stale ids; check before use). */
   sketchSel: Id[];
+  /** A constraint picked before its geometry: applied as soon as the selection fits it (Esc or another tool stops it). */
+  pendingConstraint: ConstraintType | null;
   /** Overlapping bodies found by the interference check (drawn as red boxes). */
   interference: { a: Id; b: Id; volume: number; bbox: [Vec3, Vec3] }[];
   /** Points placed so far by the active sketch tool (drives the hint line). */
@@ -154,8 +163,10 @@ export const useApp = create<AppState>(() => ({
   session: null,
   selection: [],
   hover: null,
+  hoverEdges: null,
   selectedEntity: null,
   sketchSel: [],
+  pendingConstraint: null,
   interference: [],
   sketchStep: 0,
   theme: resolveTheme(initialPrefs.theme),
@@ -240,6 +251,7 @@ export function replaceDocument(doc: WhittleDocument, fileName: string | null) {
     selectedEntity: null,
     // Marks and picks from the previous design mean nothing in this one.
     sketchSel: [],
+    pendingConstraint: null,
     sketchStep: 0,
     interference: [],
     measure: [],
@@ -442,13 +454,14 @@ export function enterSketch(sketchId: Id, isNew: boolean) {
     hover: null,
     selectedEntity: null,
     sketchSel: [],
+    pendingConstraint: null,
     viewRequest: { kind: "normal", at: Date.now() },
   });
 }
 
 export function setSketchTool(tool: SketchTool) {
   const { mode } = get();
-  if (mode.kind === "sketch") set({ mode: { ...mode, tool }, selectedEntity: tool === "select" ? get().selectedEntity : null });
+  if (mode.kind === "sketch") set({ mode: { ...mode, tool }, selectedEntity: tool === "select" ? get().selectedEntity : null, pendingConstraint: null });
 }
 
 export function finishSketch() {
@@ -467,6 +480,7 @@ export function finishSketch() {
     mode: { kind: "model" },
     selectedEntity: null,
     sketchSel: [],
+    pendingConstraint: null,
     selection: sk ? [{ kind: "sketch", sketchId: sk.id }] : [],
   });
   if (mode.isNew && sk) toast("ok", "Sketch finished. Press E to extrude it.", undefined, true);

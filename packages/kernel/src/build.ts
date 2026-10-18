@@ -19,7 +19,7 @@ import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeeping
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
 
-import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath } from "./shared";
+import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
 export * from "./shared";
 
 interface SketchBuilt {
@@ -33,6 +33,18 @@ interface SketchBuilt {
   error?: string;
   /** Triangles of the closed profile regions (world coordinates), for display. */
   fill?: Float32Array;
+  /** Every enclosed area on its own, so a feature can use some of them. */
+  regions?: BuiltRegion[];
+}
+
+interface BuiltRegion {
+  drawing: Drawing;
+  /** World triangles, for display and picking. */
+  fill?: Float32Array;
+  /** The same triangles in sketch coordinates (xy per vertex), to find which region holds a point. */
+  local: Float32Array;
+  /** A point inside the region (sketch coordinates). */
+  at: [number, number];
 }
 
 interface Snapshot {
@@ -292,7 +304,7 @@ export class Builder {
       if (f.type !== "sketch") continue;
       const s = prev.sketches.get(f.id);
       // Copy the fill: the cached array must survive being transferred to the UI.
-      if (s) sketches.push({ ...s.frame, fill: s.fill ? s.fill.slice() : undefined, solution: s.solution });
+      if (s) sketches.push({ ...s.frame, fill: s.fill ? s.fill.slice() : undefined, solution: s.solution, regions: s.regions?.flatMap((r) => (r.fill ? [{ fill: r.fill.slice(), at: r.at }] : [])) });
     }
     const planes: SketchFrame[] = [];
     for (const f of doc.features.slice(0, end)) {
@@ -539,7 +551,7 @@ export class Builder {
         } catch (e) {
           error = describeError(f, e);
         }
-        sketches.set(f.id, { frame, drawing, error, source, solution, fill: drawing ? profileFill(drawing, frame) : undefined });
+        sketches.set(f.id, { frame, drawing, error, source, solution, fill: drawing ? profileFill(drawing, frame) : undefined, regions: drawing ? builtRegions(source, frame, ev) : undefined });
         if (error) throw new FeatureError(error);
         return warning;
       }
@@ -552,7 +564,10 @@ export class Builder {
         const thin = f.type === "extrude" && f.thin ? ev.num(f.thin, "length", "Wall thickness") : 0;
         if (thin < 0) throw new FeatureError("The wall thickness must be greater than zero.");
         const surf = !!f.surface;
-        const profile = !surf && thin > 0 && f.type === "extrude" ? thinProfile(sk, thin, f.thinSide ?? "center", ev) : sk.drawing;
+        let regionWarning: string | undefined;
+        const picked = !surf && thin <= 0 && f.regions?.length ? regionProfile(sk, f.regions) : null;
+        if (picked?.warning) regionWarning = picked.warning;
+        const profile = !surf && thin > 0 && f.type === "extrude" ? thinProfile(sk, thin, f.thinSide ?? "center", ev) : (picked?.drawing ?? sk.drawing);
         if (!profile && !surf) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : "The sketch has no closed shapes yet. Draw a rectangle or circle first.");
         let tool: Shape3D;
         if (f.type === "extrude") {
@@ -602,7 +617,7 @@ export class Builder {
             tool = clean(sketch.revolve(dir, { origin, angle: d }) as Shape3D);
           }
         }
-        return applyOp(bodies, f.id, surf ? "new" : f.op, f.target, tool);
+        return applyOp(bodies, f.id, surf ? "new" : f.op, f.target, tool) ?? regionWarning;
       }
 
       case "loft": {
@@ -1321,6 +1336,69 @@ function importKey(f: { id: Id; data: string }): string {
   const key = `${f.id}:${f.data.length}:${hashKey(f.data)}`;
   importKeys.set(f.id, { data: f.data, key });
   return key;
+}
+
+/** The sketch's regions, each meshed for picking; undefined when they can't be worked out (picking regions is then unavailable). */
+function builtRegions(source: SketchFeature, frame: SketchFrame, ev: Evaluator): BuiltRegion[] | undefined {
+  try {
+    const drawings = sketchRegionDrawings(source, ev);
+    if (!drawings || drawings.length < 2) return undefined;
+    return drawings.map((drawing) => {
+      const fill = profileFill(drawing, frame);
+      const local = new Float32Array(((fill?.length ?? 0) / 3) * 2);
+      let best = -1;
+      let at: [number, number] = [0, 0];
+      for (let v = 0; fill && v < fill.length / 3; v++) {
+        const d: Vec3 = [fill[v * 3]! - frame.origin[0], fill[v * 3 + 1]! - frame.origin[1], fill[v * 3 + 2]! - frame.origin[2]];
+        local[v * 2] = dot(d, frame.xDir);
+        local[v * 2 + 1] = dot(d, frame.yDir);
+      }
+      // The centre of the largest triangle is safely inside, even for rings and crescents.
+      for (let t = 0; t + 5 < local.length; t += 6) {
+        const [ax, ay, bx, by, cx, cy] = local.subarray(t, t + 6) as unknown as number[];
+        const area = Math.abs((bx! - ax!) * (cy! - ay!) - (cx! - ax!) * (by! - ay!));
+        if (area > best) {
+          best = area;
+          at = [Math.round(((ax! + bx! + cx!) / 3) * 1000) / 1000, Math.round(((ay! + by! + cy!) / 3) * 1000) / 1000];
+        }
+      }
+      return { drawing, fill, local, at };
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function inTriangles(local: Float32Array, [x, y]: [number, number]): boolean {
+  for (let t = 0; t + 5 < local.length; t += 6) {
+    const [ax, ay, bx, by, cx, cy] = local.subarray(t, t + 6) as unknown as number[];
+    const d1 = (x - bx!) * (ay! - by!) - (ax! - bx!) * (y - by!);
+    const d2 = (x - cx!) * (by! - cy!) - (bx! - cx!) * (y - cy!);
+    const d3 = (x - ax!) * (cy! - ay!) - (cx! - ax!) * (y - ay!);
+    if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) return true;
+  }
+  return false;
+}
+
+/** The chosen regions of a sketch fused into one profile. A point that no longer falls in any region takes the nearest one, with a warning. */
+function regionProfile(sk: SketchBuilt, points: [number, number][]): { drawing: Drawing; warning?: string } {
+  const regions = sk.regions ?? [];
+  if (!regions.length) {
+    if (!sk.drawing) throw new FeatureError("The sketch has no closed shapes yet. Draw a rectangle or circle first.");
+    return { drawing: sk.drawing };
+  }
+  const chosen = new Set<BuiltRegion>();
+  let moved = false;
+  for (const p of points) {
+    const hit = regions.find((r) => inTriangles(r.local, p));
+    if (hit) chosen.add(hit);
+    else {
+      moved = true;
+      chosen.add(regions.reduce((a, b) => (Math.hypot(a.at[0] - p[0], a.at[1] - p[1]) <= Math.hypot(b.at[0] - p[0], b.at[1] - p[1]) ? a : b)));
+    }
+  }
+  const drawing = [...chosen].map((r) => r.drawing.clone()).reduce((a, b) => a.fuse(b));
+  return { drawing, warning: moved ? "The sketch changed, so a chosen profile was matched to the nearest area. Check the selected profiles." : undefined };
 }
 
 /** Triangulate a sketch's closed regions for the translucent profile fill. */

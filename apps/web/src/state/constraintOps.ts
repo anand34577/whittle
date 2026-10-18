@@ -6,6 +6,8 @@
  */
 import type { Draft } from "immer";
 import {
+  type SketchConstraint,
+  constraintLabel,
   type ConstraintType,
   type Id,
   type SketchFeature,
@@ -46,7 +48,9 @@ import {
 import { promptDialog } from "./dialogs";
 import { breakLine, moveGeometry, rectPattern, scaleGeometry } from "@whittle/core";
 import { smartSketchOn } from "./prefs";
-import { type Pick, findFeature, sketchMutate, toast, useApp } from "./store";
+import { nearestOnCurve } from "../viewport/inference";
+import type { DrawnRelation } from "../viewport/sketchTools";
+import { type Pick, findFeature, setSketchTool, sketchMutate, toast, useApp } from "./store";
 
 /** The open sketch and its latest solution. */
 export function openSketch(): { sk: SketchFeature; sol?: SketchSolution } | null {
@@ -81,10 +85,105 @@ export function geoMutate(label: string, recipe: (sk: Draft<SketchFeature>) => v
 
 const AXIS_TOL = 1e-3;
 
+/**
+ * Relations added automatically by the last drawing step (joins to snapped points, Horizontal, Parallel…).
+ * One can turn out to be implied by the rest (a level line drawn between two points already level), which
+ * the solver reports; those are taken out again, in the same undo step, so drawing never leaves red constraints.
+ */
+let autoDrawn: { sketch: Id; ids: Set<Id>; key: string } | null = null;
+let drawCount = 0;
+
+/** A drawing edit: like geoMutate, remembering the relations it added so redundant ones can be taken out. */
+function drawMutate(label: string, recipe: (sk: Draft<SketchFeature>) => void) {
+  const key = `draw${++drawCount}`;
+  const added = new Set<Id>();
+  let sketch: Id | undefined;
+  geoMutate(
+    label,
+    (sk) => {
+      sketch = sk.id;
+      const before = new Set((sk.constraints ?? []).map((c) => c.id));
+      recipe(sk);
+      for (const c of sk.constraints ?? []) if (!before.has(c.id) && !DIMENSIONS.includes(c.type)) added.add(c.id);
+    },
+    key,
+  );
+  autoDrawn = sketch && added.size ? { sketch, ids: added, key } : null;
+}
+
+/** Which automatic relation to give up first: alignments before joins, so pieces stay connected. */
+const KEEP_ORDER: Partial<Record<ConstraintType, number>> = { coincident: 3, midpoint: 2, symmetric: 1 };
+
+useApp.subscribe((s) => {
+  const a = autoDrawn;
+  if (!a || s.builtDoc !== s.doc || s.mode.kind !== "sketch" || s.mode.sketchId !== a.sketch) return;
+  const sol = s.regen?.sketches.find((x) => x.id === a.sketch)?.solution;
+  if (!sol) return;
+  const sk = findFeature(s.doc, a.sketch, "sketch");
+  const type = (id: Id) => sk?.constraints?.find((c) => c.id === id)?.type;
+  const ours = sol.state === "over" ? sol.bad.filter((id) => a.ids.has(id)) : [];
+  if (!ours.length) {
+    autoDrawn = null;
+    return;
+  }
+  // One at a time: taking one out can settle the rest, and the solver looks again after each.
+  const drop = ours.sort((x, y) => (KEEP_ORDER[type(x)!] ?? 0) - (KEEP_ORDER[type(y)!] ?? 0))[0]!;
+  a.ids.delete(drop);
+  sketchMutate("Tidy constraints", (d) => void (d.constraints = (d.constraints ?? []).filter((c) => c.id !== drop)), a.key);
+});
+/** Drawn shapes keep three decimals, so a point snapped onto something lands within this of it. */
+const JOIN_TOL = 2e-3;
+
+/**
+ * New points that were snapped onto the origin, an existing point or an existing curve (an intersection is on
+ * two) get Coincident, so they stay joined when the sketch changes instead of just touching.
+ */
+export function joinNewPoints(sk: Draft<SketchFeature>, before: ReadonlySet<Id>) {
+  const geo = resolveGeometry(sk as SketchFeature);
+  const old = geo.filter((g) => before.has(g.id));
+  const fresh = geo.filter((g) => g.type === "point" && !before.has(g.id));
+  for (const g of fresh) {
+    if (g.type !== "point") continue;
+    const near = (q: Vec2) => Math.hypot(q[0] - g.p[0], q[1] - g.p[1]) < JOIN_TOL;
+    if (near([0, 0])) {
+      addConstraint(sk, "coincident", [g.id, "origin"]);
+      continue;
+    }
+    const point = old.find((o) => o.type === "point" && near(o.p));
+    if (point) {
+      addConstraint(sk, "coincident", [g.id, point.id]);
+      continue;
+    }
+    const middle = old.find((o) => o.type === "line" && near([(o.a[0] + o.b[0]) / 2, (o.a[1] + o.b[1]) / 2]));
+    if (middle) {
+      addConstraint(sk, "midpoint", [g.id, middle.id]);
+      continue;
+    }
+    const skip = new Set<Id>();
+    for (let hit = nearestOnCurve(old, g.p, JOIN_TOL, skip); hit; hit = nearestOnCurve(old, g.p, JOIN_TOL, skip)) {
+      addConstraint(sk, "coincident", [g.id, hit.curve]);
+      skip.add(hit.curve);
+    }
+  }
+}
+
+/** Keep what the drawn lines lined up with; `lines` are the new chain's lines in order ("#k" in a relation is the k-th). */
+function keepRelations(sk: Draft<SketchFeature>, lines: Id[], relations: DrawnRelation[] = []) {
+  for (const r of relations) {
+    const line = lines[r.seg];
+    const ref = r.ref.startsWith("#") ? lines[Number(r.ref.slice(1))] : r.ref;
+    // A level or upright line is already held by Horizontal/Vertical.
+    if (!line || !ref || line === ref || sk.constraints?.some((c) => c.refs[0] === line && (c.type === "horizontal" || c.type === "vertical"))) continue;
+    addConstraint(sk, r.type, r.type === "tangent" ? [ref, line] : [line, ref]);
+  }
+}
+
 /** A chain of lines through the points (ids reuse existing points); nearly level lines get Horizontal/Vertical. */
-export function addLines(pts: (Vec2 | Id)[], closed: boolean, at: (p: Vec2 | Id) => Vec2) {
+export function addLines(pts: (Vec2 | Id)[], closed: boolean, at: (p: Vec2 | Id) => Vec2, relations?: DrawnRelation[]) {
   if (pts.length < 2) return;
-  geoMutate("Draw lines", (sk) => {
+  drawMutate("Draw lines", (sk) => {
+    const before = new Set((sk.geometry ?? []).map((g) => g.id));
+    const made: Id[] = [];
     const ends = [...pts];
     if (closed) ends.push(pts[0]!);
     let prev: Vec2 | Id = ends[0]!;
@@ -92,6 +191,7 @@ export function addLines(pts: (Vec2 | Id)[], closed: boolean, at: (p: Vec2 | Id)
     for (let i = 1; i < ends.length; i++) {
       const next = closed && i === ends.length - 1 ? firstPoint! : ends[i]!;
       const id = addLine(sk, prev, next);
+      made.push(id);
       const line = geomById(sk, id);
       if (line?.type !== "line") continue;
       if (i === 1) firstPoint = line.a;
@@ -100,13 +200,17 @@ export function addLines(pts: (Vec2 | Id)[], closed: boolean, at: (p: Vec2 | Id)
       else if (Math.abs(a[0] - b[0]) < AXIS_TOL) addConstraint(sk, "vertical", [id]);
       prev = line.b;
     }
+    joinNewPoints(sk, before);
+    keepRelations(sk, made, relations);
   });
 }
 
 export function addArcGeometry(a: Vec2 | Id, b: Vec2 | Id, through: Vec2) {
   let failed = false;
-  geoMutate("Draw arc", (sk) => {
+  drawMutate("Draw arc", (sk) => {
+    const before = new Set((sk.geometry ?? []).map((g) => g.id));
     failed = addArc(sk, a, b, through) === null;
+    joinNewPoints(sk, before);
   });
   if (failed) toast("info", "Those three points are in a straight line. Pick a point off the line for the arc's bulge.");
 }
@@ -160,7 +264,11 @@ export function addTangentCircleGeometry(refs: Id[], guess: Vec2) {
 
 export function addCircleGeometry(c: Vec2 | Id, r: number) {
   if (r <= 1e-9) return;
-  geoMutate("Draw circle", (sk) => void addCircle(sk, c, r));
+  drawMutate("Draw circle", (sk) => {
+    const before = new Set((sk.geometry ?? []).map((g) => g.id));
+    addCircle(sk, c, r);
+    joinNewPoints(sk, before);
+  });
 }
 
 export function addSplineGeometry(pts: (Vec2 | Id)[], closed: boolean) {
@@ -176,6 +284,56 @@ export function availableConstraints(): ConstraintType[] {
   return o ? constraintsFor(o.sk, sel) : [];
 }
 
+/** What to click for each constraint, said while it waits for picks. */
+export const CONSTRAINT_PICKS: Record<ConstraintType, string> = {
+  coincident: "click two points, or a point and a curve",
+  horizontal: "click a line, or two points",
+  vertical: "click a line, or two points",
+  parallel: "click two lines",
+  perpendicular: "click two lines",
+  tangent: "click a line and an arc, or two arcs",
+  equal: "click two lines, or two circles or arcs",
+  fixed: "click what to pin in place",
+  symmetric: "click two points, then the line (or point) to mirror them about",
+  midpoint: "click a point, then a line",
+  collinear: "click two lines",
+  distance: "click a line, or two items",
+  radius: "click a circle or an arc",
+  diameter: "click a circle",
+  angle: "click a line, or two lines",
+};
+
+/** The most picks a constraint takes: with this many and still no fit, the picks start over. */
+const MAX_PICKS: Record<ConstraintType, number> = { coincident: 2, horizontal: 2, vertical: 2, parallel: 2, perpendicular: 2, tangent: 2, equal: 2, fixed: 1, symmetric: 3, midpoint: 2, collinear: 2, distance: 2, radius: 1, diameter: 1, angle: 2 };
+
+/**
+ * A constraint button: applies to the selection when it fits; otherwise waits, and applies as soon as the picked
+ * geometry fits, then waits for the next pair (Esc stops), the way constraint tools work in most sketchers.
+ */
+export function startConstraint(type: ConstraintType) {
+  if (availableConstraints().includes(type)) {
+    void constrainSelection(type);
+    return;
+  }
+  setSketchTool("select");
+  useApp.setState({ pendingConstraint: type, sketchSel: [], selectedEntity: null });
+}
+
+useApp.subscribe((s, prev) => {
+  const type = s.pendingConstraint;
+  if (!type || s.sketchSel === prev.sketchSel || !s.sketchSel.length) return;
+  if (s.mode.kind !== "sketch") return useApp.setState({ pendingConstraint: null });
+  if (availableConstraints().includes(type)) {
+    void constrainSelection(type).then((err) => {
+      if (err) toast("info", err);
+      useApp.setState({ sketchSel: [] });
+    });
+  } else if (sketchSelection().length >= MAX_PICKS[type]) {
+    toast("info", `${CONSTRAINT_LABELS[type]} doesn't fit those. Next time ${CONSTRAINT_PICKS[type]}.`);
+    useApp.setState({ sketchSel: [] });
+  }
+});
+
 /** Value text for a dimension's starting value, in the document's units. */
 export function measuredText(type: ConstraintType, refs: Id[]): string {
   const o = openSketch();
@@ -189,17 +347,18 @@ export function measuredText(type: ConstraintType, refs: Id[]): string {
 function checkValue(type: ConstraintType, text: string): string | null {
   const r = documentEvaluator(useApp.getState().doc).eval(text, type === "angle" ? "angle" : "length");
   if (!r.ok) return r.error;
-  if (type !== "angle" && r.value < (type === "radius" ? 1e-9 : 0)) return type === "radius" ? "A radius must be greater than zero" : "A distance can't be negative";
+  const round = type === "radius" || type === "diameter";
+  if (type !== "angle" && r.value < (round ? 1e-9 : 0)) return round ? `A ${type} must be greater than zero` : "A distance can't be negative";
   return null;
 }
 
 /** Add a constraint to the selection (asking for the value of a dimension). Returns an error message, if any. */
-export async function constrainSelection(type: ConstraintType, value?: string, at?: [number, number]): Promise<string | undefined> {
+export async function constrainSelection(type: ConstraintType, value?: string, at?: [number, number], title?: string): Promise<string | undefined> {
   const refs = sketchSelection();
   if (DIMENSIONS.includes(type) && value === undefined) {
     const v = await promptDialog({
       at,
-      title: CONSTRAINT_LABELS[type],
+      title: title ?? (openSketch() ? constraintLabel(openSketch()!.sk, { id: "", type, refs }) : CONSTRAINT_LABELS[type]),
       label: type === "angle" ? "Angle (degrees)" : "Value",
       message: "A number or a formula using parameters, e.g. width / 2.",
       initial: measuredText(type, refs),
@@ -218,7 +377,7 @@ export async function constrainSelection(type: ConstraintType, value?: string, a
   // First dimension on a sketch drawn at a very different size: scale it all, so one number doesn't turn the rest inside out.
   const o = openSketch();
   let scale = 1;
-  if (o && value !== undefined && (type === "distance" || type === "radius") && !(o.sk.constraints ?? []).some((c) => DIMENSIONS.includes(c.type))) {
+  if (o && value !== undefined && (type === "distance" || type === "radius" || type === "diameter") && !(o.sk.constraints ?? []).some((c) => DIMENSIONS.includes(c.type))) {
     const want = documentEvaluator(useApp.getState().doc).eval(value, "length");
     const have = measureDimension(o.sk, type, refs, o.sol);
     if (want.ok && have > 1e-9 && want.value > 0 && (want.value / have > 2.5 || want.value / have < 0.4)) scale = want.value / have;
@@ -321,6 +480,7 @@ export function movePoints(ids: Id[], dx: number, dy: number) {
         else if (g?.type === "arc") pts.add(g.a).add(g.b).add(g.c);
         else if (g?.type === "spline") g.pts.forEach((p) => pts.add(p));
         else if (g?.type === "circle") pts.add(g.c);
+        else if (g?.type === "ellipse") pts.add(g.c).add(g.a);
       }
       for (const g of sk.geometry ?? []) {
         if (g.type === "point" && pts.has(g.id)) {
@@ -333,18 +493,61 @@ export function movePoints(ids: Id[], dx: number, dy: number) {
   );
 }
 
-/** Shapes that can become constraint geometry (not ellipses, text or gears, nor rounded outlines). */
+/** Shapes that can become constraint geometry (not text or gears, nor outlines that mix splines or rounding with arcs). */
 export function canConstrain(e: SketchEntity): boolean {
-  if (e.type === "polyline") return !e.corner && !e.points.some((p) => p[2] === "spline") && !(e.smooth && e.points.some((p) => p[2]));
-  return e.type === "rect" || e.type === "circle" || e.type === "polygon" || e.type === "slot";
+  if (e.type === "polyline") return !e.points.some((p) => p[2] === "spline") && !(e.smooth && e.points.some((p) => p[2])) && !(e.corner && (e.smooth || e.points.some((p) => p[2])));
+  return e.type === "rect" || e.type === "circle" || e.type === "polygon" || e.type === "slot" || e.type === "ellipse";
+}
+
+/** Sizes typed while drawing (mm): they become driving dimensions, so the shape keeps them when other things change. */
+export interface TypedSizes {
+  /** What the drawn lines lined up with while drawing (outlines). */
+  relations?: DrawnRelation[];
+  width?: number;
+  height?: number;
+  diameter?: number;
+  /** An ellipse's radii along X and Y. */
+  rx?: number;
+  ry?: number;
 }
 
 /** Add a new shape as constraint geometry when the preference is on. Returns false when it should be added as a plain shape. */
-export function addShapeAsGeometry(e: SketchEntity): boolean {
+export function addShapeAsGeometry(e: SketchEntity, sizes: TypedSizes = {}): boolean {
   if (!smartSketchOn(useApp.getState().prefs) || !canConstrain(e)) return false;
   try {
     const r = resolveEntity(e, documentEvaluator(useApp.getState().doc));
-    geoMutate("Add shape", (sk) => void addEntityGeometry(sk, r));
+    const units = useApp.getState().doc.units;
+    const len = (mm: number) => trim(mm / LENGTH_TO_MM[units], 4);
+    drawMutate("Add shape", (sk) => {
+      const before = new Set((sk.geometry ?? []).map((g) => g.id));
+      addEntityGeometry(sk, r);
+      const made = (sk.geometry ?? []).filter((g) => !before.has(g.id));
+      const lines = made.filter((g) => g.type === "line").map((g) => g.id);
+      const circle = made.find((g) => g.type === "circle")?.id;
+      // A rectangle's first line is its bottom edge (the width), the second its right edge (the height).
+      if (r.type === "rect" && !r.corner && lines.length === 4) {
+        if (sizes.width !== undefined) addConstraint(sk, "distance", [lines[0]!], len(sizes.width));
+        if (sizes.height !== undefined) addConstraint(sk, "distance", [lines[1]!], len(sizes.height));
+      }
+      if (circle && sizes.diameter !== undefined) addConstraint(sk, "diameter", [circle], len(sizes.diameter));
+      const ellipse = made.find((g) => g.type === "ellipse");
+      if (ellipse?.type === "ellipse" && r.type === "ellipse") {
+        // The longer radius is the distance from the center to the major end, the shorter the minor radius.
+        const xMajor = r.rx >= r.ry;
+        const major = (v: number) => addConstraint(sk, "distance", [ellipse.c, ellipse.a], len(v));
+        const minor = (v: number) => addConstraint(sk, "radius", [ellipse.id], len(v));
+        if (sizes.rx !== undefined) (xMajor ? major : minor)(sizes.rx);
+        if (sizes.ry !== undefined) (xMajor ? minor : major)(sizes.ry);
+      }
+      // Points drawn onto the origin, a point or a curve stay there, so a centered part is fully defined by its sizes alone.
+      joinNewPoints(sk, before);
+      if (r.type === "rect" && !r.corner && lines.length === 4) {
+        const corners = lines.map((id) => (sk.geometry ?? []).find((g) => g.id === id)).map((g) => (g?.type === "line" ? g.a : ""));
+        const centre: Vec2 = [r.x + r.w / 2, r.y + r.h / 2];
+        if (Math.hypot(centre[0], centre[1]) < 1e-6 && corners[0] && corners[2]) addConstraint(sk, "symmetric", [corners[0], corners[2], "origin"]);
+      }
+      if (r.type === "polyline" && !r.arcs.some(Boolean)) keepRelations(sk, lines, sizes.relations);
+    });
     useApp.setState({ selectedEntity: null });
     return true;
   } catch {
@@ -358,7 +561,7 @@ export function makeConstrainable(id: Id | null = useApp.getState().selectedEnti
   const e = o?.sk.entities.find((x) => x.id === id);
   if (!o || !e) return;
   if (!canConstrain(e)) {
-    toast("info", "Ellipses, text, gears and rounded outlines can't be converted. Rectangles, circles, polygons, slots and lines can.");
+    toast("info", "Text, gears and outlines that mix spline points or rounding with arcs stay whole shapes. Rectangles, circles, ellipses, polygons, slots and lines can be converted.");
     return;
   }
   let msg: string | undefined;
@@ -398,7 +601,22 @@ export async function dimensionPick(id: Id, additive: boolean, at?: [number, num
     return;
   }
   useApp.setState({ sketchSel: [id], selectedEntity: null });
-  if (kind === "circle" || kind === "arc") await constrainSelection("radius", undefined, at);
+  // Circles are sized by diameter (as holes and shafts are specified), arcs by radius.
+  if (kind === "circle") await constrainSelection("diameter", undefined, at);
+  else if (kind === "arc") await constrainSelection("radius", undefined, at);
+  else if (kind === "ellipse") {
+    // The major radius first (center to the major end), then the minor one.
+    const g = geomById(o.sk, id);
+    if (g?.type !== "ellipse") return;
+    const has = (c: SketchConstraint) => !c.driven && (c.type === "distance" ? c.refs.includes(g.c) && c.refs.includes(g.a) : c.type === "radius" && c.refs[0] === id);
+    const dims = (o.sk.constraints ?? []).filter(has);
+    const major = dims.some((c) => c.type === "distance");
+    if (!major) {
+      useApp.setState({ sketchSel: [g.c, g.a] });
+      await constrainSelection("distance", undefined, at, "Major radius");
+    } else if (!dims.some((c) => c.type === "radius")) await constrainSelection("radius", undefined, at, "Minor radius");
+    else toast("info", "Both radii of this ellipse are set. Double-click a dimension to change it.");
+  }
   else if (kind === "line" && !additive && id !== "xaxis" && id !== "yaxis") await constrainSelection("distance", undefined, at);
 }
 

@@ -43,7 +43,7 @@ export interface ProviderPreset {
 export const PRESETS: ProviderPreset[] = [
   { id: "claude", label: "Claude (Anthropic)", kind: "anthropic", baseUrl: "", model: "claude-opus-5-5", needsKey: true, blurb: "Anthropic's Claude models. Needs an API key from console.anthropic.com." },
   { id: "openai", label: "OpenAI", kind: "openai", baseUrl: "https://api.openai.com/v1", model: "", needsKey: true, blurb: "Any OpenAI chat model with tool calling. Needs an API key." },
-  { id: "ollama", label: "Ollama (local)", kind: "openai", baseUrl: "http://localhost:11434/v1", model: "qwen2.5:14b", needsKey: false, blurb: "Runs on your own computer. Start Ollama with OLLAMA_ORIGINS set to allow this app, and pull a tool-capable model." },
+  { id: "ollama", label: "Ollama (local)", kind: "openai", baseUrl: "http://localhost:11434/v1", model: "qwen2.5:14b", needsKey: false, blurb: "Runs on your own computer (or another one on your network: use its address, e.g. http://192.168.1.20:11434/v1, and start Ollama with OLLAMA_HOST=0.0.0.0). Set OLLAMA_ORIGINS to allow this app, and pull a tool-capable model." },
   { id: "lmstudio", label: "LM Studio (local)", kind: "openai", baseUrl: "http://localhost:1234/v1", model: "", needsKey: false, blurb: "Local models through LM Studio's server (enable CORS in its settings)." },
   { id: "openrouter", label: "OpenRouter", kind: "openai", baseUrl: "https://openrouter.ai/api/v1", model: "", needsKey: true, blurb: "Many hosted models behind one key." },
   { id: "custom", label: "Other (OpenAI-compatible)", kind: "openai", baseUrl: "", model: "", needsKey: false, blurb: "vLLM, LocalAI, a company gateway or any endpoint that speaks the OpenAI chat API." },
@@ -200,6 +200,20 @@ type OaiMessage =
 
 const oaiHistory: OaiMessage[] = [];
 
+/** Why a fetch to a model server failed, as far as the browser lets us tell. */
+export function unreachable(baseUrl: string, page: string = location.href): string {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return `"${baseUrl}" isn't a valid address. It should look like http://192.168.1.20:11434/v1.`;
+  }
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol === "http:" && !local && new URL(page).protocol === "https:")
+    return `This page is served over HTTPS, so the browser won't send requests to the plain-HTTP server at ${url.host}. Open the app over http://, or put the model server behind HTTPS.`;
+  return `Couldn't reach ${baseUrl}. Check the server is running, listening on the network (Ollama: OLLAMA_HOST=0.0.0.0) and allows requests from this app (Ollama: OLLAMA_ORIGINS=*; LM Studio: enable CORS).`;
+}
+
 async function runOpenAI(p: ProviderConfig, text: string, signal: AbortSignal) {
   if (!p.baseUrl) throw new Error("Set the endpoint URL for this provider in Settings.");
   if (!p.model) throw new Error("Choose a model for this provider in Settings.");
@@ -217,7 +231,7 @@ async function runOpenAI(p: ProviderConfig, text: string, signal: AbortSignal) {
       });
     } catch (e) {
       if (signal.aborted) throw e;
-      throw new Error(`Couldn't reach ${p.baseUrl}. If it's a local server, check it's running and allows requests from this app (CORS).`);
+      throw new Error(unreachable(p.baseUrl));
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");

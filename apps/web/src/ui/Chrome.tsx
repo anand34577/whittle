@@ -129,11 +129,106 @@ function ToolButton({ c, active, big }: { c: Command; active?: boolean; big?: bo
   );
 }
 
+/** Menu rows for commands ("#Heading" entries become section heads), with hints or the reason one can't run. */
+function MenuItems({ ids, onPick }: { ids: string[]; onPick: (c: Command) => void }) {
+  const state = useApp();
+  return (
+    <div role="menu">
+      {ids.map((id) => {
+        if (id.startsWith("#")) return <div key={id} className="groupmenu__head">{id.slice(1)}</div>;
+        const c = commandById(id);
+        const why = whyUnavailable(c, state);
+        return (
+          <button key={id} role="menuitem" disabled={!!why} className={`groupmenu__item ${c.on?.(state) ? "is-on" : ""}`} onClick={() => onPick(c)}>
+            <Icon name={c.icon ?? "more"} size={20} />
+            <span className="groupmenu__text">
+              <b>{c.label}</b>
+              {why ? <small className="groupmenu__why">{why}</small> : c.hint && <small>{c.hint}</small>}
+            </span>
+            {c.keys && <kbd>{c.keys}</kbd>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The variant of each tool family used last, so its button repeats it (this session). */
+const lastVariant: Record<string, string> = {};
+
+/**
+ * A tool with variants (rectangle: 2-point, center, 3-point): the button runs the variant used last, the narrow
+ * arrow beside it lists the others. One button per kind of shape keeps the bar short without hiding anything.
+ */
+function SplitTool({ family, ids, activeId }: { family: string; ids: string[]; activeId?: string }) {
+  const state = useApp();
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
+  const [, redraw] = useState(0);
+  const current = activeId && ids.includes(activeId) ? activeId : ids.includes(lastVariant[family] ?? "") ? lastVariant[family]! : ids[0]!;
+  const c = commandById(current);
+  const why = whyUnavailable(c, state);
+  const active = (!!activeId && ids.includes(activeId)) || ids.some((id) => commandById(id).on?.(state));
+  const run = (cmd: Command) => {
+    lastVariant[family] = cmd.id;
+    setOpen(false);
+    redraw((n) => n + 1);
+    cmd.run();
+  };
+  return (
+    <div className={`split ${active ? "is-active" : ""}`} ref={setAnchor}>
+      <button
+        className={`tool ${active ? "is-active" : ""}`}
+        onClick={() => run(c)}
+        disabled={!!why}
+        data-tour={c.id}
+        aria-pressed={active}
+        title={`${c.label}${c.keys ? `  (${c.keys})` : ""}${why ? "\n" + why : c.hint ? "\n" + c.hint : ""}`}
+      >
+        <Icon name={c.icon ?? "more"} size={20} />
+        <span className="tool__label">{family}</span>
+      </button>
+      {ids.length > 1 && (
+        <button
+          className={`split__more ${open ? "is-open" : ""}`}
+          onClick={() => setOpen(!open)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={`${family}: ${ids.length} ways`}
+          title={`${family}: ${ids.length} ways`}
+        >
+          <Icon name="chevronDown" size={10} />
+        </button>
+      )}
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} className="groupmenu__pop" placement="bottom-start">
+        <MenuItems ids={ids} onPick={run} />
+      </Popover>
+    </div>
+  );
+}
+
+/** Small icon-only buttons in two rows: every sketch constraint at a glance. */
+function ConstraintGrid({ ids }: { ids: string[] }) {
+  const state = useApp();
+  return (
+    <div className="cgrid">
+      {ids.map((id) => {
+        const c = commandById(id);
+        const on = !!c.on?.(state);
+        return (
+          <button key={id} className={`cgrid__btn ${on ? "is-active" : ""}`} onClick={c.run} aria-pressed={on} aria-label={c.label} title={`${c.label}\n${c.hint ?? ""}`} data-tour={id}>
+            <Icon name={c.icon ?? "link"} size={16} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Every command of a group, with hints, in a dropdown that stays inside the window and scrolls. */
 function GroupMenu({ label, ids, asTool }: { label: string; ids: string[]; asTool?: boolean }) {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
-  const state = useApp();
   return (
     <div className="groupmenu">
       {asTool ? (
@@ -151,32 +246,13 @@ function GroupMenu({ label, ids, asTool }: { label: string; ids: string[]; asToo
         </button>
       )}
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} className="groupmenu__pop" placement="bottom-start">
-        <div role="menu">
-          {ids.map((id) => {
-            if (id.startsWith("#")) return <div key={id} className="groupmenu__head">{id.slice(1)}</div>;
-            const c = commandById(id);
-            const why = whyUnavailable(c, state);
-            return (
-              <button
-                key={id}
-                role="menuitem"
-                disabled={!!why}
-                className="groupmenu__item"
-                onClick={() => {
-                  setOpen(false);
-                  c.run();
-                }}
-              >
-                <Icon name={c.icon ?? "more"} size={20} />
-                <span className="groupmenu__text">
-                  <b>{c.label}</b>
-                  {why ? <small className="groupmenu__why">{why}</small> : c.hint && <small>{c.hint}</small>}
-                </span>
-                {c.keys && <kbd>{c.keys}</kbd>}
-              </button>
-            );
-          })}
-        </div>
+        <MenuItems
+          ids={ids}
+          onPick={(c) => {
+            setOpen(false);
+            c.run();
+          }}
+        />
       </Popover>
     </div>
   );
@@ -194,14 +270,46 @@ function Group({ label, ids, more, menu, activeId }: { label: string; ids: strin
   return (
     <div className="toolgroup" role="group" aria-label={label}>
       <div className="toolgroup__tools">
-        {ids.map((id) => (
-          <ToolButton key={id} c={commandById(id)} active={id === activeId} />
-        ))}
+        {ids.map((id) =>
+          MODEL_FAMILIES[id] ? <SplitTool key={id} family={MODEL_FAMILIES[id].name} ids={MODEL_FAMILIES[id].ids} activeId={activeId} /> : <ToolButton key={id} c={commandById(id)} active={id === activeId} />,
+        )}
       </div>
       {more ? <GroupMenu label={label} ids={menu ?? (ids.every((i) => more.includes(i)) ? more : [...ids, ...more.filter((i) => !ids.includes(i))])} /> : <span className="toolgroup__label">{label}</span>}
     </div>
   );
 }
+
+/** Modeling tools with variants: the toolbar button repeats the one used last, its arrow lists the rest. */
+const MODEL_FAMILIES: Record<string, { name: string; ids: string[] }> = {
+  box: { name: "Shape", ids: ["box", "cylinder", "sphere", "cone", "torus", "tube"] },
+  fillet: { name: "Fillet", ids: ["fillet", "fillet-all"] },
+  chamfer: { name: "Chamfer", ids: ["chamfer", "chamfer-all"] },
+  sweep: { name: "Sweep", ids: ["sweep", "pipe"] },
+  measure: { name: "Measure", ids: ["measure", "check-geometry"] },
+};
+
+/** Sketch tool families: one button each, the other ways to draw it behind its arrow. */
+const SKETCH_CREATE: Record<string, string[]> = {
+  Line: ["tool-line", "tool-segment", "tool-path"],
+  Rectangle: ["tool-rect", "tool-crect", "tool-rect3"],
+  Circle: ["tool-circle", "tool-circle2", "tool-circle3", "tool-tan2c", "tool-tan3c"],
+  Arc: ["tool-arc", "tool-carc", "tool-tarc"],
+  Polygon: ["tool-polygon", "tool-polygonc", "tool-polygone"],
+  Ellipse: ["tool-ellipse", "tool-earc"],
+  Slot: ["tool-slot"],
+  Spline: ["tool-spline", "tool-cspline", "tool-conic"],
+};
+/** The first five are corners and pieces, the rest copies and moves (the Modify menu splits them there). */
+const SKETCH_MODIFY: Record<string, string[]> = {
+  Fillet: ["tool-sfillet", "tool-schamfer"],
+  Trim: ["tool-trim", "tool-extend", "geo-break"],
+  Offset: ["geo-offset"],
+  Mirror: ["geo-mirror-line", "geo-mirror-y", "geo-mirror-x"],
+  Move: ["geo-move", "geo-copy", "geo-stretch", "geo-scale", "geo-grid"],
+};
+const SKETCH_CONSTRAINTS = ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear"].map((t) => `constrain-${t}`);
+/** Sketch tools whose command id isn't simply "tool-" and the tool's name. */
+const SKETCH_TOOL_IDS: Record<string, string> = { polygonC: "tool-polygonc", polygonE: "tool-polygone" };
 
 /**
  * Which tools sit on the toolbar and which wait in the group menu depends on
@@ -233,22 +341,52 @@ export function Toolbar() {
   const labels = useApp((s) => s.prefs.toolLabels);
   const { create, modify } = toolsFor(profile);
   if (mode.kind === "sketch") {
-    const active = mode.tool === "select" ? "tool-select" : mode.tool === "polyline" ? "tool-line" : `tool-${mode.tool}`;
+    const active = mode.tool === "select" ? "tool-select" : mode.tool === "polyline" ? "tool-line" : (SKETCH_TOOL_IDS[mode.tool] ?? `tool-${mode.tool}`);
+    const modifyIds = Object.values(SKETCH_MODIFY).flat();
     return (
       <div className={`toolbar toolbar--sketch ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Sketch tools">
         <div className="toolbar__mode">
           <span className="pill pill--accent">Sketch</span>
         </div>
         <div className="toolbar__scroll" onWheel={wheelX}>
-        <Group label="Draw" ids={["tool-line", "tool-path", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot"]} more={["tool-crect", "tool-rect3", "tool-circle2", "tool-circle3", "tool-polygonc", "tool-polygone", "tool-carc", "tool-tarc", "tool-conic", "tool-cspline", "tool-earc", "tool-tan2c", "tool-tan3c"]} menu={["#Lines", "tool-line", "tool-path", "#Rectangles", "tool-rect", "tool-crect", "tool-rect3", "#Circles & ellipses", "tool-circle", "tool-circle2", "tool-circle3", "tool-tan2c", "tool-tan3c", "tool-ellipse", "#Polygons", "tool-polygon", "tool-polygonc", "tool-polygone", "#Arcs & curves", "tool-carc", "tool-tarc", "tool-earc", "tool-conic", "tool-cspline", "#Slots", "tool-slot"]} activeId={active} />
-        <Group label="Insert" ids={[]} more={["tool-project", "sketch-intersect", "tool-text", "tool-gear", "import-image", "import-svg", "import-dxf", "calibrate-image", "flatten-image", "trace-image", "trace-area", "export-sketch-svg", "export-sketch-dxf"]} />
-        <Group label="Arrange" ids={["tool-select", "make-constrainable", "duplicate", "mirror-shape-y", "rotate-shape", "construction"]} more={["mirror-shape-x", "geo-stretch", "geo-move", "geo-copy", "geo-scale", "geo-grid", "geo-break", "geo-offset", "geo-mirror-y", "geo-mirror-x", "geo-mirror-line", "delete"]} activeId={active} />
-        <Group
-          label="Constrain"
-          ids={profile === "engineer" || profile === "designer" ? ["tool-segment", "tool-arc", "tool-spline", "tool-pcircle", "tool-dimension", "tool-sfillet", "tool-schamfer", "tool-trim", "tool-extend"] : ["tool-segment", "tool-spline", "tool-dimension", "tool-sfillet"]}
-          more={["tool-segment", "tool-arc", "tool-spline", "tool-pcircle", "tool-dimension", "tool-gpoint", "tool-sfillet", "tool-schamfer", "tool-trim", "tool-extend", ...CONSTRAINT_COMMANDS]}
-          activeId={active}
-        />
+          <div className="toolgroup" role="group" aria-label="Select">
+            <div className="toolgroup__tools">
+              <ToolButton c={commandById("tool-select")} active={active === "tool-select"} />
+              <ToolButton c={commandById("construction")} />
+            </div>
+            <span className="toolgroup__label">Select</span>
+          </div>
+          <div className="toolgroup" role="group" aria-label="Create">
+            <div className="toolgroup__tools">
+              {Object.entries(SKETCH_CREATE).map(([family, ids]) => (
+                <SplitTool key={family} family={family} ids={ids} activeId={active} />
+              ))}
+            </div>
+            <GroupMenu label="Create" ids={[...Object.entries(SKETCH_CREATE).flatMap(([family, ids]) => [`#${family}`, ...ids]), "#More", "tool-gpoint", "tool-text", "tool-gear"]} />
+          </div>
+          <div className="toolgroup" role="group" aria-label="Modify">
+            <div className="toolgroup__tools">
+              {Object.entries(SKETCH_MODIFY).map(([family, ids]) => (
+                <SplitTool key={family} family={family} ids={ids} activeId={active} />
+              ))}
+            </div>
+            <GroupMenu
+              label="Modify"
+              ids={["#Corners and pieces", ...modifyIds.slice(0, 5), "#Copy and move", ...modifyIds.slice(5), "#A whole shape", "make-constrainable", "duplicate", "rotate-shape", "mirror-shape-y", "mirror-shape-x", "offset-shape", "#Remove", "delete"]}
+            />
+          </div>
+          <div className="toolgroup" role="group" aria-label="Constrain">
+            <div className="toolgroup__tools">
+              <ToolButton c={commandById("tool-dimension")} active={active === "tool-dimension"} />
+              <ConstraintGrid ids={SKETCH_CONSTRAINTS} />
+            </div>
+            <GroupMenu label="Constrain" ids={["#Size", "tool-dimension", "#Relations", ...SKETCH_CONSTRAINTS, "#Dimensions", "constrain-distance", "constrain-diameter", "constrain-radius", "constrain-angle"]} />
+          </div>
+          <Group
+            label="Insert"
+            ids={[]}
+            more={["#From the model", "tool-project", "sketch-intersect", "#Text and parts", "tool-text", "tool-gear", "#Pictures and drawings", "import-image", "calibrate-image", "flatten-image", "trace-image", "trace-area", "import-svg", "import-dxf", "#Save this sketch", "export-sketch-svg", "export-sketch-dxf"]}
+          />
         </div>
         <button className="btn btn--accent toolbar__finish" onClick={commandById("finish-sketch").run} data-tour="finish-sketch">
           <Icon name="finish" size={18} /> Finish sketch

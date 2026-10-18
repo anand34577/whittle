@@ -13,11 +13,11 @@ describe("sketch export", () => {
     { id: uid(), type: "text", x: "0", y: "0", text: "Hi", size: "5", angle: "0" },
   ];
 
-  it("keeps circles exact, skips construction, reports text", () => {
+  it("keeps circles exact and skips construction and text (the geometry engine outlines text)", () => {
     const { shapes, skipped } = sketchShapes(entities, ev);
     expect(shapes).toHaveLength(2);
     expect(shapes[1]!.circle).toEqual({ cx: 10, cy: 0, r: 3 });
-    expect(skipped).toBe(1);
+    expect(skipped).toBe(0);
   });
 
   it("writes true-size SVG and a well-formed DXF", () => {

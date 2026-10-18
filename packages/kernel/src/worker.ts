@@ -12,7 +12,7 @@ import gcsWasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?ur
 import { Builder, isValidShape } from "./build";
 import { initSolver } from "./solver";
 import { exportShapes } from "./exporters";
-import { interference, radii } from "./inspect";
+import { interference, radii, textOutlines } from "./inspect";
 import type { InspectResult, KernelRequest, KernelResponse } from "./protocol";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -93,6 +93,8 @@ async function handle(req: KernelRequest) {
       }
       for (const s of r.sketches) if (s.fill) transfer.push(s.fill.buffer);
       post({ type: "regen", result: { ...r, seq: req.seq } }, transfer);
+    } else if (req.type === "inspect" && req.kind === "text") {
+      post({ type: "inspect", seq: req.seq, result: { kind: "text", items: textOutlines(req.doc) } });
     } else if (req.type === "inspect") {
       await builder.prepareImports(req.doc);
       const shapes = builder.shapes(req.doc);

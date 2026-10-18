@@ -13,6 +13,7 @@ import {
   type OriginPlane,
   type PlaneRef,
   type PrimitiveShape,
+  type Vec2,
   type Vec3,
   activeEnd,
   frameAxes,
@@ -54,6 +55,7 @@ import {
   trim,
 } from "@whittle/core";
 import { tangentChain } from "./edgeChain";
+import { regionAt } from "./regions";
 import type { BodyResult, EdgeInfo, FaceInfo } from "@whittle/kernel";
 import {
   type Pick,
@@ -170,12 +172,35 @@ export function pickSketchPlane(p: Pick) {
 /** The sketch an extrude/revolve should use: selected one, else the newest unused one. */
 function sketchForProfile(): Id | null {
   const { selection, doc } = get();
-  const picked = selection.find((p) => p.kind === "sketch");
-  if (picked && picked.kind === "sketch") return picked.sketchId;
+  const picked = selection.find((p) => p.kind === "sketch" || p.kind === "region");
+  if (picked && (picked.kind === "sketch" || picked.kind === "region")) return picked.sketchId;
   const end = activeEnd(doc);
   const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length > 0);
   const unused = sketches.filter((s) => !isSketchConsumed(doc, s.id));
   return (unused.pop() ?? sketches.pop())?.id ?? null;
+}
+
+/** The sketch areas picked before starting a feature (undefined: the whole sketch). */
+function selectedRegions(sketch: Id): Vec2[] | undefined {
+  const at = get().selection.flatMap((p) => (p.kind === "region" && p.sketchId === sketch ? [p.at] : []));
+  return at.length ? at : undefined;
+}
+
+/** Add or remove a clicked sketch area from an extrude or revolve (switching to that sketch if it is another one). */
+function toggleRegion(f: Feature, p: Extract<Pick, { kind: "region" }>) {
+  const frame = get().regen?.sketches.find((s) => s.id === p.sketchId);
+  mutate("Pick profile", (d) => {
+    const x = d.features.find((y) => y.id === f.id);
+    if (!x || (x.type !== "extrude" && x.type !== "revolve")) return;
+    if (x.sketch !== p.sketchId) {
+      x.sketch = p.sketchId;
+      x.regions = [p.at];
+      return;
+    }
+    const kept = (x.regions ?? []).filter((q) => !frame || regionAt(frame, q) !== p.index);
+    if (kept.length === (x.regions ?? []).length) kept.push(p.at);
+    x.regions = kept.length ? kept : undefined;
+  });
 }
 
 export function startExtrude() {
@@ -189,6 +214,7 @@ export function startExtrude() {
   }
   const hasBodies = (get().regen?.bodies.length ?? 0) > 0;
   const f = makeExtrude(get().doc, sketch, "new");
+  if (f.type === "extrude") f.regions = selectedRegions(sketch);
   // On a face of an existing body, joining is what people usually want.
   const sk = findFeature(get().doc, sketch, "sketch");
   if (hasBodies && sk?.plane.kind === "face" && f.type === "extrude") {
@@ -205,6 +231,7 @@ export function startRevolve() {
     return;
   }
   const f = makeRevolve(get().doc, sketch);
+  if (f.type === "revolve") f.regions = selectedRegions(sketch);
   beginNewFeature(f, `New ${f.name}`);
 }
 
@@ -583,7 +610,7 @@ function snapPoint(p: Pick & { at?: Vec3 }): Vec3 | null {
 export function startPressPull() {
   const sel = get().selection;
   if (sel.some((p) => p.kind === "edge")) return startEdgeFeature("fillet");
-  if (sel.some((p) => p.kind === "sketch")) return startExtrude();
+  if (sel.some((p) => p.kind === "sketch" || p.kind === "region")) return startExtrude();
   startOffsetFace();
 }
 
@@ -628,6 +655,8 @@ export function samePick(a: Pick, b: Pick): boolean {
       return a.id === (b as typeof a).id;
     case "sketch":
       return a.sketchId === (b as typeof a).sketchId;
+    case "region":
+      return a.sketchId === (b as typeof a).sketchId && a.index === (b as typeof a).index;
   }
 }
 
@@ -639,7 +668,7 @@ export function handlePick(p: Pick | null, additive: boolean) {
     return;
   }
   if (mode.kind === "measure") {
-    if (!p || p.kind === "plane" || p.kind === "cplane" || p.kind === "sketch") return set({ measure: [] });
+    if (!p || p.kind === "plane" || p.kind === "cplane" || p.kind === "sketch" || p.kind === "region") return set({ measure: [] });
     const m = get().measure;
     set({ measure: m.length >= 2 ? [p] : [...m, p] });
     return;
@@ -763,6 +792,14 @@ export function handlePick(p: Pick | null, additive: boolean) {
           if (fr) x.faces = [fr];
         } else if (sp.kind === "sketch") x.sketch = sp.sketchId;
       }
+    });
+    return;
+  }
+  if (f && (f.type === "extrude" || f.type === "revolve") && p?.kind === "region") return toggleRegion(f, p);
+  if (f && (f.type === "extrude" || f.type === "revolve") && p?.kind === "sketch" && p.sketchId !== f.sketch) {
+    mutate("Pick profile", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (x && (x.type === "extrude" || x.type === "revolve")) (x.sketch = p.sketchId), (x.regions = undefined);
     });
     return;
   }

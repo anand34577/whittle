@@ -59,8 +59,15 @@ export interface SketchFrame {
   line?: Float32Array;
   /** Triangles (xyz per vertex, world space) of the closed profile regions. */
   fill?: Float32Array;
+  /** Each enclosed area on its own (world-space triangles), with a point inside it in sketch coordinates, for picking profiles. */
+  regions?: SketchRegionInfo[];
   /** Solved constraint-driven geometry, when the sketch has any. */
   solution?: SketchSolution;
+}
+
+export interface SketchRegionInfo {
+  fill: Float32Array;
+  at: [number, number];
 }
 
 /** "incomplete" = waiting for the user to pick something (not an error). */
@@ -117,12 +124,14 @@ export interface RadiusItem {
   normal: Vec3;
 }
 
-export type InspectKind = "interference" | "radii" | "validity";
+export type InspectKind = "interference" | "radii" | "validity" | "text";
 export type InspectResult =
   | { kind: "interference"; items: InterferenceItem[] }
   | { kind: "radii"; items: RadiusItem[] }
   /** OpenCascade's own validity check of every body. */
-  | { kind: "validity"; items: { bodyId: Id; valid: boolean }[] };
+  | { kind: "validity"; items: { bodyId: Id; valid: boolean }[] }
+  /** Outlines of the text in every sketch (sketch millimetres; holes, such as the inside of an "o", are loops too). */
+  | { kind: "text"; items: { sketchId: Id; loops: [number, number][][] }[] };
 
 export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply" | "drawing";
 /** How finely curved faces are cut into triangles for mesh formats: smoother files are bigger. */

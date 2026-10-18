@@ -122,7 +122,7 @@ after changes: `sudo systemctl restart whittle`.
 | `WHITTLE_MAX_UPLOAD_MB` | `64` | Largest design that can be saved. |
 | `WHITTLE_MAX_VERSIONS` | `50` | Versions kept per design; older ones are pruned. |
 | `WHITTLE_SESSION_DAYS` | `30` | How long a sign-in lasts. |
-| `WHITTLE_AI` | `true` | Allow the in-app AI assistant. `false` hides it and keeps the strictest browser security policy. |
+| `WHITTLE_AI` | `true` | Allow the in-app AI assistant. The browser may then call any HTTPS provider and model servers on plain HTTP (this computer or the local network, e.g. `http://192.168.1.20:11434/v1`); browsers only allow plain-HTTP model servers from a page that is itself served over HTTP, or on `localhost`. `false` hides the assistant and keeps the strictest browser security policy. |
 | `WHITTLE_TRUST_PROXY` | `false` | Set to `true` only behind a reverse proxy you control that sets `X-Forwarded-For`. Sign-in and password-reset limits then count each visitor's own address; without it they all share the proxy's address, so a few failed attempts lock everyone out. Never enable it when the server is reachable directly. |
 | `WHITTLE_SETUP_TOKEN` | *(none)* | If set, whoever creates the first (administrator) account must enter this value, so a stranger who reaches a new server first can't claim it. |
 | `WHITTLE_SMTP_HOST` | | Mail server for invitations, password resets and notices (see [Email](#email-smtp)). |
@@ -280,7 +280,13 @@ Run the installer again to upgrade (`curl -fsSL .../install.sh | sh -s -- --serv
    automatically**;
 4. runs `whittle-server doctor`.
 
-Database upgrades are automatic and forward-only. To remove the server:
+Database upgrades are automatic and forward-only. People with Whittle open see a **Reload** notice once
+the new version is in place: browsers keep a copy of the app for offline use (over HTTPS), and the
+server marks the page and `sw.js` as "always check" and the content-hashed files under `assets/` as
+"keep", so an upgrade is picked up on the next visit. A reverse proxy should pass these
+`Cache-Control` headers through unchanged.
+
+To remove the server:
 
 ```bash
 sudo /opt/whittle/uninstall.sh            # keeps /var/lib/whittle and /etc/whittle

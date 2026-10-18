@@ -157,7 +157,8 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
   const advanced = !!(f.taper || f.twist);
   return (
     <>
-      <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void (d.sketch = v))} />
+      <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void ((d.sketch = v), d.type === "extrude" && (d.regions = undefined)))} />
+      <RegionLine f={f} />
       {f.extent !== "through" && f.extent !== "face" && (
         <ExprInput label="Distance" kind="length" value={f.distance} autoFocus onChange={(v) => upd(f, "Distance", (d) => void (d.distance = v))} />
       )}
@@ -233,7 +234,8 @@ function RevolveEditor({ f }: { f: RevolveFeature }) {
   const lines = (sketch?.entities ?? []).filter((e) => e.type === "polyline" && (e.open || e.construction));
   return (
     <>
-      <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void (d.sketch = v))} />
+      <SketchSelect f={f} label="Profile" value={f.sketch} onChange={(v) => upd(f, "Profile", (d) => void ((d.sketch = v), d.type === "revolve" && (d.regions = undefined)))} />
+      <RegionLine f={f} />
       <Segmented
         label="Axis"
         value={f.axis}
@@ -262,11 +264,13 @@ function RevolveEditor({ f }: { f: RevolveFeature }) {
 function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
   const n = f.edges.length;
   const prefs = useApp((s) => s.prefs);
+  const previewing = useApp((s) => s.hoverEdges?.length ?? 0);
+  const label = n === 0 ? "No edges yet: click edges in the view" : `${n} edge${n > 1 ? "s" : ""}`;
   return (
     <>
       <div className="picker">
         <Icon name="fillet" size={16} />
-        <span>{n === 0 ? "No edges yet: click edges in the view" : `${n} edge${n > 1 ? "s" : ""}`}</span>
+        <span>{previewing ? `${label} · previewing the edge${previewing > 1 ? "s" : ""} under the pointer, click to add` : label}</span>
         {n > 0 && (
           <button className="link" onClick={() => upd(f, "Clear edges", (d) => void (d.edges = []))}>
             Clear
@@ -880,7 +884,22 @@ function ConstructEditor({ f }: { f: ConstructFeature }) {
   );
 }
 
-function PickLine({ icon, text, onClear, clearable }: { icon: "move" | "thread" | "trash" | "plane"; text: string; onClear: () => void; clearable: boolean }) {
+/** Which areas of the sketch an extrude or revolve uses, with a way back to the whole sketch. */
+function RegionLine({ f }: { f: ExtrudeFeature | RevolveFeature }) {
+  const n = f.regions?.length ?? 0;
+  const many = useApp((s) => (s.regen?.sketches.find((x) => x.id === f.sketch)?.regions?.length ?? 0) > 1);
+  if (!n && !many) return null;
+  return (
+    <PickLine
+      icon="select"
+      text={n ? `${n} area${n > 1 ? "s" : ""} of the sketch. Click areas in the view to add or remove them` : "The whole sketch (shapes inside shapes are holes). Click an area in the view to use only that"}
+      clearable={n > 0}
+      onClear={() => upd(f, "Whole sketch", (d) => void ((d.type === "extrude" || d.type === "revolve") && (d.regions = undefined)))}
+    />
+  );
+}
+
+function PickLine({ icon, text, onClear, clearable }: { icon: "move" | "thread" | "trash" | "plane" | "select"; text: string; onClear: () => void; clearable: boolean }) {
   return (
     <div className="picker">
       <Icon name={icon} size={16} />

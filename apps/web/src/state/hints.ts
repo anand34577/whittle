@@ -1,5 +1,6 @@
 /** "Always show the next step": the hint line is derived from state, never hand-placed. */
-import { CONSTRUCT_MODES, CURVE_SOURCES, SURFACE_OPS } from "@whittle/core";
+import { CONSTRAINT_LABELS, CONSTRUCT_MODES, CURVE_SOURCES, SURFACE_OPS } from "@whittle/core";
+import { CONSTRAINT_PICKS } from "./constraintOps";
 import { type AppState, findFeature } from "./store";
 
 const TOOL_HINTS: Record<string, [string, string]> = {
@@ -14,7 +15,7 @@ const TOOL_HINTS: Record<string, [string, string]> = {
   ellipse: ["Click the center", "Click a corner of its bounding box · or type the X radius, Tab for Y"],
   gear: ["Click the center of the gear", "Drag out its size · or type the pitch diameter · set teeth and module on the right"],
   text: ["Click where the text should start", "Type the text on the right"],
-  polyline: ["Click the first point", "Click the next point \u00b7 click the first point to close \u00b7 A turns arcs on/off (click the end, then a point on the arc) \u00b7 Backspace undoes a point"],
+  polyline: ["Click the first point", "Click the next point · click the first point to close the shape · Esc or Enter stops and keeps the lines · A turns arcs on/off · Backspace undoes a point"],
   segment: ["Click the first point (snap to points to join them)", "Click the next point · click the first point to close · click the last point again or Enter to stop · level lines get Horizontal/Vertical"],
   tarc: ["Click the end of a line or arc", "Click where the arc ends: it leaves the line smoothly (tangent)"],
   conic: ["Click where the curve starts", "Click where it ends, then the apex where the tangents meet · type ρ (0.01–0.99; 0.5 = parabola)"],
@@ -51,6 +52,7 @@ export function hintFor(s: AppState): string {
   }
   if (mode.kind === "sketch") {
     if (mode.tool === "select") {
+      if (s.pendingConstraint) return `${CONSTRAINT_LABELS[s.pendingConstraint]}: ${CONSTRAINT_PICKS[s.pendingConstraint]} · it keeps going for the next ones · Esc stops`;
       if (s.sketchSel.length) return "Pick a constraint on the right · Shift+click adds to the selection · drag to move · Del removes";
       return s.selectedEntity
         ? "Edit sizes on the right \u00b7 drag to move \u00b7 X makes it construction \u00b7 Del removes it"
@@ -73,9 +75,11 @@ export function hintFor(s: AppState): string {
       case "shell":
         return f.faces.length === 0 ? "Click the face(s) to remove: that side stays open" : "Set the wall thickness \u00b7 Enter to finish";
       case "extrude":
-        return "Set the distance (drag the label to scrub) \u00b7 choose New body, Join or Cut \u00b7 Enter to finish";
+        return f.regions?.length
+          ? `${f.regions.length} profile${f.regions.length > 1 ? "s" : ""} \u00b7 click areas of the sketch to add or remove \u00b7 drag the arrow or type the distance \u00b7 Enter to finish`
+          : "Click an area of the sketch to extrude just that \u00b7 drag the arrow or type the distance \u00b7 New body, Join or Cut \u00b7 Enter to finish";
       case "revolve":
-        return "Choose the axis and angle · Enter to finish";
+        return "Choose the axis and angle · click areas of the sketch to revolve only those · Enter to finish";
       case "hole":
         return !f.face ? "Click a flat face where the holes go" : "Click on the face to add holes · fine-tune positions on the right · Enter to finish";
       case "loft":
@@ -131,6 +135,7 @@ export function hintFor(s: AppState): string {
   if (p?.kind === "face") return "Face selected \u00b7 S sketches on it \u00b7 Shell (Modify) hollows the body from here";
   if (p?.kind === "edge") return `${selection.length} edge${selection.length > 1 ? "s" : ""} selected \u00b7 F to fillet \u00b7 Shift-click to add more`;
   if (p?.kind === "sketch") return "Sketch selected \u00b7 E to extrude \u00b7 R to revolve \u00b7 double-click to edit";
+  if (p?.kind === "region") return `${selection.length} profile${selection.length > 1 ? "s" : ""} selected \u00b7 E extrudes just ${selection.length > 1 ? "these" : "this"} \u00b7 Shift-click to add more`;
   if (p?.kind === "body") return "Body selected · M moves it · right-click for more · Del removes the feature that made it";
   if ((regen?.bodies.length ?? 0) === 0) {
     return doc.features.some((f) => f.type === "sketch")

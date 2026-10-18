@@ -553,13 +553,37 @@ async fn ai_assistant_switch_controls_the_browser_policy() {
     let r = call(&on, Method::GET, "/api/config", None, None, false, &[]).await;
     assert_eq!(r.json()["ai"], true);
     let csp = r.headers.get(header::CONTENT_SECURITY_POLICY).unwrap().to_str().unwrap().to_owned();
-    assert!(csp.contains("connect-src 'self' blob: data: https:"), "{csp}");
+    assert!(csp.contains("connect-src 'self' blob: data: https: http:;"), "{csp}");
 
     let off = app(|c| c.ai = false).await;
     let r = call(&off, Method::GET, "/api/config", None, None, false, &[]).await;
     assert_eq!(r.json()["ai"], false);
     let csp = r.headers.get(header::CONTENT_SECURITY_POLICY).unwrap().to_str().unwrap().to_owned();
-    assert!(!csp.contains("https:"), "{csp}");
+    assert!(!csp.contains("https:") && !csp.contains("http:"), "{csp}");
+}
+
+#[tokio::test]
+async fn built_files_are_kept_and_the_page_is_always_checked() {
+    let web = std::env::temp_dir().join(format!("whittle-web-{}", whittle_server::random_token(8)));
+    std::fs::create_dir_all(web.join("assets")).unwrap();
+    std::fs::write(web.join("index.html"), "<!doctype html>").unwrap();
+    std::fs::write(web.join("sw.js"), "/* worker */").unwrap();
+    std::fs::write(web.join("assets/index-abc123.js"), "/* app */").unwrap();
+    let app = app(|c| c.web = web.clone()).await;
+    let cache = |r: &Resp| r.headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap().to_owned()).unwrap_or_default();
+    let r = call(&app, Method::GET, "/assets/index-abc123.js", None, None, false, &[]).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(cache(&r).contains("immutable"), "{}", cache(&r));
+    // Any other path gets the page (with a 404 status), which must not be kept either.
+    for page in ["/", "/sw.js", "/some/route"] {
+        let r = call(&app, Method::GET, page, None, None, false, &[]).await;
+        assert_eq!(cache(&r), "no-cache", "{page}");
+    }
+    let r = call(&app, Method::GET, "/assets/missing-1.js", None, None, false, &[]).await;
+    assert!(!cache(&r).contains("immutable"), "a missing file is not kept");
+    let r = call(&app, Method::GET, "/api/health", None, None, false, &[]).await;
+    assert!(!cache(&r).contains("immutable"));
+    let _ = std::fs::remove_dir_all(&web);
 }
 
 #[tokio::test]
