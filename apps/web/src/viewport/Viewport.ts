@@ -7,6 +7,7 @@
  * - Picking: raycast for faces, screen-space distance for edges (with
  *   occlusion test), so edges are easy to hit even when thin.
  */
+import { type CameraState, viewportRef } from "./current";
 import * as THREE from "three";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
@@ -18,6 +19,9 @@ import type { Pick, ViewSettings } from "../state/store";
 import { lookById } from "./looks";
 import { VIEWPORT_THEMES, type ViewportTheme } from "./theme";
 import { type NavPreset, navAction } from "../state/prefs";
+
+/** Same thing picked, wherever on it the click landed. */
+const samePick = (a: Pick, b: Pick) => JSON.stringify({ ...a, at: 0 }) === JSON.stringify({ ...b, at: 0 });
 
 export type CubeView = "front" | "back" | "left" | "right" | "top" | "bottom" | "iso";
 
@@ -269,9 +273,25 @@ export class Viewport {
     this.resizeObs = new ResizeObserver(() => this.resize());
     this.resizeObs.observe(container);
     this.resize();
+    viewportRef.current = this;
+  }
+
+  /** The camera as plain numbers: what a named view stores. */
+  getCamera(): CameraState {
+    return { target: this.orbit.target.toArray() as [number, number, number], distance: this.orbit.distance, theta: this.orbit.theta, phi: this.orbit.phi };
+  }
+
+  setCamera(c: CameraState) {
+    const to = new Turntable();
+    to.target.fromArray(c.target);
+    to.distance = c.distance;
+    to.theta = c.theta;
+    to.phi = c.phi;
+    this.animateTo(to);
   }
 
   dispose() {
+    if (viewportRef.current === this) viewportRef.current = null;
     this.disposed = true;
     this.resizeObs.disconnect();
     cancelAnimationFrame(this.frame);
@@ -549,7 +569,7 @@ export class Viewport {
 
   /* ───────────────────────── Bodies ───────────────────────── */
 
-  private makeBodyView(b: BodyResult, color: string, overlay: boolean, lookId?: string): BodyView {
+  private makeBodyView(b: BodyResult, color: string, overlay: boolean, lookId?: string, bodyOpacity?: number): BodyView {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(b.positions, 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(b.normals, 3));
@@ -561,7 +581,8 @@ export class Viewport {
     const section = !overlay && !!v.section;
     const clipping = section ? [this.clip] : [];
     const xray = !overlay && v.display === "xray";
-    const opacity = xray ? Math.min(0.28, look.opacity) : look.opacity;
+    const base = bodyOpacity ?? look.opacity;
+    const opacity = xray ? Math.min(0.28, base) : base;
     const analysis = overlay ? null : v.analysis;
     const tinted = analysis === "overhang" || analysis === "draft" || analysis === "curvature" || analysis === "access";
     if (tinted) geo.setAttribute("color", this.analysisColors(b, color, analysis));
@@ -591,7 +612,7 @@ export class Viewport {
     const egeo = new LineSegmentsGeometry();
     egeo.setPositions(b.edgePositions.length ? b.edgePositions : new Float32Array(6));
     const edgeMat = overlay
-      ? this.lineMat(this.theme.edgeOverlay, 1.2, { opacity: 0.7 })
+      ? this.lineMat(this.theme.edge, 1.2, { opacity: 0.6 }) // the normal edge colour: the light overlay tone vanished on light bodies
       : this.lineMat(v.display === "wire" ? this.theme.sketch : this.theme.edge, v.display === "wire" ? 1.4 : 1.15);
     edgeMat.clippingPlanes = clipping;
     const edges = new LineSegments2(egeo, edgeMat);
@@ -756,7 +777,7 @@ export class Viewport {
     this.bodies.clear();
     for (const b of list) {
       const m = meta[b.id];
-      const v = this.makeBodyView(b, m?.color ?? "#cfc8bb", false, m?.look);
+      const v = this.makeBodyView(b, m?.color ?? "#cfc8bb", false, m?.look, m?.opacity);
       v.visible = m?.visible !== false;
       if (!v.visible) v.mesh.visible = v.edges.visible = false;
       this.bodies.set(b.id, v);
@@ -923,11 +944,13 @@ export class Viewport {
   }
 
   /** Bodies used for picking while a feature previews (shown as an edge overlay only). */
-  setPickBodies(list: BodyResult[] | undefined) {
+  setPickBodies(list: BodyResult[] | undefined, faint = false) {
     for (const v of this.pickBodies) this.dropView(v, this.overlay);
     this.pickBodies = [];
     for (const b of list ?? []) {
       const v = this.makeBodyView(b, "#ffffff", true);
+      // Edges that the feature rounds away must stay clickable and seen; otherwise the old outline only reads as a seam.
+      if (faint) v.edges.material.opacity = 0.18;
       this.pickBodies.push(v);
       this.overlay.add(v.mesh, v.edges);
     }
@@ -1297,6 +1320,42 @@ export class Viewport {
     return null;
   }
 
+  /** Alt+click reaches what's behind: each Alt+click on the same spot takes the next thing under it (edge, then faces further back). */
+  private lastClick: { x: number; y: number; list: Pick[]; i: number } | null = null;
+
+  private pickCycling(e: { clientX: number; clientY: number; altKey: boolean }): Pick | null {
+    const last = this.lastClick;
+    if (e.altKey && last && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 4) {
+      last.i = (last.i + 1) % last.list.length;
+      return last.list[last.i]!;
+    }
+    const first = this.pick(e);
+    const list = first ? [first, ...this.facesBehind(e).filter((p) => !samePick(p, first))] : [];
+    this.lastClick = list.length ? { x: e.clientX, y: e.clientY, list, i: e.altKey && list.length > 1 ? 1 : 0 } : null;
+    return this.lastClick ? this.lastClick.list[this.lastClick.i]! : null;
+  }
+
+  /** Every face along the pointer's ray, nearest first (bodies behind bodies included). */
+  private facesBehind(e: { clientX: number; clientY: number }): Pick[] {
+    if (!this.filter.faces || this.sketchFrame || (this.view.explode ?? 0) > 0.001) return [];
+    const views = this.pickBodies.length > 0 ? this.pickBodies : [...this.bodies.values()].filter((v) => v.visible);
+    this.raycaster.setFromCamera(this.ndc(e), this.camera);
+    const meshes = views.map((v) => v.mesh);
+    const hidden = meshes.filter((m) => !m.visible);
+    for (const m of hidden) m.visible = true;
+    const hits = this.raycaster.intersectObjects(meshes, false);
+    for (const m of hidden) m.visible = false;
+    const out: Pick[] = [];
+    for (const h of hits) {
+      if (h.faceIndex == null || (this.view.section && this.clip.distanceToPoint(h.point) < 0)) continue;
+      const bodyId = h.object.userData.bodyId as Id;
+      const v = views.find((x) => x.id === bodyId);
+      const index = v ? this.faceOfTriangle(v.data.faceRanges, h.faceIndex * 3) : -1;
+      if (index >= 0 && !out.some((p) => p.kind === "face" && p.bodyId === bodyId && p.index === index)) out.push({ kind: "face", bodyId, index, at: [h.point.x, h.point.y, h.point.z] });
+    }
+    return out;
+  }
+
   private faceOfTriangle(ranges: Int32Array, indexOffset: number): number {
     for (let i = 0; i < ranges.length / 2; i++) {
       const s = ranges[i * 2]!;
@@ -1331,10 +1390,13 @@ export class Viewport {
         for (let k = s; k + 1 < s + c; k += 2) {
           a.set(pos[k * 3]!, pos[k * 3 + 1]!, pos[k * 3 + 2]!);
           b.set(pos[k * 3 + 3]!, pos[k * 3 + 4]!, pos[k * 3 + 5]!);
-          const { d, t } = this.distToSegment(sp, this.worldToScreen([a.x, a.y, a.z]), this.worldToScreen([b.x, b.y, b.z]));
+          const { d } = this.distToSegment(sp, this.worldToScreen([a.x, a.y, a.z]), this.worldToScreen([b.x, b.y, b.z]));
           if (d > radius || (best && d >= best.d)) continue;
+          // The edge point nearest the pick ray. (A screen-space fraction along the edge isn't the same fraction in 3D under
+          // perspective, so lerping by it lands millimetres away and wrongly reads as hidden.)
+          const on = new THREE.Vector3();
+          ray.distanceSqToSegment(a, b, undefined, on);
           // Hidden behind a face? (small tolerance: the edge lies on that face)
-          const on = a.clone().lerp(b, t);
           if (on.clone().sub(ray.origin).dot(ray.direction) > faceDist + tol) continue;
           if (this.view.section && this.clip.distanceToPoint(on) < 0) continue;
           best = { d, bodyId: v.id, index: ei, at: [on.x, on.y, on.z] };
@@ -1536,7 +1598,7 @@ export class Viewport {
       if (d.button === 0) this.sketchEvent("up", e);
       return;
     }
-    if (!d.moved && d.button === 0) this.cb.onClick(this.pick(e), e.shiftKey || e.ctrlKey || e.metaKey);
+    if (!d.moved && d.button === 0) this.cb.onClick(this.pickCycling(e), e.shiftKey || e.ctrlKey || e.metaKey);
   };
 
   private onPointerLeave = (e: PointerEvent) => {
@@ -1590,10 +1652,11 @@ export class Viewport {
     return box;
   }
 
-  private fitDistance(radius: number) {
+  /** `margin` 1.22 leaves room for the view dock along the bottom and the cube in the corner (model views). */
+  private fitDistance(radius: number, margin = 1.22) {
     const vfov = THREE.MathUtils.degToRad(this.persp.fov);
     const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.persp.aspect);
-    return (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.08;
+    return (radius / Math.sin(Math.min(vfov, hfov) / 2)) * margin;
   }
 
   viewTo(view: CubeView | "home" | "fit") {
@@ -1622,6 +1685,39 @@ export class Viewport {
     this.animateTo(to);
   }
 
+  /** Look along any direction from the model's center (the orientation cube's edges and corners). */
+  viewDirection(dir: [number, number, number]) {
+    const sphere = this.sceneBox().getBoundingSphere(new THREE.Sphere());
+    const to = new Turntable();
+    to.target.copy(sphere.center);
+    to.distance = this.fitDistance(sphere.radius);
+    const d = new THREE.Vector3(...dir);
+    // Straight down or up has no "up" of its own: keep +Y up the screen, as the cube's Top face does.
+    const a = Turntable.anglesFor(d, Math.abs(d.clone().normalize().z) > 0.999 ? new THREE.Vector3(0, Math.sign(d.z), 0) : undefined);
+    to.theta = a.theta;
+    to.phi = THREE.MathUtils.clamp(a.phi, 0.0001, Math.PI - 0.0001);
+    this.animateTo(to);
+  }
+
+  /** Extruding from a plan view: swing to a three-quarter view on the sketch's side, so the new solid's depth shows. */
+  tiltFromPlan(normal: [number, number, number]) {
+    const n = new THREE.Vector3(...normal).normalize();
+    const look = this.camera.getWorldDirection(new THREE.Vector3());
+    if (Math.abs(look.dot(n)) < 0.97) return;
+    const d = new THREE.Vector3(1, -1.25, 0.95);
+    if (d.dot(n) < 0) d.addScaledVector(n, -2 * d.dot(n));
+    this.viewDirection([d.x, d.y, d.z]);
+  }
+
+  /** Turn the camera around the target by screen pixels (dragging the orientation cube). */
+  orbitBy(dx: number, dy: number) {
+    this.orbit.theta -= dx * 0.0075;
+    this.orbit.phi = THREE.MathUtils.clamp(this.orbit.phi - dy * 0.0075, 0.0001, Math.PI - 0.0001);
+    this.applyOrbit();
+    this.cb.onCamera();
+    this.invalidate();
+  }
+
   /** Look straight at a sketch plane. */
   viewNormal(frame: SketchFrame) {
     const to = new Turntable();
@@ -1632,7 +1728,7 @@ export class Viewport {
     const n = new THREE.Vector3(...frame.normal).normalize();
     if ([...this.bodies.values()].some((v) => v.visible)) to.target.copy(sphere.center).addScaledVector(n, -sphere.center.clone().sub(o).dot(n));
     else to.target.copy(o);
-    to.distance = this.fitDistance(r);
+    to.distance = this.fitDistance(r, 1.08); // sketches keep their tighter framing
     const a = Turntable.anglesFor(new THREE.Vector3(...frame.normal), new THREE.Vector3(...frame.yDir));
     to.theta = a.theta;
     to.phi = THREE.MathUtils.clamp(a.phi, 0.0001, Math.PI - 0.0001);

@@ -100,8 +100,9 @@ describe("regeneration", () => {
     expect(s.state).toBe("error");
     expect(s.message).toMatch(/too large/);
     expect(s.fix?.field).toBe("radius");
-    expect(Number(s.fix?.value)).toBeGreaterThan(0);
-    expect(Number(s.fix?.value)).toBeLessThanOrEqual(10);
+    expect(s.fix?.value).toMatch(/ mm$/);
+    expect(parseFloat(s.fix!.value)).toBeGreaterThan(0);
+    expect(parseFloat(s.fix!.value)).toBeLessThanOrEqual(10);
     // The model still shows the last good state.
     expect(r.bodies).toHaveLength(1);
   });

@@ -125,6 +125,10 @@ await step("06-fillet-a-corner", async () => {
   await click(-80, 100); // a corner of the first rectangle
   const dlg = page.getByRole("dialog", { name: "Fillet corner" });
   await dlg.waitFor();
+  // Too big for the corner: said while typing, before Enter.
+  await dlg.locator("input").first().fill("500");
+  const warn = (await dlg.locator(".inline-prompt__error").textContent({ timeout: 2000 }).catch(() => "")) ?? "";
+  expect(/too big/i.test(warn), "oversized radius flagged while typing", warn);
   await dlg.locator("input").first().fill("8");
   await dlg.getByRole("button", { name: /OK|Apply|Fillet|Done/ }).first().click();
   await waitBuilt();

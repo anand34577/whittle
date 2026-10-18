@@ -97,6 +97,8 @@ export function hintFor(s: AppState): string {
         return "Choose the plane and offset · keep both halves or one side · Enter to finish";
       case "offset":
         return "Positive grows the body, negative shrinks it (clearances for fits and printing) · Enter to finish";
+      case "boundingSolid":
+        return "Click bodies to enclose (none: all of them) · choose box or cylinder and padding · Enter to finish";
       case "scale":
         return "Type a factor (2 = twice the size) · Enter to finish";
       case "joint":
@@ -132,7 +134,7 @@ export function hintFor(s: AppState): string {
     }
   }
   const p = selection[0];
-  if (p?.kind === "face") return "Face selected \u00b7 S sketches on it \u00b7 Shell (Modify) hollows the body from here";
+  if (p?.kind === "face") return "Face selected \u00b7 S sketches on it \u00b7 Shell (Modify) hollows the body from here · Alt+click picks the face behind";
   if (p?.kind === "edge") return `${selection.length} edge${selection.length > 1 ? "s" : ""} selected \u00b7 F to fillet \u00b7 Shift-click to add more`;
   if (p?.kind === "sketch") return "Sketch selected \u00b7 E to extrude \u00b7 R to revolve \u00b7 double-click to edit";
   if (p?.kind === "region") return `${selection.length} profile${selection.length > 1 ? "s" : ""} selected \u00b7 E extrudes just ${selection.length > 1 ? "these" : "this"} \u00b7 Shift-click to add more`;

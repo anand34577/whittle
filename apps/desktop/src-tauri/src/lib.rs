@@ -365,6 +365,122 @@ fn open_release(version: String) -> Result<(), String> {
     cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't open the browser: {e}"))
 }
 
+/* ───────────────────────── Slicers ───────────────────────── */
+
+/// Slicers looked for where they install themselves. Only these are ever started: the page names one, it never
+/// chooses a program to run.
+const SLICERS: &[&str] = &["PrusaSlicer", "Bambu Studio", "OrcaSlicer", "UltiMaker Cura"];
+
+#[cfg(target_os = "windows")]
+fn slicer_path(name: &str) -> Option<PathBuf> {
+    let roots: Vec<PathBuf> = ["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"].iter().filter_map(|v| std::env::var_os(v)).map(PathBuf::from).collect();
+    for root in &roots {
+        let found = match name {
+            "PrusaSlicer" => Some(root.join(r"Prusa3D\PrusaSlicer\prusa-slicer.exe")),
+            "Bambu Studio" => Some(root.join(r"Bambu Studio\bambu-studio.exe")),
+            "OrcaSlicer" => Some(root.join(r"OrcaSlicer\orca-slicer.exe")),
+            // Cura installs into a folder named after its version.
+            "UltiMaker Cura" => std::fs::read_dir(root).ok().and_then(|dirs| {
+                dirs.filter_map(|d| d.ok())
+                    .filter(|d| d.file_name().to_string_lossy().to_lowercase().starts_with("ultimaker cura"))
+                    .flat_map(|d| [d.path().join("UltiMaker-Cura.exe"), d.path().join("Cura.exe")])
+                    .find(|p| p.is_file())
+            }),
+            _ => None,
+        };
+        if let Some(p) = found.filter(|p| p.is_file()) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn slicer_path(name: &str) -> Option<PathBuf> {
+    let apps: &[&str] = match name {
+        "PrusaSlicer" => &["PrusaSlicer.app"],
+        "Bambu Studio" => &["BambuStudio.app", "Bambu Studio.app"],
+        "OrcaSlicer" => &["OrcaSlicer.app"],
+        "UltiMaker Cura" => &["UltiMaker Cura.app", "Ultimaker Cura.app"],
+        _ => &[],
+    };
+    apps.iter().map(|a| Path::new("/Applications").join(a)).find(|p| p.exists())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn slicer_path(name: &str) -> Option<PathBuf> {
+    let bins: &[&str] = match name {
+        "PrusaSlicer" => &["prusa-slicer", "PrusaSlicer"],
+        "Bambu Studio" => &["bambu-studio"],
+        "OrcaSlicer" => &["orca-slicer"],
+        "UltiMaker Cura" => &["UltiMaker-Cura", "cura"],
+        _ => &[],
+    };
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).flat_map(|dir| bins.iter().map(move |b| dir.join(b))).find(|p| p.is_file())
+}
+
+/// The slicers found on this computer, by name.
+#[tauri::command]
+fn installed_slicers() -> Vec<String> {
+    SLICERS.iter().filter(|n| slicer_path(n).is_some()).map(|n| n.to_string()).collect()
+}
+
+/// Write the request body (a 3MF) to a temporary file named by `x-name` and open it in the slicer named by
+/// `x-slicer`, or in whatever the system opens .3mf files with when that is empty.
+#[tauri::command]
+fn open_in_slicer(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected raw bytes".into()) };
+    let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(percent_decode).transpose();
+    let name: String = header("x-name")?.unwrap_or_default().chars().filter(|c| c.is_alphanumeric() || " -_".contains(*c)).take(80).collect();
+    let slicer = header("x-slicer")?.unwrap_or_default();
+    let dir = std::env::temp_dir().join("whittle-slicer");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = dir.join(format!("{}.3mf", if name.trim().is_empty() { "design" } else { name.trim() }));
+    std::fs::write(&file, bytes).map_err(|e| format!("Couldn't write the file for the slicer: {e}"))?;
+    let mut cmd = if slicer.is_empty() {
+        default_opener(&file)
+    } else {
+        let exe = slicer_path(&slicer).ok_or_else(|| format!("{slicer} isn't installed where Whittle looks for it."))?;
+        #[cfg(target_os = "macos")]
+        let c = {
+            let mut c = std::process::Command::new("open");
+            c.arg("-a").arg(&exe).arg(&file);
+            c
+        };
+        #[cfg(not(target_os = "macos"))]
+        let c = {
+            let mut c = std::process::Command::new(&exe);
+            c.arg(&file);
+            c
+        };
+        c
+    };
+    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't start the slicer: {e}"))
+}
+
+fn default_opener(file: &Path) -> std::process::Command {
+    #[cfg(target_os = "windows")]
+    let c = {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler").arg(file);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let c = {
+        let mut c = std::process::Command::new("open");
+        c.arg(file);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let c = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(file);
+        c
+    };
+    c
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -393,7 +509,9 @@ pub fn run() {
             forget_recent,
             list_history,
             read_history,
-            open_release
+            open_release,
+            installed_slicers,
+            open_in_slicer
         ])
         .setup(|app| {
             let state = app.state::<AppData>();

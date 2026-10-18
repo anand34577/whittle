@@ -68,6 +68,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   coil: "Coil",
   split: "Split",
   offset: "Offset",
+  boundingSolid: "Bounding Solid",
   scale: "Scale",
   draft: "Draft",
   offsetFace: "Press/Pull",
@@ -176,6 +177,7 @@ export function makeHole(doc: WhittleDocument): Feature {
     through: true,
     headDiameter: "9",
     headDepth: "3",
+    tipAngle: "118", // a blind hole ends in a drill point, as Fusion's does
   };
 }
 
@@ -227,6 +229,10 @@ export function makeSplit(doc: WhittleDocument, bodyId?: Id): Feature {
 
 export function makeOffset(doc: WhittleDocument, bodyId?: Id): Feature {
   return { id: uid("of"), type: "offset", name: nextName(doc, "Offset"), bodyId, distance: "0.5", copy: false };
+}
+
+export function makeBoundingSolid(doc: WhittleDocument, bodies: Id[] = []): Feature {
+  return { id: uid("bs"), type: "boundingSolid", name: nextName(doc, "Bounding Solid"), bodies, shape: "box", padding: "0", axis: "z" };
 }
 
 export function makeScale(doc: WhittleDocument, bodyId?: Id): Feature {

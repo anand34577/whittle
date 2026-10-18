@@ -8,6 +8,7 @@
  * has rebuilt, so the caller sees the real outcome (including errors and
  * suggested fixes) and can correct itself.
  */
+import { problemsOf } from "./problems";
 import type { Draft } from "immer";
 import {
   type EdgeRef,
@@ -51,6 +52,7 @@ import {
   makeMirror,
   makeMove,
   makeOffset,
+  makeBoundingSolid,
   makePattern,
   makePrimitive,
   makeRevolve,
@@ -83,7 +85,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
   {
     name: "get_design",
     description:
-      "Read the open design: units, parameters, every feature in timeline order (with its settings and build status; sketches with several enclosed areas list a point inside each as `regions`), every body (size, volume, bounding box), and what the person has selected in the view (`selection`: when they say \"this\" or \"these\", they mean it). Call this first, and again after changes when you need ids.",
+      "Read the open design: units, parameters, every feature in timeline order (with its settings and build status; sketches with several enclosed areas list a point inside each as `regions`), every body (size, volume, bounding box), `problems` (failed steps, conflicting sketches, unfinished work), and what the person has selected in the view (`selection`: when they say \"this\" or \"these\", they mean it). Call this first, and again after changes when you need ids.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -198,9 +200,9 @@ export const DESIGN_TOOLS: ToolDef[] = [
       "primitive {shape: box|cylinder|sphere|cone|torus|tube, width, depth, height, radius, radius2, position: [x,y,z], op}",
       "coil {section: circle|triangle|square, radius, pitch, height, size, lefthand, position, op}",
       "fillet {body, edges: selector, radius}",
-      "chamfer {body, edges: selector, distance}",
+      "chamfer {body, edges: selector, distance, mode: equal|two|angle, distance2 (two), angle (angle, degrees), flip}",
       "shell {body, face: selector, thickness}",
-      "hole {body, face: selector, points: [[x,y]...] in the face frame, diameter, through, depth, style: simple|counterbore|countersink, headDiameter, headDepth}",
+      "hole {body, face: selector, points: [[x,y]...] in the face frame, diameter, through, depth, style: simple|counterbore|countersink, headDiameter, headDepth, sinkAngle (deg, default 90), tipAngle (deg drill point of a blind hole, default 118; \"\" for a flat bottom)}",
       "draft {body, faces: 'sides', angle, pull: x|y|z}",
       "mirror {body, plane: XY|XZ|YZ, offset (moves the plane along its normal), merge, features: [earlier feature names to mirror instead of the whole body]}",
       "pattern {body, pattern: linear|circular, axis: x|y|z, count, spacing, angle, axis2, count2, spacing2 (a second linear direction makes a grid), merge, features: [earlier feature names to repeat instead of the whole body, e.g. one boss or cut]}",
@@ -209,11 +211,12 @@ export const DESIGN_TOOLS: ToolDef[] = [
       "split {body, plane, offset, keep: both|above|below}",
       "offset {body, distance, copy}",
       "scale {body, factor, center: body|origin, copy}",
+      "boundingSolid {bodies: [bodies to enclose, empty = all], shape: box|cylinder, padding, axis: x|y|z} (a new body around others: machining stock, a case blank)",
     ].join("; ")}. op is new|join|cut|intersect (with optional target body). Bodies and sketches can be named or given by id. Edge selectors: all, top, bottom, vertical, circular, or selected (what the person picked in the view); face selectors: top, bottom, front, back, left, right, or selected. Returns the feature id and whether it built.`,
     input_schema: {
       type: "object",
       properties: {
-        type: { type: "string", enum: ["extrude", "revolve", "loft", "sweep", "primitive", "coil", "fillet", "chamfer", "shell", "hole", "draft", "mirror", "pattern", "move", "combine", "split", "offset", "scale"] },
+        type: { type: "string", enum: ["extrude", "revolve", "loft", "sweep", "primitive", "coil", "fillet", "chamfer", "shell", "hole", "draft", "mirror", "pattern", "move", "combine", "split", "offset", "scale", "boundingSolid"] },
         name: { type: "string" },
         settings: { type: "object", description: "The settings listed for this type" },
       },
@@ -239,7 +242,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
     description: "Rename a body or set its color (#rrggbb) and finish.",
     input_schema: {
       type: "object",
-      properties: { body: { type: "string" }, name: { type: "string" }, color: { type: "string" }, finish: { type: "string", enum: ["matte", "satin", "metal", "glass"] }, visible: { type: "boolean" } },
+      properties: { body: { type: "string" }, name: { type: "string" }, color: { type: "string" }, finish: { type: "string", enum: ["matte", "satin", "metal", "glass"] }, visible: { type: "boolean" }, opacity: { type: "number", description: "0.05 (nearly invisible) to 1 (solid)" } },
       required: ["body"],
     },
   },
@@ -403,16 +406,17 @@ function entityFrom(s: Record<string, unknown>): SketchEntity {
 
 const EXPR_KEYS = new Set([
   "distance", "distance2", "taper", "twist", "angle", "width", "depth", "height", "radius", "radius2", "pitch", "size", "thickness",
-  "diameter", "headDiameter", "headDepth", "count", "spacing", "offset", "factor", "neutral", "scale", "thin", "count2", "spacing2",
+  "diameter", "headDiameter", "headDepth", "sinkAngle", "count", "spacing", "offset", "factor", "neutral", "scale", "padding", "thin", "count2", "spacing2",
 ]);
-const ENUM_KEYS = new Set(["extent", "flip", "op", "axis", "axis2", "thinSide", "shape", "ruled", "orientation", "section", "lefthand", "style", "through", "plane", "merge", "pattern", "copy", "keepTools", "keep", "center", "pull"]);
+const ENUM_KEYS = new Set(["extent", "mode", "flip", "op", "axis", "axis2", "thinSide", "shape", "ruled", "orientation", "section", "lefthand", "style", "through", "plane", "merge", "pattern", "copy", "keepTools", "keep", "center", "pull"]);
 
 /** Apply API settings onto a feature draft (resolving names, selectors and formulas). */
 function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
   const rec = f as unknown as Record<string, unknown>;
   for (const [k, v] of Object.entries(s)) {
     if (v === undefined) continue;
-    if (EXPR_KEYS.has(k)) rec[k] = ex(v);
+    if (k === "tipAngle") rec[k] = v === "" || v === null || v === false ? undefined : ex(v);
+    else if (EXPR_KEYS.has(k)) rec[k] = ex(v);
     else if (ENUM_KEYS.has(k)) rec[k] = v;
     else if (k === "position" || k === "translate") {
       if (!Array.isArray(v) || v.length !== 3) throw new ApiInputError(`${k} is [x, y, z].`);
@@ -434,6 +438,7 @@ function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
       else rec.bodyId = id;
     } else if (k === "target") rec.target = bodyRef(v);
     else if (k === "tools") rec.tools = (v as unknown[]).map(bodyRef);
+    else if (k === "bodies") rec.bodies = (v as unknown[]).map(bodyRef);
     else if (k === "to_face") {
       const o = v as { body?: unknown; face?: unknown };
       if (!o || typeof o !== "object" || !o.body) throw new ApiInputError('to_face is {body, face}, e.g. {"body": "Body 1", "face": "bottom"}.');
@@ -562,6 +567,7 @@ const MAKERS: Partial<Record<FeatureType, (d: WhittleDocument, s: Record<string,
   split: (d) => makeSplit(d),
   offset: (d) => makeOffset(d),
   scale: (d) => makeScale(d),
+  boundingSolid: (d) => makeBoundingSolid(d),
 };
 
 /** Wait for the geometry to catch up with the document, then report a feature's status. */
@@ -628,6 +634,8 @@ export function describeDesign() {
       edges: b.edges.length,
     })),
     selection: describeSelection(),
+    // The same list the person sees under Problems: fix errors before going on.
+    problems: problemsOf(useApp.getState()).map((p) => ({ severity: p.severity, title: p.title, ...(p.detail ? { detail: p.detail } : {}) })),
   };
 }
 
@@ -792,6 +800,11 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
           if (input.name) b.name = String(input.name);
           if (input.color) b.color = String(input.color);
           if (input.finish) b.look = String(input.finish);
+          if (input.opacity !== undefined) {
+            const o = Number(input.opacity);
+            if (!(o >= 0.05 && o <= 1)) throw new ApiInputError("opacity is between 0.05 and 1.");
+            b.opacity = o >= 0.995 ? undefined : o;
+          }
           if (input.visible !== undefined) b.visible = !!input.visible;
         });
         return { ok: true };

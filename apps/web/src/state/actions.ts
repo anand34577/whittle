@@ -36,6 +36,7 @@ import {
   makeJoint,
   makeOffsetFace,
   makeOffset,
+  makeBoundingSolid,
   makeScale,
   makeSplit,
   makePipe,
@@ -53,8 +54,13 @@ import {
   makeShell,
   makeSketch,
   trim,
+  LENGTH_TO_MM,
+  type NamedView,
+  uid,
 } from "@whittle/core";
 import { tangentChain } from "./edgeChain";
+import { promptDialog } from "./dialogs";
+import { viewportRef } from "../viewport/current";
 import { regionAt } from "./regions";
 import type { BodyResult, EdgeInfo, FaceInfo } from "@whittle/kernel";
 import {
@@ -175,7 +181,7 @@ function sketchForProfile(): Id | null {
   const picked = selection.find((p) => p.kind === "sketch" || p.kind === "region");
   if (picked && (picked.kind === "sketch" || picked.kind === "region")) return picked.sketchId;
   const end = activeEnd(doc);
-  const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length > 0);
+  const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length + (f.geometry?.length ?? 0) > 0);
   const unused = sketches.filter((s) => !isSketchConsumed(doc, s.id));
   return (unused.pop() ?? sketches.pop())?.id ?? null;
 }
@@ -288,7 +294,7 @@ export function startLoft() {
   let ids = selection.filter((p) => p.kind === "sketch").map((p) => (p.kind === "sketch" ? p.sketchId : ""));
   if (ids.length < 2) {
     const end = activeEnd(doc);
-    const unused = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length > 0 && !isSketchConsumed(doc, f.id));
+    const unused = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length + (f.geometry?.length ?? 0) > 0 && !isSketchConsumed(doc, f.id));
     ids = unused.slice(-2).map((f) => f.id);
   }
   beginNewFeature(makeLoft(get().doc, ids), "New Loft");
@@ -359,7 +365,14 @@ export function startMirror() {
 export function startPattern() {
   const body = selectedBodyId() ?? lastBodyId();
   if (!body) return toast("info", "Create a body first, then pattern it.");
-  beginNewFeature(makePattern(get().doc, body), "New Pattern");
+  const f = makePattern(get().doc, body);
+  // Copies start clear of each other (half a body apart), not run together into one bar.
+  const b = get().regen?.bodies.find((x) => x.id === body);
+  if (b && f.type === "pattern") {
+    const w = (b.bbox[1][0] - b.bbox[0][0]) / LENGTH_TO_MM[get().doc.units];
+    if (w > 0) f.spacing = String(+(w * 1.5).toPrecision(2));
+  }
+  beginNewFeature(f, "New Pattern");
 }
 
 /** Sweep: the selected sketches (profile first), else the two newest unused ones. */
@@ -368,7 +381,7 @@ export function startSweep() {
   let ids = selection.flatMap((p) => (p.kind === "sketch" ? [p.sketchId] : []));
   if (ids.length < 2) {
     const end = activeEnd(doc);
-    const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length > 0 && !isSketchConsumed(doc, f.id));
+    const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length + (f.geometry?.length ?? 0) > 0 && !isSketchConsumed(doc, f.id));
     // A sketch with an open path is the path; the other one is the profile.
     const path = [...sketches].reverse().find((s) => s.type === "sketch" && s.entities.some((e) => e.type === "polyline" && e.open));
     const profile = [...sketches].reverse().find((s) => s.id !== path?.id);
@@ -381,7 +394,7 @@ export function startSweep() {
 /** Pipe: a tube along the selected (or newest unused) path sketch. */
 export function startPipe() {
   const { selection, doc } = get();
-  const sketches = doc.features.slice(0, activeEnd(doc)).filter((f) => f.type === "sketch" && f.entities.length > 0);
+  const sketches = doc.features.slice(0, activeEnd(doc)).filter((f) => f.type === "sketch" && f.entities.length + (f.geometry?.length ?? 0) > 0);
   const picked = selection.find((p) => p.kind === "sketch");
   const path =
     (picked?.kind === "sketch" ? picked.sketchId : undefined) ??
@@ -406,6 +419,13 @@ export function startOffset() {
   const body = selectedBodyId() ?? lastBodyId();
   if (!body) return toast("info", "Create a body first, then offset it.");
   beginNewFeature(makeOffset(get().doc, body), "New Offset");
+}
+
+/** A box or cylinder around the selected bodies (all of them when none is selected). */
+export function startBoundingSolid() {
+  if (!lastBodyId()) return toast("info", "Create a body first, then enclose it.");
+  const picked = [...new Set(get().selection.flatMap((p) => (p.kind === "body" || p.kind === "face" || p.kind === "edge" ? [p.bodyId] : [])))];
+  beginNewFeature(makeBoundingSolid(get().doc, picked), "New Bounding Solid");
 }
 
 export function startScale() {
@@ -927,6 +947,17 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f && f.type === "pattern" && f.axisGeom && (p?.kind === "edge" || p?.kind === "face")) {
+    // Waiting for the direction: this click sets it (not the body to repeat).
+    const edge = p.kind === "edge" ? edgeRefFromPick(p) : null;
+    const face = p.kind === "face" ? faceRefFromPick(p) : null;
+    if (!edge && !face) return;
+    mutate("Pick direction", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (x?.type === "pattern") x.axisGeom = edge ? { edge } : { face: face! };
+    });
+    return;
+  }
   const bodyOf = p && (p.kind === "body" || p.kind === "face" || p.kind === "edge") ? p.bodyId : null;
   if (f && f.type === "combine" && bodyOf) {
     mutate("Pick body", (d) => {
@@ -956,6 +987,13 @@ export function handlePick(p: Pick | null, additive: boolean) {
     mutate("Pick body", (d) => {
       const x = d.features.find((y) => y.id === f.id);
       if (x && (x.type === "move" || x.type === "mirror" || x.type === "pattern" || x.type === "split" || x.type === "offset" || x.type === "scale")) x.bodyId = bodyOf;
+    });
+    return;
+  }
+  if (f?.type === "boundingSolid" && bodyOf && bodyOf !== f.id) {
+    mutate("Pick body", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (x?.type === "boundingSolid") x.bodies = x.bodies.includes(bodyOf) ? x.bodies.filter((b) => b !== bodyOf) : [...x.bodies, bodyOf];
     });
     return;
   }
@@ -1003,3 +1041,17 @@ export function handlePick(p: Pick | null, additive: boolean) {
 }
 
 export type { Feature };
+/** Save the camera as a named view in the design (Fusion's Named Views). */
+export async function saveNamedView() {
+  const vp = viewportRef.current;
+  if (!vp) return;
+  const n = (get().doc.views?.length ?? 0) + 1;
+  const name = await promptDialog({ title: "Save view", label: "Name", initial: `View ${n}`, confirmLabel: "Save" });
+  if (!name?.trim()) return;
+  const cam = vp.getCamera();
+  mutate(`Save view ${name}`, (d) => void (d.views ??= []).push({ id: uid("v"), name: name.trim(), ...cam }));
+}
+
+export function showNamedView(v: NamedView) {
+  viewportRef.current?.setCamera(v);
+}

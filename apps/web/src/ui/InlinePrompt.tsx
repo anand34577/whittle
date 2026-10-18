@@ -21,15 +21,19 @@ export function InlinePrompt() {
   useEffect(() => {
     if (req) input.current?.select();
   }, [req]);
+  useEffect(() => {
+    if (req) req.onInput?.(text.trim());
+  }, [req, text]);
   if (!req) return null;
+  // Problems show while typing, not only after Enter.
+  const problem = error ?? req.validate?.(text.trim()) ?? null;
 
   const done = (v: string | null) => {
     req.resolve(v);
     setReq(null);
   };
   const submit = () => {
-    const bad = req.validate?.(text.trim()) ?? null;
-    if (bad) return setError(bad);
+    if (problem) return setError(problem);
     done(text.trim());
   };
   return (
@@ -59,7 +63,7 @@ export function InlinePrompt() {
           OK
         </button>
       </div>
-      {error ? <div className="inline-prompt__error">{error}</div> : <div className="inline-prompt__hint muted">{req.label} · Enter to apply, Esc to cancel</div>}
+      {problem ? <div className="inline-prompt__error">{problem}</div> : <div className="inline-prompt__hint muted">{req.label} · Enter to apply, Esc to cancel</div>}
     </div>
   );
 }

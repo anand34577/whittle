@@ -1,4 +1,7 @@
-/** Orientation cube: an HTML/CSS 3D cube that mirrors the camera. Click a face to look at it. */
+/**
+ * Orientation cube: an HTML/CSS 3D cube that mirrors the camera. Click a face, an edge or a corner to look from
+ * there (as in Fusion's ViewCube), or drag it to turn the view.
+ */
 import { useEffect, useRef } from "react";
 import type { CubeView, Viewport } from "../viewport/Viewport";
 
@@ -13,11 +16,31 @@ const FACES: { id: CubeView; label: string; n: number[]; r: number[]; u: number[
   { id: "bottom", label: "BOTTOM", n: [0, 0, -1], r: [1, 0, 0], u: [0, -1, 0] },
 ];
 
+const NAMES: [number[], string][] = [
+  [[0, -1, 0], "front"],
+  [[0, 1, 0], "back"],
+  [[1, 0, 0], "right"],
+  [[-1, 0, 0], "left"],
+  [[0, 0, 1], "top"],
+  [[0, 0, -1], "bottom"],
+];
+/** "top front right" for a corner direction, and so on. */
+const nameOf = (d: number[]) =>
+  NAMES.filter(([n]) => n.some((x, i) => x !== 0 && x === d[i]))
+    .map(([, s]) => s)
+    .sort((a, b) => ["top", "bottom", "front", "back", "left", "right"].indexOf(a) - ["top", "bottom", "front", "back", "left", "right"].indexOf(b))
+    .join(" ");
+
 const faceMatrix = (f: (typeof FACES)[number]) =>
   `matrix3d(${[...f.r, 0, ...f.u.map((x) => -x), 0, ...f.n, 0, ...f.n.map((x) => x * H), 1].join(",")})`;
 
+/** A face's 3 x 3 hot zones, top row first: corners, edges and the face itself. */
+const zones = (f: (typeof FACES)[number]) =>
+  [1, 0, -1].flatMap((v) => [-1, 0, 1].map((c) => ({ c, v, dir: f.n.map((x, i) => x + c * f.r[i]! + v * f.u[i]!) })));
+
 export function OrientationCube({ viewport, tick }: { viewport: Viewport | null; tick: { subscribe: (fn: () => void) => () => void } }) {
   const cube = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -32,19 +55,50 @@ export function OrientationCube({ viewport, tick }: { viewport: Viewport | null;
   }, [viewport, tick]);
 
   return (
-    <div className="orientcube" aria-label="Orientation cube">
+    <div
+      className="orientcube"
+      aria-label="Orientation cube"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        drag.current = { x: e.clientX, y: e.clientY, moved: false };
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d || !viewport) return;
+        const dx = e.clientX - d.x;
+        const dy = e.clientY - d.y;
+        if (!d.moved && Math.hypot(dx, dy) < 4) return;
+        if (!d.moved) e.currentTarget.setPointerCapture(e.pointerId);
+        d.moved = true;
+        d.x = e.clientX;
+        d.y = e.clientY;
+        viewport.orbitBy(dx * 1.6, dy * 1.6);
+      }}
+      onPointerUp={() => setTimeout(() => (drag.current = null))}
+      onClickCapture={(e) => {
+        // The end of a drag isn't a click on whatever zone it ended over.
+        if (drag.current?.moved) e.stopPropagation();
+      }}
+    >
       <div className="orientcube__stage">
         <div className="orientcube__cube" ref={cube}>
           {FACES.map((f) => (
-            <button
-              key={f.id}
-              className="orientcube__face"
-              style={{ transform: faceMatrix(f), width: H * 2, height: H * 2, left: -H, top: -H }}
-              onClick={() => viewport?.viewTo(f.id)}
-              title={`Look at ${f.label.toLowerCase()}`}
-            >
-              {f.label}
-            </button>
+            <div key={f.id} className="orientcube__face" style={{ transform: faceMatrix(f), width: H * 2, height: H * 2, left: -H, top: -H }}>
+              {zones(f).map(({ c, v, dir }) => {
+                const face = c === 0 && v === 0;
+                return (
+                  <button
+                    key={`${c}${v}`}
+                    className={`orientcube__zone ${face ? "orientcube__zone--face" : ""}`}
+                    onClick={() => (face ? viewport?.viewTo(f.id) : viewport?.viewDirection(dir as [number, number, number]))}
+                    title={`Look from the ${nameOf(dir)}`}
+                    aria-label={`Look from the ${nameOf(dir)}`}
+                  >
+                    {face && f.label}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </div>
       </div>

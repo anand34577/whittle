@@ -214,6 +214,25 @@ export function unreachable(baseUrl: string, page: string = location.href): stri
   return `Couldn't reach ${baseUrl}. Check the server is running, listening on the network (Ollama: OLLAMA_HOST=0.0.0.0) and allows requests from this app (Ollama: OLLAMA_ORIGINS=*; LM Studio: enable CORS).`;
 }
 
+/** Models an OpenAI-compatible server offers (Ollama, LM Studio, vLLM… all answer GET /models). Throws a friendly message. */
+export async function listModels(p: Pick<ProviderConfig, "baseUrl" | "apiKey">): Promise<string[]> {
+  if (!p.baseUrl) throw new Error("Enter the endpoint first.");
+  let res: Response;
+  try {
+    res = await fetch(`${p.baseUrl.replace(/\/+$/, "")}/models`, { headers: p.apiKey ? { Authorization: `Bearer ${p.apiKey}` } : {}, signal: AbortSignal.timeout(8000) });
+  } catch {
+    throw new Error(unreachable(p.baseUrl));
+  }
+  if (!res.ok) throw new Error(`The server answered ${res.status}. Type the model name instead.`);
+  const json = (await res.json().catch(() => ({}))) as { data?: { id?: string }[] };
+  const ids = (json.data ?? []).map((m) => m.id).filter((x): x is string => !!x);
+  if (!ids.length) throw new Error("The server has no models yet. For Ollama, run `ollama pull qwen2.5:14b` first.");
+  return ids;
+}
+
+/** Long tool results swamp a small local model's context; keep the start, which carries the status and message. */
+const clip = (s: string) => (s.length > 6000 ? `${s.slice(0, 6000)}…(shortened)` : s);
+
 async function runOpenAI(p: ProviderConfig, text: string, signal: AbortSignal) {
   if (!p.baseUrl) throw new Error("Set the endpoint URL for this provider in Settings.");
   if (!p.model) throw new Error("Choose a model for this provider in Settings.");
@@ -264,7 +283,7 @@ async function runOpenAI(p: ProviderConfig, text: string, signal: AbortSignal) {
         }
       }
       patchLastTool(result);
-      oaiHistory.push({ role: "tool", tool_call_id: c.id, content: JSON.stringify(result) });
+      oaiHistory.push({ role: "tool", tool_call_id: c.id, content: clip(JSON.stringify(result)) });
     }
   }
   push({ kind: "error", text: "Stopped after many steps. Ask again to continue." });

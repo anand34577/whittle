@@ -158,3 +158,62 @@ export function renameParameter(doc: Pick<WhittleDocument, "parameters" | "featu
 }
 
 export { evaluateRaw };
+/** Rows of a CSV file (quoted cells, doubled quotes, commas and newlines inside quotes). */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') (cell += '"'), i++;
+      else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === "," || c === ";") row.push(cell), (cell = "");
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell), rows.push(row), (row = []), (cell = "");
+    } else cell += c;
+  }
+  if (cell || row.length) row.push(cell), rows.push(row);
+  return rows.filter((r) => r.some((x) => x.trim()));
+}
+
+const KINDS = new Set<QuantityKind>(["length", "angle", "number", "count"]);
+
+/**
+ * Merge a parameter table (Whittle's own export, or any sheet with Name and Value/Formula columns) into the list:
+ * names that exist get the new formula, new names are added. Returns what happened, row by row.
+ */
+export function mergeParameterCsv(params: Parameter[], text: string, newId: () => string): { updated: string[]; added: string[]; skipped: string[] } {
+  const rows = parseCsv(text);
+  const head = (rows[0] ?? []).map((h) => h.trim().toLowerCase());
+  const col = (...names: string[]) => head.findIndex((h) => names.includes(h));
+  const hasHead = col("name") >= 0;
+  const [ni, fi, ki, ci] = hasHead ? [col("name"), col("formula", "expression", "value", "expr"), col("kind", "type"), col("note", "comment", "description")] : [0, 1, 2, 4];
+  const out = { updated: [] as string[], added: [] as string[], skipped: [] as string[] };
+  for (const r of rows.slice(hasHead ? 1 : 0)) {
+    const name = (r[ni] ?? "").trim();
+    const expr = (r[fi] ?? "").trim();
+    const kind = (r[ki] ?? "").trim().toLowerCase() as QuantityKind;
+    const comment = ci >= 0 ? (r[ci] ?? "").trim() : "";
+    if (!name) continue;
+    const p = params.find((x) => x.name === name);
+    if (!expr || (!p && validateParamName(name, params))) {
+      out.skipped.push(name);
+      continue;
+    }
+    if (p) {
+      p.expr = expr;
+      if (KINDS.has(kind)) p.kind = kind;
+      if (comment) p.comment = comment;
+      out.updated.push(name);
+    } else {
+      params.push({ id: newId(), name, expr, kind: KINDS.has(kind) ? kind : "length", ...(comment ? { comment } : {}) });
+      out.added.push(name);
+    }
+  }
+  return out;
+}

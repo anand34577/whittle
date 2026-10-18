@@ -86,7 +86,8 @@ await step("04-history-restore", async () => {
 });
 
 await step("05-gallery-reopen", async () => {
-  await page.getByTitle(/Start screen/).click();
+  await page.getByTitle(/Help, lessons/).click();
+  await page.getByRole("menuitem", { name: /Start screen/ }).click();
   await page.locator(".lib-card__open", { hasText: "Mounting plate" }).click();
   // The status bar still shows the previous build, so wait for the new result itself.
   await page.waitForFunction(() => window.whittle.useApp.getState().regen?.bodies.length === 1, null, { timeout: 60000 });

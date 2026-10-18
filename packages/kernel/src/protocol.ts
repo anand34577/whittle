@@ -124,8 +124,12 @@ export interface RadiusItem {
   normal: Vec3;
 }
 
-export type InspectKind = "interference" | "radii" | "validity" | "text";
+export type InspectKind = "interference" | "radii" | "validity" | "text" | "distance";
+/** A face, edge or whole body to measure from (indices are those of the body's faces and edges). */
+export type MeasurePick = { bodyId: Id; kind: "face" | "edge" | "body"; index?: number };
 export type InspectResult =
+  /** The shortest distance between two picks, and its end points; null when it can't be worked out. */
+  | { kind: "distance"; result: { d: number; a: Vec3; b: Vec3 } | null }
   | { kind: "interference"; items: InterferenceItem[] }
   | { kind: "radii"; items: RadiusItem[] }
   /** OpenCascade's own validity check of every body. */
@@ -140,7 +144,7 @@ export type MeshQuality = "draft" | "standard" | "fine";
 export type KernelRequest =
   | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id; preview?: Id }
   | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[]; quality?: MeshQuality }
-  | { type: "inspect"; seq: number; doc: WhittleDocument; kind: InspectKind };
+  | { type: "inspect"; seq: number; doc: WhittleDocument; kind: InspectKind; picks?: MeasurePick[] };
 
 export type KernelResponse =
   | { type: "ready"; ms: number }

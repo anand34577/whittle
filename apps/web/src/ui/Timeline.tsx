@@ -8,6 +8,8 @@ import type { Feature } from "@whittle/core";
 import { activeEnd, dependents, featureInputs, reorderProblem } from "@whittle/core";
 import { confirmDeleteFeature, editFeature, moveFeature, mutate, updateFeature, useApp } from "../state/store";
 import { Icon } from "./icons";
+import { copySteps, folderSteps, timelinePick } from "../state/steps";
+import { promptDialog } from "../state/dialogs";
 import { FEATURE_ICONS } from "./PropertiesPanel";
 
 interface Menu {
@@ -15,6 +17,36 @@ interface Menu {
   index: number;
   x: number;
   y: number;
+}
+
+/** The key values of a step, for its tooltip: "10 mm · Join", "R 2 mm · 4 edges". */
+export function summary(f: Feature, units: string): string {
+  const v = (e: string | undefined) => (e === undefined ? "" : /^\s*-?[\d.]+\s*$/.test(e) ? `${e.trim()} ${units}` : e);
+  const op = "op" in f && typeof f.op === "string" ? { new: "New body", join: "Join", cut: "Cut", intersect: "Keep overlap" }[f.op as string] : undefined;
+  const n = (k: number, what: string) => `${k} ${what}${k === 1 ? "" : "s"}`;
+  const parts: (string | undefined)[] = (() => {
+    switch (f.type) {
+      case "sketch":
+        return [n(f.entities.length + (f.geometry?.length ?? 0), "shape")];
+      case "extrude":
+        return [f.extent === "through" ? "Through all" : f.extent === "face" ? "Up to a face" : v(f.distance) + (f.extent === "symmetric" ? " both ways" : ""), op];
+      case "revolve":
+        return [`${f.angle}°`, op];
+      case "fillet":
+        return [`R ${v(f.radius)}`, n(f.edges.length, "edge")];
+      case "chamfer":
+        return [v(f.distance), n(f.edges.length, "edge")];
+      case "shell":
+        return [`${v(f.thickness)} wall`, n(f.faces.length, "open face")];
+      case "hole":
+        return [`Ø ${v(f.diameter)}`, f.through ? "through" : v(f.depth) + " deep", n(f.points.length, "hole")];
+      case "primitive":
+        return [f.shape === "box" ? `${f.width} × ${f.depth} × ${f.height} ${units}` : `R ${v(f.radius)}`, op];
+      default:
+        return [op];
+    }
+  })();
+  return parts.filter(Boolean).join(" · ");
 }
 
 export function Timeline() {
@@ -28,6 +60,24 @@ export function Timeline() {
   const [menu, setMenu] = useState<Menu | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const [dragStep, setDragStep] = useState<{ from: number; over: number } | null>(null);
+  // Steps picked for copying or folding (Shift/Ctrl+click adds); mirrored where the commands can see them.
+  const [picked, setPicked] = useState<string[]>([]);
+  useEffect(() => void (timelinePick.ids = picked), [picked]);
+  const [folderMenu, setFolderMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!folderMenu) return;
+    const close = () => setFolderMenu(null);
+    window.addEventListener("pointerdown", close);
+    return () => window.removeEventListener("pointerdown", close);
+  }, [folderMenu]);
+  const folders = (doc.folders ?? []).filter((x) => x.features.some((id) => doc.features.some((f) => f.id === id)));
+  const folderOf = new Map(folders.flatMap((x) => x.features.map((id) => [id, x] as const)));
+  const firstOf = new Set(folders.map((x) => doc.features.find((f) => x.features.includes(f.id))!.id));
+  const setFolder = (id: string, label: string, recipe: (x: { name: string; open: boolean; features: string[] }) => void) =>
+    mutate(label, (d) => {
+      const x = d.folders?.find((y) => y.id === id);
+      if (x) recipe(x);
+    });
   const track = useRef<HTMLDivElement>(null);
   const end = activeEnd(doc);
 
@@ -92,7 +142,24 @@ export function Timeline() {
           const st = regen?.status.find((s) => s.id === f.id);
           const state = i >= end ? "rolledback" : f.suppressed ? "suppressed" : st?.state ?? "ok";
           return (
-            <div key={f.id} className="step-wrap">
+            <div key={f.id} className={`step-wrap ${folderOf.get(f.id) && !folderOf.get(f.id)!.open ? "is-folded" : ""}`}>
+              {firstOf.has(f.id) && (() => {
+                const fo = folderOf.get(f.id)!;
+                return (
+                  <button
+                    className={`folder ${fo.open ? "is-open" : ""}`}
+                    title={`${fo.name}: ${fo.features.length} step${fo.features.length > 1 ? "s" : ""} · click to ${fo.open ? "fold" : "open"} · right-click to rename or ungroup`}
+                    onClick={() => setFolder(fo.id, fo.open ? "Fold folder" : "Open folder", (x) => void (x.open = !x.open))}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setFolderMenu({ id: fo.id, x: e.clientX, y: e.clientY });
+                    }}
+                  >
+                    <Icon name="folder" size={16} />
+                    <span>{fo.name}</span>
+                  </button>
+                );
+              })()}
               {i === markerAt && <Marker onDown={(e) => startDrag(e)} />}
               <button
                 draggable
@@ -113,15 +180,17 @@ export function Timeline() {
                   setDragStep(null);
                 }}
                 onDragEnd={() => setDragStep(null)}
-                className={`step step--${state} ${isSelected(f) ? "is-selected" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? (reorderProblem(doc, dragStep.from, i) ? "is-drop-blocked" : "is-drop-before") : ""} ${parents.has(f.id) ? "is-parent" : ""} ${children.has(f.id) ? "is-child" : ""} ${hovered === f.id ? "is-hovered" : ""}`}
+                className={`step step--${state} ${isSelected(f) || (picked.length > 1 && picked.includes(f.id)) ? "is-selected" : ""} ${folderOf.has(f.id) ? "is-in-folder" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? (reorderProblem(doc, dragStep.from, i) ? "is-drop-blocked" : "is-drop-before") : ""} ${parents.has(f.id) ? "is-parent" : ""} ${children.has(f.id) ? "is-child" : ""} ${hovered === f.id ? "is-hovered" : ""}`}
                 onPointerEnter={() => (setHot(f.id), glow(f))}
                 onPointerLeave={() => (setHot(null), useApp.setState({ hover: null }))}
-                title={`${f.name}${st?.message ? "\n" + st.message : ""}\nDouble-click to edit · drag to reorder`}
-                onClick={() =>
+                title={`${f.name}${summary(f, doc.units) ? " · " + summary(f, doc.units) : ""}${st?.message ? "\n" + st.message : ""}\nDouble-click to edit · drag to reorder`}
+                onClick={(e) => {
+                  if (e.shiftKey || e.ctrlKey || e.metaKey) return setPicked((p) => (p.includes(f.id) ? p.filter((x) => x !== f.id) : [...p, f.id]));
+                  setPicked([f.id]);
                   useApp.setState({
                     selection: f.type === "sketch" ? [{ kind: "sketch", sketchId: f.id }] : doc.bodies[f.id] ? [{ kind: "body", bodyId: f.id }] : [],
-                  })
-                }
+                  });
+                }}
                 onDoubleClick={() => editFeature(f.id)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -136,6 +205,32 @@ export function Timeline() {
         })}
         {markerAt >= doc.features.length && doc.features.length > 0 && <Marker onDown={(e) => startDrag(e)} />}
       </div>
+
+      {folderMenu && (
+        <div className="menu" style={{ left: folderMenu.x, top: folderMenu.y - 8 }} role="menu" onPointerDown={(e) => e.stopPropagation()}>
+          <button
+            role="menuitem"
+            onClick={async () => {
+              const fo = folders.find((x) => x.id === folderMenu.id);
+              setFolderMenu(null);
+              const name = fo && (await promptDialog({ title: "Rename folder", label: "Name", initial: fo.name, confirmLabel: "Rename" }));
+              if (fo && name?.trim()) setFolder(fo.id, "Rename folder", (x) => void (x.name = name.trim()));
+            }}
+          >
+            <Icon name="edit" size={16} /> Rename
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              const id = folderMenu.id;
+              setFolderMenu(null);
+              mutate("Ungroup folder", (d) => void (d.folders = d.folders?.filter((x) => x.id !== id)));
+            }}
+          >
+            <Icon name="unlink" size={16} /> Ungroup
+          </button>
+        </div>
+      )}
 
       {menu && (
         <div className="menu" style={{ left: menu.x, top: menu.y - 8 }} role="menu" onPointerDown={(e) => e.stopPropagation()}>
@@ -157,6 +252,26 @@ export function Timeline() {
           </button>
           <button role="menuitem" disabled={menu.index >= doc.features.length - 1} onClick={() => (setMenu(null), moveFeature(menu.index, menu.index + 1))}>
             <Icon name="arrowRight" size={16} /> Move later
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setMenu(null);
+              if (!picked.includes(menu.f.id)) timelinePick.ids = [menu.f.id];
+              copySteps();
+            }}
+          >
+            <Icon name="copy" size={16} /> Copy {picked.length > 1 && picked.includes(menu.f.id) ? `${picked.length} steps` : ""}
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setMenu(null);
+              if (!picked.includes(menu.f.id)) timelinePick.ids = [menu.f.id];
+              void folderSteps().then(() => setPicked([]));
+            }}
+          >
+            <Icon name="folder" size={16} /> Put in a folder{picked.length > 1 && picked.includes(menu.f.id) ? ` (${picked.length} steps)` : ""}
           </button>
           <button role="menuitem" onClick={() => (setMenu(null), setRollback(menu.index))}>
             <Icon name="rollback" size={16} /> Roll back to before this

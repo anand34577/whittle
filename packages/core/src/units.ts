@@ -82,5 +82,6 @@ export function formatQuantity(
 export function trim(value: number, digits: number): string {
   if (!Number.isFinite(value)) return "—";
   const fixed = value.toFixed(digits);
-  return fixed.includes(".") ? fixed.replace(/\.?0+$/, "") : fixed;
+  const out = fixed.includes(".") ? fixed.replace(/\.?0+$/, "") : fixed;
+  return out === "-0" ? "0" : out; // a tiny negative rounds to "-0"
 }

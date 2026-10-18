@@ -24,6 +24,7 @@ import type {
   CoilFeature,
   SplitFeature,
   OffsetFeature,
+  BoundingSolidFeature,
   ScaleFeature,
   ConstructionPlaneFeature,
   ConstructFeature,
@@ -285,7 +286,29 @@ function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
           {f.radius2 && <ExprInput label="End radius" kind="length" value={f.radius2} min={0} onChange={(v) => upd(f, "End radius", (d) => void ((d as FilletFeature).radius2 = v))} />}
         </>
       ) : (
-        <ExprInput label="Distance" kind="length" value={f.distance} autoFocus min={0} onChange={(v) => upd(f, "Distance", (d) => void ((d as ChamferFeature).distance = v))} />
+        <>
+          <Segmented
+            label="Type"
+            value={f.mode ?? "equal"}
+            options={[
+              { value: "equal", label: "Equal", title: "The same setback on both faces" },
+              { value: "two", label: "Two distances", title: "A different setback on each face" },
+              { value: "angle", label: "Distance + angle", title: "A setback on one face and the angle of the cut" },
+            ]}
+            onChange={(v) =>
+              upd(f, "Chamfer type", (d) => {
+                const c = d as ChamferFeature;
+                c.mode = v === "equal" ? undefined : (v as ChamferFeature["mode"]);
+                if (v === "two") c.distance2 ??= c.distance;
+                if (v === "angle") c.angle ??= "45";
+              })
+            }
+          />
+          <ExprInput label={f.mode === "two" ? "Distance 1" : "Distance"} kind="length" value={f.distance} autoFocus min={0} onChange={(v) => upd(f, "Distance", (d) => void ((d as ChamferFeature).distance = v))} />
+          {f.mode === "two" && <ExprInput label="Distance 2" kind="length" value={f.distance2 ?? f.distance} min={0} onChange={(v) => upd(f, "Distance 2", (d) => void ((d as ChamferFeature).distance2 = v))} />}
+          {f.mode === "angle" && <ExprInput label="Angle" kind="angle" value={f.angle ?? "45"} min={0} max={89.9} onChange={(v) => upd(f, "Angle", (d) => void ((d as ChamferFeature).angle = v))} />}
+          {f.mode && <Toggle label="Flip side" hint="Measure the first distance on the other face of each edge" checked={!!f.flip} onChange={(v) => upd(f, "Flip chamfer", (d) => void ((d as ChamferFeature).flip = v || undefined))} />}
+        </>
       )}
     </>
   );
@@ -452,12 +475,30 @@ function PatternEditor({ f }: { f: PatternFeature }) {
           <Toggle label="Turn copies with the path" checked={!!f.follow} onChange={(v) => upd(f, "Follow", (d) => void (d.follow = v))} />
         </>
       ) : (
-        <Select
-          label={f.pattern === "linear" ? "Direction" : "Axis"}
-          value={f.axisRef ?? f.axis}
-          options={[...ORIGIN_AXES, ...constructsBefore(useApp.getState().doc.features, f.id, "axis").map((c) => ({ value: c.id, label: c.name, icon: "axis" as const }))]}
-          onChange={(v) => upd(f, "Axis", (d) => (v === "x" || v === "y" || v === "z" ? ((d.axis = v), (d.axisRef = undefined)) : (d.axisRef = v)))}
-        />
+        <>
+          <Select
+            label={f.pattern === "linear" ? "Direction" : "Axis"}
+            value={f.axisGeom ? "pick" : f.axisRef ?? f.axis}
+            options={[
+              ...ORIGIN_AXES,
+              ...constructsBefore(useApp.getState().doc.features, f.id, "axis").map((c) => ({ value: c.id, label: c.name, icon: "axis" as const })),
+              { value: "pick", label: "Edge or face on the model…", icon: "select" as const },
+            ]}
+            onChange={(v) =>
+              upd(f, "Axis", (d) => {
+                d.axisGeom = v === "pick" ? (d.axisGeom ?? {}) : undefined;
+                if (v === "x" || v === "y" || v === "z") ((d.axis = v), (d.axisRef = undefined));
+                else if (v !== "pick") d.axisRef = v;
+              })
+            }
+          />
+          {f.axisGeom && (
+            <div className="picker">
+              <Icon name="select" size={16} />
+              <span>{f.axisGeom.edge ? "Along the picked edge" : f.axisGeom.face ? "From the picked face" : f.pattern === "linear" ? "Click a straight edge or flat face for the direction" : "Click a round face or circular edge for the axis"}</span>
+            </div>
+          )}
+        </>
       )}
       <ExprInput label="Count" kind="count" value={f.count} autoFocus min={2} onChange={(v) => upd(f, "Count", (d) => void (d.count = v))} />
       {f.pattern === "path" ? null : f.pattern === "linear" ? (
@@ -509,10 +550,23 @@ function HoleEditor({ f }: { f: HoleFeature }) {
       <ExprInput label="Diameter" kind="length" value={f.diameter} autoFocus min={0} onChange={(v) => upd(f, "Diameter", (d) => void (d.diameter = v))} />
       <Toggle label="Through all" checked={f.through} onChange={(v) => upd(f, "Through", (d) => void (d.through = v))} />
       {!f.through && <ExprInput label="Depth" kind="length" value={f.depth} min={0} onChange={(v) => upd(f, "Depth", (d) => void (d.depth = v))} />}
+      {!f.through && (
+        <Segmented
+          label="Drill point"
+          value={f.tipAngle ? "angle" : "flat"}
+          options={[
+            { value: "flat", label: "Flat", title: "A flat bottom (end mill)" },
+            { value: "angle", label: "Angled", title: "The cone a twist drill leaves" },
+          ]}
+          onChange={(v) => upd(f, "Drill point", (d) => void (d.tipAngle = v === "angle" ? "118" : undefined))}
+        />
+      )}
+      {!f.through && f.tipAngle && <ExprInput label="Point angle" kind="angle" value={f.tipAngle} min={1} max={179} hint="118° is a standard twist drill" onChange={(v) => upd(f, "Drill point angle", (d) => void (d.tipAngle = v))} />}
       {f.style !== "simple" && (
         <div className="field-row">
           <ExprInput label="Head Ø" kind="length" value={f.headDiameter} min={0} onChange={(v) => upd(f, "Head diameter", (d) => void (d.headDiameter = v))} />
           {f.style === "counterbore" && <ExprInput label="Head depth" kind="length" value={f.headDepth} min={0} onChange={(v) => upd(f, "Head depth", (d) => void (d.headDepth = v))} />}
+          {f.style === "countersink" && <ExprInput label="Angle" kind="angle" value={f.sinkAngle ?? "90"} min={1} max={179} hint="90° metric, 82° imperial" onChange={(v) => upd(f, "Countersink angle", (d) => void (d.sinkAngle = v))} />}
         </div>
       )}
       {f.points.map((p, i) => (
@@ -752,6 +806,59 @@ function SplitEditor({ f }: { f: SplitFeature }) {
         ]}
         onChange={(v) => upd(f, "Keep", (d) => void (d.keep = v))}
       />}
+    </>
+  );
+}
+
+function BoundingSolidEditor({ f }: { f: BoundingSolidFeature }) {
+  const bodies = useApp((s) => s.regen?.pickBodies ?? s.regen?.bodies ?? []);
+  const meta = useApp((s) => s.doc.bodies);
+  return (
+    <>
+      <div className="field">
+        <span className="field__label">Enclose</span>
+        <div className="checklist">
+          {bodies
+            .filter((b) => b.id !== f.id)
+            .map((b) => (
+              <Checkbox
+                key={b.id}
+                className="checkrow"
+                checked={f.bodies.includes(b.id)}
+                onChange={(on) => upd(f, "Bodies", (d) => void (d.bodies = on ? [...d.bodies, b.id] : d.bodies.filter((x) => x !== b.id)))}
+                label={
+                  <>
+                    <span className="tree__swatch" style={{ background: meta[b.id]?.color ?? "#ccc" }} />
+                    {meta[b.id]?.name ?? "Body"}
+                  </>
+                }
+              />
+            ))}
+        </div>
+        <p className="field__hint">{f.bodies.length ? "Click bodies in the view to add or remove them" : "Every body (or click bodies in the view to choose)"}</p>
+      </div>
+      <Segmented
+        label="Shape"
+        value={f.shape}
+        options={[
+          { value: "box", label: "Box" },
+          { value: "cylinder", label: "Cylinder" },
+        ]}
+        onChange={(v) => upd(f, "Shape", (d) => void (d.shape = v))}
+      />
+      {f.shape === "cylinder" && (
+        <Segmented
+          label="Axis"
+          value={f.axis}
+          options={[
+            { value: "x", label: "X" },
+            { value: "y", label: "Y" },
+            { value: "z", label: "Z" },
+          ]}
+          onChange={(v) => upd(f, "Axis", (d) => void (d.axis = v))}
+        />
+      )}
+      <ExprInput label="Padding" kind="length" value={f.padding} autoFocus hint="Extra stock on every side (machining allowance, clearance)" onChange={(v) => upd(f, "Padding", (d) => void (d.padding = v))} />
     </>
   );
 }
@@ -1348,6 +1455,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <SplitEditor f={f} />;
     case "offset":
       return <OffsetEditor f={f} />;
+    case "boundingSolid":
+      return <BoundingSolidEditor f={f} />;
     case "scale":
       return <ScaleEditor f={f} />;
     case "offsetFace":

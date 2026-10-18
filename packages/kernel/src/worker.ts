@@ -12,7 +12,7 @@ import gcsWasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?ur
 import { Builder, isValidShape } from "./build";
 import { initSolver } from "./solver";
 import { exportShapes } from "./exporters";
-import { interference, radii, textOutlines } from "./inspect";
+import { interference, minDistance, radii, textOutlines } from "./inspect";
 import type { InspectResult, KernelRequest, KernelResponse } from "./protocol";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -99,7 +99,9 @@ async function handle(req: KernelRequest) {
       await builder.prepareImports(req.doc);
       const shapes = builder.shapes(req.doc);
       const result: InspectResult =
-        req.kind === "interference"
+        req.kind === "distance"
+          ? { kind: "distance", result: minDistance(shapes, req.picks ?? []) }
+          : req.kind === "interference"
           ? { kind: "interference", items: interference(shapes) }
           : req.kind === "validity"
             ? { kind: "validity", items: [...shapes].map(([bodyId, s]) => ({ bodyId, valid: isValidShape(s) })) }

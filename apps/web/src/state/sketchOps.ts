@@ -108,6 +108,11 @@ const rotMap = (deg: number, c: Vec2 = [0, 0]): PointMap => {
   return ([x, y]) => [c[0] + (x - c[0]) * cs - (y - c[1]) * sn, c[1] + (x - c[0]) * sn + (y - c[1]) * cs];
 };
 
+/** A copy of a shape moved by (dx, dy), under a new id (shapes placed by formulas stay where they are). */
+export function movedCopy(e: SketchEntity, dx: number, dy: number): SketchEntity {
+  return cloneEntity((dx || dy ? transform(e, ([x, y]) => [x + dx, y + dy], 0, null) : null) ?? e);
+}
+
 export function duplicateEntity(id = useApp.getState().selectedEntity) {
   const e = current(id);
   if (!e) return;

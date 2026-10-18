@@ -16,9 +16,11 @@ interface Props {
   hint?: string;
   autoFocus?: boolean;
   min?: number;
+  /** Upper limit for nudging and scrubbing (typed values are checked by the model). */
+  max?: number;
 }
 
-export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }: Props) {
+export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, max }: Props) {
   const doc = useApp((s) => s.doc);
   const id = useId();
   const [text, setText] = useState(value);
@@ -54,6 +56,7 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }
     const step = (e.shiftKey ? 10 : e.altKey ? 0.1 : 1) * (kind === "count" ? 1 : 1);
     let display = result.value / factor + dir * step;
     if (min !== undefined) display = Math.max(min, display);
+    if (max !== undefined) display = Math.min(max, display);
     const t = trim(display, 4);
     setText(t);
     commit(t, true);
@@ -73,6 +76,7 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }
     const per = kind === "count" ? 0.1 : e.shiftKey ? 1 : e.altKey ? 0.01 : 0.1 * Math.max(1, Math.abs(s.base) / 20);
     let v = s.base + dx * per;
     if (min !== undefined) v = Math.max(min, v);
+    if (max !== undefined) v = Math.min(max, v);
     const t = kind === "count" ? String(Math.round(v)) : trim(Math.round(v * 100) / 100, 2);
     setText(t);
     commit(t, true);
@@ -120,7 +124,7 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }
               (e.target as HTMLInputElement).blur();
               // In a feature panel, Enter also means OK (like every dialog).
               const s = useApp.getState();
-              if (s.session && s.mode.kind === "model") setTimeout(commitSession, 0);
+              if (s.session && s.mode.kind === "model") setTimeout(() => commitSession(true), 0);
             } else if (e.key === "Escape") {
               // First Esc undoes the typing; with nothing typed, Esc cancels the feature as it does everywhere else.
               const typed = text !== value;
@@ -136,6 +140,7 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min }
       </div>
       {showResult && <div className="field__result mono">= {formatQuantity(result.value, kind, unit)}</div>}
       {!result.ok && <div className="field__error">{result.error}</div>}
+      {max !== undefined && result.ok && result.value / factor > max + 1e-6 && <div className="field__hint">Too big: held at {trim(max, 2)} {unitLabel}</div>}
       {hint && result.ok && !showResult && <div className="field__hint">{hint}</div>}
     </div>
   );

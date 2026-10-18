@@ -1,12 +1,12 @@
 /** Main-thread handle to the kernel worker (the default KernelHost). */
 import type { Id, WhittleDocument } from "@whittle/core";
-import type { ExportFormat, InspectKind, InspectResult, KernelRequest, KernelResponse, MeshQuality, RegenResult } from "./protocol";
+import type { ExportFormat, InspectKind, InspectResult, KernelRequest, KernelResponse, MeasurePick, MeshQuality, RegenResult } from "./protocol";
 
 export interface KernelHost {
   readonly ready: Promise<number>;
   regen(doc: WhittleDocument, quality?: "preview" | "final", pickBefore?: Id, preview?: Id): Promise<RegenResult | null>;
   export(doc: WhittleDocument, format: ExportFormat, bodyIds?: Id[], quality?: MeshQuality): Promise<{ data: Uint8Array; mime: string; ext: string }>;
-  inspect(doc: WhittleDocument, kind: InspectKind): Promise<InspectResult>;
+  inspect(doc: WhittleDocument, kind: InspectKind, picks?: MeasurePick[]): Promise<InspectResult>;
   dispose(): void;
   /** Stops a long operation by restarting the engine. */
   cancel?(): void;
@@ -108,8 +108,8 @@ export class WorkerKernel implements KernelHost {
     return this.send<{ data: Uint8Array; mime: string; ext: string }>({ type: "export", seq: ++this.seq, doc, format, bodyIds, quality });
   }
 
-  inspect(doc: WhittleDocument, kind: InspectKind) {
-    return this.send<InspectResult>({ type: "inspect", seq: ++this.seq, doc, kind });
+  inspect(doc: WhittleDocument, kind: InspectKind, picks?: MeasurePick[]) {
+    return this.send<InspectResult>({ type: "inspect", seq: ++this.seq, doc, kind, picks });
   }
 
   private send<T>(req: KernelRequest, regen = false): Promise<T> {

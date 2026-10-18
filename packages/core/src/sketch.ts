@@ -31,11 +31,10 @@ export function resolveEntity(e: SketchEntity, ev: Evaluator): ResolvedEntity {
         y -= h / 2;
       }
       const corner = e.corner ? L(e.corner, "Corner radius") : 0;
-      if (corner < 0 || corner * 2 >= Math.min(w, h)) {
-        if (corner !== 0) throw new Error(`Corner radius must be less than ${(Math.min(w, h) / 2).toFixed(2)} mm`);
-      }
+      if (corner < 0) throw new Error("Corner radius can't be negative");
       const angle = e.angle ? ev.num(e.angle, "angle", "Rotation") : 0;
-      return { ...common, type: "rect", x, y, w, h, corner, angle };
+      // A radius past half the short side cannot fit: hold it at the limit (a pill shape) instead of failing or overshooting.
+      return { ...common, type: "rect", x, y, w, h, corner: Math.min(corner, maxRectCorner(w, h)), angle };
     }
     case "circle": {
       const r = L(e.r, "Radius");
@@ -88,7 +87,8 @@ export function resolveEntity(e: SketchEntity, ev: Evaluator): ResolvedEntity {
       splines.forEach((s, i) => {
         if (s && (i === 0 || (e.open && i === points.length - 1))) throw new Error("A spline needs a plain point before and after it");
       });
-      return { ...common, type: "polyline", points, arcs, splines, corner, smooth: !!e.smooth, ctrl: !!e.ctrl, open: !!e.open };
+      const plain = !arcs.some(Boolean) && !splines.some(Boolean) && !e.smooth && !e.ctrl && !e.open;
+      return { ...common, type: "polyline", points, arcs, splines, corner: plain && corner > 0 ? Math.min(corner, maxPolylineCorner(points)) : corner, smooth: !!e.smooth, ctrl: !!e.ctrl, open: !!e.open };
     }
     case "ellipse": {
       const rx = L(e.rx, "Radius X");
@@ -418,6 +418,28 @@ export function smoothOpen(pts: Vec2[], perSeg: number): Vec2[] {
   }
   out.push(pts[n - 1]!);
   return out;
+}
+
+/** Largest rounded-corner radius a w x h rectangle can take (just under a full pill, which has zero-length sides). */
+export const maxRectCorner = (w: number, h: number) => (Math.min(w, h) / 2) * 0.999;
+
+/** Largest radius that rounds every corner of a closed outline without one corner's arc running into its neighbours'. */
+export function maxPolylineCorner(pts: Vec2[]): number {
+  const n = pts.length;
+  let best = Infinity;
+  for (let i = 0; i < n; i++) {
+    const p = pts[i]!;
+    const a = pts[(i - 1 + n) % n]!;
+    const b = pts[(i + 1) % n]!;
+    const u = norm2([a[0] - p[0], a[1] - p[1]]);
+    const v = norm2([b[0] - p[0], b[1] - p[1]]);
+    const half = Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1]))) / 2;
+    if (half < 1e-3 || Math.abs(half - Math.PI / 2) < 1e-3) continue;
+    // Each side is shared with a neighbouring corner, so a corner may use at most half of it.
+    const room = Math.min(Math.hypot(a[0] - p[0], a[1] - p[1]), Math.hypot(b[0] - p[0], b[1] - p[1])) / 2;
+    best = Math.min(best, room * Math.tan(half) * 0.999);
+  }
+  return best;
 }
 
 /** Polygon with each corner replaced by a circular arc (display approximation). */

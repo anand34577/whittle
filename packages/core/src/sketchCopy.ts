@@ -4,7 +4,7 @@
  * equal, dimensions); a mirror is also held symmetric to its original.
  * Everything works on stored positions: bake the solution first.
  */
-import type { Id, SketchFeature, SketchGeom, Vec2 } from "./model";
+import type { Id, SketchConstraint, SketchFeature, SketchGeom, Vec2 } from "./model";
 import { addConstraint, addLine, addPoint, circleCircle, geomById, geomType, lineCircle, lineLine, pointAt } from "./constraints";
 import { uid } from "./factory";
 
@@ -343,4 +343,43 @@ export function offsetGeometry(sk: Geo, ids: Id[], d: number): string | undefine
     });
   });
   return undefined;
+}
+
+/** Copied sketch geometry with the relations among it, for pasting into this or another sketch. */
+export interface GeometryClip {
+  geometry: SketchGeom[];
+  constraints: SketchConstraint[];
+}
+
+/** The selection (with its points) and the relations wholly inside it; ties to the sheet (Fix, the origin) stay behind. */
+export function clipGeometry(sk: Geo, ids: Id[]): GeometryClip | null {
+  const { curves, points } = closure(sk, ids);
+  if (!points.size) return null;
+  const inside = new Set<Id>([...points, ...curves.map((c) => c.id)]);
+  const geometry = (sk.geometry ?? []).filter((g) => inside.has(g.id)).map((g) => (g.type === "point" ? { ...g, ...pointXY(sk, g.id) } : { ...g }));
+  const constraints = (sk.constraints ?? []).filter((c) => c.type !== "fixed" && c.refs.every((r) => inside.has(r))).map((c) => ({ ...c, refs: [...c.refs] }));
+  return { geometry, constraints };
+}
+
+const pointXY = (sk: Geo, id: Id) => {
+  const [x, y] = pointAt(sk, id);
+  return { x, y };
+};
+
+/** Paste a clip, moved by (dx, dy), under fresh ids. Returns the new curves (or points, when only points were copied). */
+export function pasteGeometry(sk: Geo, clip: GeometryClip, dx: number, dy: number): Id[] {
+  const ids = new Map<Id, Id>(clip.geometry.map((g) => [g.id, uid(g.id.replace(/[^a-z].*$/, "") || "g")]));
+  const at = (id: Id) => ids.get(id)!;
+  for (const g of clip.geometry) {
+    const id = at(g.id);
+    if (g.type === "point") (sk.geometry ??= []).push({ ...g, id, x: g.x + dx, y: g.y + dy });
+    else if (g.type === "line") sk.geometry!.push({ ...g, id, a: at(g.a), b: at(g.b) });
+    else if (g.type === "arc") sk.geometry!.push({ ...g, id, c: at(g.c), a: at(g.a), b: at(g.b) });
+    else if (g.type === "ellipse") sk.geometry!.push({ ...g, id, c: at(g.c), a: at(g.a) });
+    else if (g.type === "spline") sk.geometry!.push({ ...g, id, pts: g.pts.map(at) });
+    else sk.geometry!.push({ ...g, id, c: at(g.c) });
+  }
+  for (const c of clip.constraints) (sk.constraints ??= []).push({ ...c, id: uid("k"), refs: c.refs.map(at) });
+  const curves = clip.geometry.filter((g) => g.type !== "point");
+  return (curves.length ? curves : clip.geometry).map((g) => at(g.id));
 }

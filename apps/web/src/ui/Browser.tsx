@@ -1,7 +1,7 @@
 /** Left panel: what's in the design (parameters, origin, bodies, sketches). */
 import { useState } from "react";
 import { activeEnd, documentEvaluator, formatQuantity, isSketchConsumed } from "@whittle/core";
-import { createSketchOn } from "../state/actions";
+import { createSketchOn, saveNamedView, showNamedView } from "../state/actions";
 import { editFeature, mutate, useApp } from "../state/store";
 import { Icon } from "./icons";
 
@@ -37,11 +37,11 @@ export function Browser() {
     <nav className="browser" aria-label="Design browser">
       <div className="tree">
         <Section title="Parameters" count={doc.parameters.length} defaultOpen={doc.parameters.length > 0}>
-          {doc.parameters.map((p) => {
+          {[...doc.parameters].sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite)).map((p) => {
             const v = ev.params.get(p.name);
             return (
               <button key={p.id} className="tree__row" onClick={() => useApp.setState({ panel: "params" })} title={p.comment ?? p.expr}>
-                <span className="tree__glyph mono">fx</span>
+                {p.favorite ? <Icon name="starOn" size={12} /> : <span className="tree__glyph mono">fx</span>}
                 <span className="tree__name mono">{p.name}</span>
                 <span className={`tree__value mono ${v?.ok ? "" : "is-error"}`}>{v?.ok ? formatQuantity(v.value, p.kind, doc.units) : "error"}</span>
               </button>
@@ -90,6 +90,24 @@ export function Browser() {
             ))}
           </Section>
         )}
+
+        <Section title="Views" count={doc.views?.length ?? 0} defaultOpen={!!doc.views?.length}>
+          {(doc.views ?? []).map((v) => (
+            <div key={v.id} className="tree__row">
+              <button className="tree__main" onClick={() => showNamedView(v)} title="Go to this view">
+                <Icon name="camera" size={14} />
+                <span className="tree__name">{v.name}</span>
+              </button>
+              <button className="tree__eye" aria-label={`Delete view ${v.name}`} title="Delete view" onClick={() => mutate(`Delete view ${v.name}`, (d) => void (d.views = d.views?.filter((x) => x.id !== v.id)))}>
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
+          ))}
+          <button className="tree__row tree__row--add" onClick={() => void saveNamedView()}>
+            <Icon name="plus" size={14} />
+            <span className="tree__name">Save current view</span>
+          </button>
+        </Section>
 
         <Section title="Bodies" count={bodies.length}>
           {bodies.length === 0 && <p className="tree__empty">No bodies yet</p>}

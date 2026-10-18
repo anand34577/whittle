@@ -9,7 +9,6 @@ export interface ViewportTheme {
   axisY: string;
   axisZ: string;
   edge: string;
-  edgeOverlay: string;
   hover: string;
   select: string;
   accent: string;
@@ -33,7 +32,6 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     axisY: "#6f8f5e",
     axisZ: "#5b7fb0",
     edge: "#141312",
-    edgeOverlay: "#e8e2d6",
     hover: "#ffb27a",
     select: "#7fd0f0",
     accent: "#ff7a2e",
@@ -54,7 +52,6 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     axisY: "#6f9a5c",
     axisZ: "#5a7fb8",
     edge: "#2a2722",
-    edgeOverlay: "#2a2722",
     hover: "#e8742f",
     select: "#2f7fb8",
     accent: "#e0611c",
@@ -75,7 +72,6 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     axisY: "#5d9a6a",
     axisZ: "#5f86c8",
     edge: "#07080b",
-    edgeOverlay: "#dfe6f5",
     hover: "#ffb27a",
     select: "#6fc8ff",
     accent: "#ff7a2e",
@@ -96,7 +92,6 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     axisY: "#8fd6a0",
     axisZ: "#8fb8ff",
     edge: "#e8f0ff",
-    edgeOverlay: "#ffffff",
     hover: "#ffd27a",
     select: "#7fe8ff",
     accent: "#ffcf5a",
@@ -117,7 +112,6 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     axisY: "#6e9c62",
     axisZ: "#5d86c0",
     edge: "#121214",
-    edgeOverlay: "#ececee",
     hover: "#ffb27a",
     select: "#5fb7ff",
     accent: "#ff8a3d",
@@ -138,7 +132,6 @@ export const VIEWPORT_THEMES: Record<Theme, ViewportTheme> = {
     axisY: "#5cff7a",
     axisZ: "#5c9cff",
     edge: "#ffffff",
-    edgeOverlay: "#ffffff",
     hover: "#ffd400",
     select: "#00e5ff",
     accent: "#ffd400",

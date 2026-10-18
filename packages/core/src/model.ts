@@ -28,6 +28,8 @@ export interface Parameter {
   expr: Expr;
   kind: QuantityKind;
   comment?: string;
+  /** Starred: listed first, and editable straight from the properties panel. */
+  favorite?: boolean;
 }
 
 export type OriginPlane = "XY" | "XZ" | "YZ";
@@ -444,6 +446,14 @@ export interface ChamferFeature extends FeatureBase {
   type: "chamfer";
   edges: EdgeRef[];
   distance: Expr;
+  /** Equal setbacks (default), two different ones, or a setback and an angle. */
+  mode?: "equal" | "two" | "angle";
+  /** Second setback ("two"). */
+  distance2?: Expr;
+  /** Angle from the first face ("angle"), degrees. */
+  angle?: Expr;
+  /** Measure the first setback on the other face of each edge. */
+  flip?: boolean;
 }
 
 export interface ShellFeature extends FeatureBase {
@@ -489,6 +499,11 @@ export interface PatternFeature extends FeatureBase {
   axis: "x" | "y" | "z";
   /** A construction axis to repeat along / around instead of an origin axis. */
   axisRef?: Id;
+  /**
+   * Or a direction / axis picked on the model: a straight edge, a circular edge or a round or flat face.
+   * Present but empty while waiting for that click.
+   */
+  axisGeom?: { edge?: EdgeRef; face?: FaceRef };
   /** Path pattern: the sketch whose first path the copies follow, and whether they turn with it. */
   path?: Id;
   follow?: boolean;
@@ -515,6 +530,10 @@ export interface HoleFeature extends FeatureBase {
   through: boolean;
   headDiameter: Expr;
   headDepth: Expr;
+  /** Countersink cone angle (default 90°; 82° for imperial flat heads). */
+  sinkAngle?: Expr;
+  /** Drill point at the bottom of a blind hole: the cone's angle (118° is a standard drill). Unset: flat bottom. */
+  tipAngle?: Expr;
 }
 
 /** A smooth solid through two or more sketch profiles. */
@@ -594,6 +613,18 @@ export interface OffsetFeature extends FeatureBase {
   bodyId?: Id;
   distance: Expr;
   copy: boolean;
+}
+
+/** A new body that just encloses others: a stock block for machining, a case blank, a keep-out volume. */
+export interface BoundingSolidFeature extends FeatureBase {
+  type: "boundingSolid";
+  /** The bodies to enclose; empty means every body. */
+  bodies: Id[];
+  shape: "box" | "cylinder";
+  /** Extra room on every side. */
+  padding: Expr;
+  /** The cylinder's axis. */
+  axis: "x" | "y" | "z";
 }
 
 /** Scale a body uniformly. */
@@ -687,6 +718,7 @@ export type Feature =
   | CoilFeature
   | SplitFeature
   | OffsetFeature
+  | BoundingSolidFeature
   | ScaleFeature
   | DraftFeature
   | JointFeature
@@ -726,10 +758,29 @@ export interface BodyMeta {
   visible: boolean;
   /** Appearance preset (see MATERIAL_LOOKS in the web app). */
   look?: string;
+  /** 0.05–1; overrides the finish's own transparency. */
+  opacity?: number;
   /** Bodies sharing a component name move together under joints. */
   component?: string;
   /** A grounded body never moves under a joint. */
   grounded?: boolean;
+}
+
+export interface TimelineFolder {
+  id: Id;
+  name: string;
+  features: Id[];
+  open: boolean;
+}
+
+export interface NamedView {
+  id: Id;
+  name: string;
+  target: [number, number, number];
+  distance: number;
+  /** Azimuth around Z and angle from +Z, radians. */
+  theta: number;
+  phi: number;
 }
 
 export interface WhittleDocument {
@@ -743,6 +794,10 @@ export interface WhittleDocument {
   variants?: Variant[];
   features: Feature[];
   bodies: Record<Id, BodyMeta>;
+  /** Named folders in the timeline, folding a run of steps into one. */
+  folders?: TimelineFolder[];
+  /** Saved camera views ("Front detail", "Underside"), restored from the browser. */
+  views?: NamedView[];
   /** Timeline rollback marker: only features before this index are built. */
   rollback: number | null;
   createdAt: string;

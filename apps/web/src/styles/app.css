@@ -859,10 +859,21 @@ kbd {
   letter-spacing: 0.08em;
   transform-origin: 50% 50%;
 }
-.orientcube__face:hover {
+.orientcube__face {
+  grid-template: 22% 1fr 22% / 22% 1fr 22%;
+  place-items: stretch;
+}
+.orientcube__zone {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+.orientcube__zone:hover {
   background: var(--accent);
   color: var(--accent-ink);
-  border-color: var(--accent);
 }
 .orientcube__home {
   position: absolute;
@@ -1639,7 +1650,7 @@ kbd {
 }
 .ptable__row {
   display: grid;
-  grid-template-columns: 130px minmax(160px, 1.4fr) 100px 110px minmax(100px, 1fr) 32px;
+  grid-template-columns: 130px minmax(160px, 1.4fr) 100px 110px minmax(100px, 1fr) 64px;
   gap: 8px;
   align-items: center;
   padding: 4px 0;

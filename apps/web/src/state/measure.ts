@@ -3,7 +3,7 @@
  * two picks report the distance and angle between them.
  */
 import { LENGTH_TO_MM, type LengthUnit, type Vec3, formatQuantity, trim } from "@whittle/core";
-import type { BodyResult } from "@whittle/kernel";
+import type { BodyResult, MeasurePick } from "@whittle/kernel";
 import type { Pick } from "./store";
 
 export interface MeasureLine {
@@ -75,6 +75,24 @@ function describe(p: Pick, bodies: BodyResult[], unit: LengthUnit): MeasureLine[
   ];
 }
 
+/** One line about what the pointer rests on, for the hover chip: "Round face · Ø 8 mm", "Edge · 35 mm". */
+export function quickInfo(p: Pick, bodies: BodyResult[], unit: LengthUnit): string | null {
+  if (p.kind !== "face" && p.kind !== "edge") return null;
+  const b = bodies.find((x) => x.id === p.bodyId);
+  if (!b) return null;
+  const L = (v: number) => formatQuantity(v, "length", unit);
+  if (p.kind === "edge") {
+    const e = b.edges[p.index];
+    if (!e) return null;
+    return e.radius ? `${e.length >= Math.PI * 2 * e.radius - 1e-6 ? "Circle" : "Arc"} · Ø ${L(e.radius * 2)}` : `Edge · ${L(e.length)}`;
+  }
+  const f = b.faces[p.index];
+  if (!f) return null;
+  const r = (b.faceEdges[p.index] ?? []).map((i) => b.edges[i]?.radius).find((x) => x);
+  const kind = f.surface === "PLANE" ? "Flat face" : r ? "Round face" : "Curved face";
+  return `${kind} · ${f.surface !== "PLANE" && r ? `Ø ${L(r * 2)}` : areaText(f.area, unit)}`;
+}
+
 function direction(p: Pick, bodies: BodyResult[]): { kind: "normal" | "tangent"; v: Vec3; planar: boolean } | null {
   const b = p.kind === "face" || p.kind === "edge" ? bodies.find((x) => x.id === p.bodyId) : undefined;
   if (!b) return null;
@@ -89,7 +107,14 @@ function direction(p: Pick, bodies: BodyResult[]): { kind: "normal" | "tangent";
   return null;
 }
 
-export function measure(picks: Pick[], bodies: BodyResult[], unit: LengthUnit): MeasureResult | null {
+/** What the geometry engine measures between two picks: faces, edges or bodies (not the clicked spots). */
+export function measurePicks(picks: Pick[]): MeasurePick[] | null {
+  const out = picks.map((p): MeasurePick | null => (p.kind === "face" || p.kind === "edge" ? { bodyId: p.bodyId, kind: p.kind, index: p.index } : p.kind === "body" ? { bodyId: p.bodyId, kind: "body" } : null));
+  return out.length === 2 && out.every((x) => x) ? (out as MeasurePick[]) : null;
+}
+
+/** `exact`: the engine's shortest distance between the two picks, once it has answered. */
+export function measure(picks: Pick[], bodies: BodyResult[], unit: LengthUnit, exact?: { d: number; a: Vec3; b: Vec3 } | null): MeasureResult | null {
   if (picks.length === 0) return null;
   if (picks.length === 1) return { lines: describe(picks[0]!, bodies, unit) };
   const [a, b] = picks as [Pick, Pick];
@@ -101,15 +126,19 @@ export function measure(picks: Pick[], bodies: BodyResult[], unit: LengthUnit): 
   let segment: [Vec3, Vec3] = [pa, pb];
   const da = direction(a, bodies);
   const db = direction(b, bodies);
-  // Two parallel flat faces: the gap between them is what people want.
-  if (da && db && da.kind === "normal" && db.kind === "normal" && da.planar && db.planar && Math.abs(dot(da.v, db.v)) > 0.9999) {
+  if (exact) {
+    // As Fusion measures: the shortest distance between the things themselves (touching faces are 0 apart).
+    lines.push({ label: "Distance", value: L(exact.d), primary: true });
+    segment = [exact.a, exact.b];
+  } else if (da && db && da.kind === "normal" && db.kind === "normal" && da.planar && db.planar && Math.abs(dot(da.v, db.v)) > 0.9999) {
+    // Two parallel flat faces: the gap between them is what people want.
     const gap = dot(sub(pb, pa), da.v);
     lines.push({ label: "Distance", value: L(Math.abs(gap)), primary: true });
     segment = [pa, addS(pa, da.v, gap)];
   } else {
     lines.push({ label: "Distance", value: L(len(sub(pb, pa))), primary: true });
   }
-  const d = sub(pb, pa);
+  const d = sub(segment[1], segment[0]);
   lines.push({ label: "ΔX ΔY ΔZ", value: d.map((v) => trim(v / LENGTH_TO_MM[unit], 2)).join("  ") });
   if (da && db) {
     const c = Math.abs(dot(da.v, db.v));
@@ -117,5 +146,6 @@ export function measure(picks: Pick[], bodies: BodyResult[], unit: LengthUnit): 
     if (da.kind !== db.kind) ang = 90 - ang;
     lines.push({ label: "Angle", value: `${trim(ang, 2)}°` });
   }
-  return { lines, segment };
+  // Things that touch have nothing to draw between them.
+  return { lines, segment: len(d) > 1e-9 ? segment : undefined };
 }

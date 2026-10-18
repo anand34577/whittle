@@ -6,10 +6,16 @@
  * detents every 15 degrees.
  */
 import { useRef, useState } from "react";
-import { type Feature, type Vec3, LENGTH_TO_MM } from "@whittle/core";
+import { type Feature, type LengthUnit, type Vec3, LENGTH_TO_MM, trim } from "@whittle/core";
 import type { RegenResult } from "@whittle/kernel";
-import { cancelSession, commitSession, updateFeature } from "../state/store";
+import { cancelSession, commitSession, updateFeature, useApp } from "../state/store";
 import type { Viewport } from "../viewport/Viewport";
+
+/** A kernel fix ("9.8 mm") as a plain number in the document's units, so it stays draggable and reads naturally. */
+export function fixInUnits(value: string, units: LengthUnit): string {
+  const m = /^\s*(-?[\d.]+)\s*mm\s*$/.exec(value);
+  return m ? trim(Number(m[1]) / LENGTH_TO_MM[units], 3) : value;
+}
 
 type Round = (v: number, fine: boolean) => number;
 
@@ -25,6 +31,8 @@ interface Spec {
   value: number;
   unit: string;
   min?: number;
+  /** Upper limit (the largest value known to work). */
+  max?: number;
   round: Round;
   /** Colour hint: an axis ("x" | "y" | "z") or "cut" for a subtractive pull. */
   tone?: string;
@@ -76,8 +84,38 @@ const perpendicular = (n: Vec3): Vec3 => {
   return [c[0] / l, c[1] / l, c[2] / l];
 };
 
+/** Largest working fillet / chamfer size, learned when the kernel reports "too large" (document units), per feature and edge set. */
+const learnedMax = new Map<string, number>();
+/** The feature a handle is (or was just) dragging, and when the drag ended: "too large" from a drag snaps to what fits. */
+const dragging: { id: string | null; until: number } = { id: null, until: 0 };
+const fixed = new WeakSet<object>();
+const edgeKey = (f: Feature) => (f.type === "fillet" || f.type === "chamfer" ? f.id + f.edges.map((e) => e.mid.join(",")).join(";") : f.id);
+
+/**
+ * Where a fillet's centre line sits: from the edge into the corner's bisector,
+ * with the travel-to-size ratio (size = travel x ratio). Null for edges that
+ * aren't between two flat faces, or nearly flat ones.
+ */
+function bisector(regen: RegenResult | null, e: { bodyId: string; mid: Vec3 }): { dir: Vec3; ratio: number } | null {
+  // While the fillet is being edited the edge is gone from the result: look in the body as it was before it.
+  const body = (regen?.pickBodies ?? []).find((b) => b.id === e.bodyId) ?? regen?.bodies.find((b) => b.id === e.bodyId);
+  if (!body) return null;
+  const ei = body.edges.findIndex((x) => Math.hypot(...sub(x.mid, e.mid)) < 1e-3);
+  if (ei < 0) return null;
+  const fs = body.faceEdges.flatMap((list, fi) => (list.includes(ei) ? [body.faces[fi]!] : []));
+  if (fs.length !== 2 || fs.some((x) => x.surface !== "PLANE")) return null;
+  const [a, b] = fs as [(typeof fs)[0], (typeof fs)[0]];
+  const sum: Vec3 = [a.normal[0] + b.normal[0], a.normal[1] + b.normal[1], a.normal[2] + b.normal[2]];
+  const sin = Math.hypot(...sum) / 2;
+  if (sin < 0.2) return null;
+  // Convex edge: the other face lies behind this one, so the centre is inside the material.
+  const convex = dot(a.normal, sub(b.center, e.mid)) < 0;
+  const k = (convex ? -1 : 1) / (sin * 2);
+  return { dir: [sum[0] * k, sum[1] * k, sum[2] * k], ratio: sin };
+}
+
 /** The handles for this feature: empty when nothing is picked yet or a value is a formula rather than a plain number. */
-function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: string): Spec[] {
+function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: string, px = 1): Spec[] {
   const out: Spec[] = [];
   const len = (s: Omit<Spec, "unit" | "round"> & Partial<Pick<Spec, "round">>): void => void out.push({ unit: units, round: stepRound, ...s });
   const angle = (s: Omit<Spec, "unit" | "round" | "per" | "off">): void => void out.push({ unit: "°", round: angleRound, per: 1, off: 0, ...s });
@@ -91,9 +129,23 @@ function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: stri
       const n = fr.normal.map((x) => x * sign) as Vec3;
       if (f.extent === "one" || f.extent === "symmetric") {
         const k = f.extent === "symmetric" ? 0.5 : 1;
+        const sk = useApp.getState().doc.features.find((x) => x.id === f.sketch);
+        const onFace = f.extent === "one" && sk?.type === "sketch" && sk.plane.kind === "face";
         len({
           key: "d", anchor, dir: n, off: v * mm * k, per: 1 / (mm * k), value: v, primary: true, snap: f.extent === "one", flip: f.flip, tone: f.op === "cut" ? "cut" : undefined,
-          set: (x, flip0) => void updateFeature(f.id, "Drag " + f.name, (d) => void (d.type === "extrude" && ((d.distance = String(Math.round(Math.abs(x) * 1000) / 1000)), (d.flip = flip0 !== x < 0))), "drag" + f.id),
+          set: (x, flip0) =>
+            void updateFeature(
+              f.id,
+              "Drag " + f.name,
+              (d) => {
+                if (d.type !== "extrude") return;
+                d.distance = String(Math.round(Math.abs(x) * 1000) / 1000);
+                d.flip = flip0 !== x < 0;
+                // As in Fusion: pulled out of the face it joins, pushed into the body it cuts.
+                if (onFace && (d.op === "join" || d.op === "cut")) d.op = d.flip ? "cut" : "join";
+              },
+              "drag" + f.id,
+            ),
         });
       } else if (f.extent === "two") {
         const v2 = num(f.distance2 ?? "0") ?? 0;
@@ -128,7 +180,9 @@ function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: stri
       const v = num(f.type === "fillet" ? f.radius : f.distance);
       const e = f.edges[0];
       if (v === null || !e) return out;
-      len({ key: "r", anchor: e.mid, off: v * mm, per: 1 / mm, min: 0.01, value: v, primary: true, set: (x) => void updateFeature(f.id, "Drag " + f.name, (d) => void ((d.type === "fillet" && (d.radius = String(x))) || (d.type === "chamfer" && (d.distance = String(x)))), "drag" + f.id) });
+      const bis = bisector(regen, e);
+      const max = learnedMax.get(edgeKey(f));
+      len({ key: "r", anchor: e.mid, ...(bis ? { dir: bis.dir, off: (v * mm) / bis.ratio, per: bis.ratio / mm } : { off: v * mm, per: 1 / mm }), min: 0.01, max, value: v, primary: true, set: (x) => void updateFeature(f.id, "Drag " + f.name, (d) => void ((d.type === "fillet" && (d.radius = String(x))) || (d.type === "chamfer" && (d.distance = String(x)))), "drag" + f.id) });
       return out;
     }
     case "hole": {
@@ -162,10 +216,47 @@ function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: stri
       if (!box) return out;
       (["x", "y", "z"] as const).forEach((ax, i) => {
         const v = num(f.translate[i]);
-        if (v !== null) len({ key: ax, label: ax.toUpperCase(), tone: ax, anchor: box.c, dir: AXES[ax]!, off: box.size * 0.7, per: 1 / mm, value: v, set: (x) => void updateFeature(f.id, "Drag " + f.name, (d) => void (d.type === "move" && (d.translate[i] = String(x))), "drag" + ax + f.id) });
+        if (v !== null) len({ key: ax, label: ax.toUpperCase(), tone: ax, anchor: box.c, dir: AXES[ax]!, off: Math.min(box.size * 0.7, 110 * px), per: 1 / mm, value: v, set: (x) => void updateFeature(f.id, "Drag " + f.name, (d) => void (d.type === "move" && (d.translate[i] = String(x))), "drag" + ax + f.id) });
       });
       const a = num(f.angle);
       if (a !== null) angle({ key: "rot", label: "Rotate", anchor: box.c, value: a, set: (x) => void updateFeature(f.id, "Drag " + f.name, (d) => void (d.type === "move" && (d.angle = String(x))), "dragr" + f.id) });
+      return out;
+    }
+    case "primitive": {
+      // Arrows on the shape's own sides, as in other CAD tools: pull a side out to size it.
+      const p = f.position.map(num);
+      if (p.some((x) => x === null)) return out;
+      const [px, py, pz] = (p as number[]).map((x) => x * mm) as Vec3;
+      const setter = (field: "width" | "depth" | "height" | "radius" | "radius2", key: string) => (x: number) =>
+        void updateFeature(f.id, "Drag " + f.name, (d) => void (d.type === "primitive" && (d[field] = String(x))), "drag" + key + f.id);
+      const w = num(f.width);
+      const dp = num(f.depth);
+      const h = num(f.height);
+      const r = num(f.radius);
+      const r2 = num(f.radius2);
+      const mid = (z: number): Vec3 => [px, py, pz + z];
+      if (f.shape === "box") {
+        if (w !== null && h !== null) len({ key: "w", label: "Width", tone: "x", anchor: mid((h * mm) / 2), dir: AXES.x!, off: (w * mm) / 2, per: 2 / mm, min: 0.01, value: w, set: setter("width", "w") });
+        if (dp !== null && h !== null) len({ key: "dp", label: "Depth", tone: "y", anchor: mid((h * mm) / 2), dir: AXES.y!, off: (dp * mm) / 2, per: 2 / mm, min: 0.01, value: dp, set: setter("depth", "dp") });
+        if (h !== null) len({ key: "h", label: "Height", tone: "z", anchor: mid(0), dir: AXES.z!, off: h * mm, per: 1 / mm, min: 0.01, value: h, primary: true, snap: true, set: setter("height", "h") });
+        return out;
+      }
+      if (f.shape === "sphere") {
+        if (r !== null) len({ key: "r", label: "Radius", anchor: mid(r * mm), dir: AXES.x!, off: r * mm, per: 1 / mm, min: 0.01, value: r, primary: true, set: setter("radius", "r") });
+        return out;
+      }
+      if (f.shape === "torus") {
+        if (r !== null && r2 !== null) {
+          len({ key: "r", label: "Ring", anchor: mid(r2 * mm), dir: AXES.x!, off: r * mm, per: 1 / mm, min: 0.01, value: r, primary: true, set: setter("radius", "r") });
+          len({ key: "r2", label: "Tube", anchor: [px + r * mm, py, pz + r2 * mm], dir: AXES.z!, off: r2 * mm, per: 1 / mm, min: 0.01, value: r2, set: setter("radius2", "r2") });
+        }
+        return out;
+      }
+      // Cylinder, cone, tube: radius out along X at the base, height up Z.
+      if (h !== null) len({ key: "h", label: "Height", tone: "z", anchor: mid(0), dir: AXES.z!, off: h * mm, per: 1 / mm, min: 0.01, value: h, primary: true, snap: true, set: setter("height", "h") });
+      if (r !== null) len({ key: "r", label: f.shape === "cone" ? "Bottom" : "Radius", anchor: mid(0), dir: AXES.x!, off: r * mm, per: 1 / mm, min: 0.01, value: r, set: setter("radius", "r") });
+      if (r2 !== null && h !== null && f.shape === "cone") len({ key: "r2", label: "Top", anchor: mid(h * mm), dir: AXES.x!, off: r2 * mm, per: 1 / mm, min: 0, value: r2, set: setter("radius2", "r2") });
+      if (r2 !== null && f.shape === "tube") len({ key: "r2", label: "Inner", anchor: mid(0), dir: neg(AXES.x!), off: r2 * mm, per: 1 / mm, min: 0.01, value: r2, set: setter("radius2", "r2") });
       return out;
     }
     case "draft": {
@@ -184,9 +275,10 @@ function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: stri
 function place(vp: Viewport, s: Spec) {
   const a = vp.worldToScreen(s.anchor);
   if (!s.dir) {
-    const u: [number, number] = [Math.SQRT1_2, -Math.SQRT1_2];
-    // Lengths scale with the zoom (so the handle sits on the edge it rounds); angles use a fixed pixel scale.
     const angleMode = s.unit === "°";
+    // Angles go up-left, clear of the axis arrows (Y points up-right in the usual view).
+    const u: [number, number] = [angleMode ? -Math.SQRT1_2 : Math.SQRT1_2, -Math.SQRT1_2];
+    // Lengths scale with the zoom (so the handle sits on the edge it rounds); angles use a fixed pixel scale.
     const ppu = angleMode ? 0.6 : 1 / vp.pixelSize;
     const px = angleMode ? 40 + s.value * ppu : s.off * ppu;
     return { at: [a[0] + u[0] * px, a[1] + u[1] * px] as [number, number], u, ppm: ppu };
@@ -221,7 +313,19 @@ export function DragHandles({
 }) {
   const f = LENGTH_TO_MM[units];
   const specs: Spec[] = [];
-  if (feature && vp) specs.push(...specsFor(feature, regen, f, units));
+  // A "too large" report names the biggest size that works: remember it so the handle stops there.
+  const st = feature && (feature.type === "fillet" || feature.type === "chamfer") ? regen?.status.find((s) => s.id === feature.id) : undefined;
+  if (feature && st?.state === "error" && st.fix && (st.fix.field === "radius" || st.fix.field === "distance")) {
+    const fit = Number(fixInUnits(st.fix.value, units));
+    if (fit > 0) learnedMax.set(edgeKey(feature), fit);
+    // Pulled past the limit: land on the largest size that works instead of leaving the step broken.
+    const fix = st.fix;
+    if (fit > 0 && dragging.id === feature.id && performance.now() < dragging.until && !fixed.has(st)) {
+      fixed.add(st);
+      queueMicrotask(() => void updateFeature(feature.id, "Drag " + feature.name, (d) => void ((d.type === "fillet" && (d.radius = String(fit))) || (d.type === "chamfer" && (d.distance = String(fit)))), "drag" + feature.id));
+    }
+  }
+  if (feature && vp) specs.push(...specsFor(feature, regen, f, units, vp.pixelSize));
   if (vp && section && setSection && !specs.length) {
     const c: Vec3 = [0, 0, 0];
     const i = { x: 0, y: 1, z: 2 }[section.axis];
@@ -254,6 +358,7 @@ export function DragHandles({
     setSnapped(snap);
     if (!snap) v = s.round(v, fine);
     if (s.min !== undefined) v = Math.max(s.min, v);
+    if (s.max !== undefined) v = Math.min(s.max, v);
     s.set(Math.round(v * 1000) / 1000, d.flip0);
   };
 
@@ -293,11 +398,15 @@ export function DragHandles({
               e.stopPropagation();
               e.currentTarget.setPointerCapture(e.pointerId);
               drag.current = { key: s.key, x: e.clientX, y: e.clientY, start: s.value, flip0: !!s.flip, u, ppm };
+              dragging.id = feature?.id ?? null;
+              dragging.until = Infinity;
               setLive(s.key);
             }}
             onPointerMove={(e) => move(e, s)}
             onPointerUp={() => {
               drag.current = null;
+              // The last rebuild may still be on its way: give its answer a moment to arrive.
+              dragging.until = performance.now() + 3000;
               setLive(null);
               setSnapped(false);
             }}
@@ -312,14 +421,14 @@ export function DragHandles({
                 onPointerDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => {
                   // Enter finishes the edit, Escape abandons it, as everywhere else.
-                  if (e.key === "Enter") (e.currentTarget.blur(), commitSession());
+                  if (e.key === "Enter") (e.currentTarget.blur(), commitSession(true));
                   else if (e.key === "Escape") (e.currentTarget.blur(), cancelSession());
                 }}
                 onChange={(e) => {
                   const t = e.target.value.trim();
                   const v = Number(t);
                   if (t === "" || !Number.isFinite(v)) return;
-                  s.set(s.min !== undefined ? Math.max(s.min, v) : v, !!s.flip);
+                  s.set(s.max !== undefined ? Math.min(s.max, s.min !== undefined ? Math.max(s.min, v) : v) : s.min !== undefined ? Math.max(s.min, v) : v, !!s.flip);
                 }}
               />
             )}
@@ -329,6 +438,7 @@ export function DragHandles({
                 {Math.round(s.value * 100) / 100}
                 {s.unit === "°" ? "°" : ` ${s.unit}`}
                 {active && snapped && " · to face"}
+                {active && s.max !== undefined && s.value >= s.max - 1e-6 && " · largest that fits"}
               </span>
             )}
           </button>

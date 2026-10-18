@@ -13,6 +13,8 @@ const P = {
       <path d="M10 5 L13.5 8.5" />
     </>
   ),
+  star: <path d="M10 2.8 L12.2 7.4 L17.2 8 L13.5 11.4 L14.5 16.4 L10 13.9 L5.5 16.4 L6.5 11.4 L2.8 8 L7.8 7.4 Z" />,
+  starOn: <path d="M10 2.8 L12.2 7.4 L17.2 8 L13.5 11.4 L14.5 16.4 L10 13.9 L5.5 16.4 L6.5 11.4 L2.8 8 L7.8 7.4 Z" fill="currentColor" />,
   finish: (
     <>
       <rect x="3" y="3" width="14" height="14" rx="1.5" />
