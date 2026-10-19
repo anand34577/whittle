@@ -117,7 +117,7 @@ await step("06-sketch-new-tools", async () => {
   await page.mouse.click(cx - 60, cy + 40);
   await page.keyboard.press("g");
   await page.mouse.click(cx + 110, cy);
-  await page.mouse.click(cx + 170, cy);
+  await page.mouse.click(cx + 150, cy);
   await waitBuilt();
   // Rectangles and ellipses are drawn as constraint-ready geometry; gears stay whole shapes.
   const sk = await state(() => {
@@ -132,7 +132,8 @@ await step("06-sketch-new-tools", async () => {
 await step("07-text-tool", async () => {
   const { cx, cy } = await vp();
   await page.keyboard.press("t");
-  await page.mouse.click(cx - 40, cy - 100);
+  // Inside the rectangle, below the ellipse and left of the gear: outlines that cross make the extrude very slow.
+  await page.mouse.click(cx - 200, cy + 115);
   const input = page.locator(".panel .textfield");
   await input.waitFor();
   await input.fill("HELLO");
@@ -153,6 +154,12 @@ await step("08-arrange-copies", async () => {
   await waitBuilt();
   const n = await state(() => window.whittle.useApp.getState().doc.features.find((f) => f.type === "sketch").entities.length);
   if (n !== before + 2) throw new Error(`expected ${before + 2} shapes, got ${n}`);
+  // Take the copies back out: the extrude that follows would otherwise cut through overlapping outlines, which is very slow.
+  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Control+z");
+  await waitBuilt();
+  const m = await state(() => window.whittle.useApp.getState().doc.features.find((f) => f.type === "sketch").entities.length);
+  if (m !== before) throw new Error(`expected ${before} shapes after undo, got ${m}`);
 });
 
 await step("09-extrude", async () => {
