@@ -110,7 +110,7 @@ async function handle(req: KernelRequest) {
     } else {
       await builder.prepareImports(req.doc);
       const shapes = builder.shapes(req.doc);
-      const file = await exportShapes(req.doc, shapes, req.format, req.bodyIds, req.quality);
+      const file = await exportShapes(req.doc, shapes, req.format, req.bodyIds, req.quality, req.drawing);
       post({ type: "export", seq: req.seq, ...file }, [file.data.buffer]);
     }
   } catch (e) {

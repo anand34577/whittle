@@ -1,6 +1,6 @@
 /**
  * Orientation cube: an HTML/CSS 3D cube that mirrors the camera. Click a face, an edge or a corner to look from
- * there (as in Fusion's ViewCube), or drag it to turn the view.
+ * there, or drag it to turn the view.
  */
 import { useEffect, useRef } from "react";
 import type { CubeView, Viewport } from "../viewport/Viewport";

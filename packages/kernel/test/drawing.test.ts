@@ -34,3 +34,24 @@ it("can leave hidden lines out", () => {
   const part = makeBaseBox(60, 40, 20).cut(makeBaseBox(10, 10, 30));
   expect(buildDrawingSVG([part], { title: "x", hidden: false })).not.toContain('class="hid"');
 });
+
+it("lays out an A4 sheet at a chosen scale, first-angle, with a section and a parts list", () => {
+  const part = makeBaseBox(60, 40, 20).cut(makeBaseBox(10, 10, 30));
+  const svg = buildDrawingSVG([part], { title: "Opts", sheet: "A4", scale: 2, angle: "first", section: true, parts: [{ name: "Block", volume: 45000, material: "al" }] });
+  expect(svg).toContain('viewBox="0 0 297 210"');
+  expect(svg).toContain(">1:2<");
+  expect(svg).toContain("first-angle");
+  expect(svg).toContain("SECTION A-A");
+  expect(svg).toContain('fill="url(#hatch)"');
+  expect(svg).toContain(">Block<");
+  expect(svg).toContain(">45<");
+  expect(svg.match(/NaN|Infinity/)).toBeNull();
+});
+
+it("a section of a solid hatches the cut and leaves the hole open", () => {
+  const part = makeBaseBox(60, 40, 20).cut(makeBaseBox(10, 10, 30));
+  const svg = buildDrawingSVG([part], { title: "Sec", section: true });
+  const cut = svg.match(/<g class="cut"[^>]*>(.*?)<\/g>/)?.[1] ?? "";
+  // The cut face has the hole as a second loop in one even-odd path.
+  expect((cut.match(/M/g) ?? []).length).toBeGreaterThanOrEqual(2);
+});

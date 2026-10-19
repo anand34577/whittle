@@ -1,5 +1,6 @@
 /** Mounts the viewport engine and keeps it in sync with application state. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { SketchFrame } from "@whittle/kernel";
 import {
   type ConstraintType,
   type Id,
@@ -25,17 +26,17 @@ import {
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace, samePick } from "../state/actions";
 import { regionAt } from "../state/regions";
-import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addMidpointLine, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure, measurePicks, quickInfo } from "../state/measure";
 import { nextSteps } from "../state/problems";
 import { getKernel } from "../state/kernel";
 import { cancelImagePick, imagePickPointer, placeImage, useImagePick } from "../state/refImage";
-import { type Pick, editFeature, findFeature, setSketchTool, setView, sketchMutate, toast, useApp } from "../state/store";
+import { type Pick, editFeature, findFeature, requestView, setSketchTool, setSketchView, setView, sketchMutate, toast, useApp } from "../state/store";
 import { type SketchUIState, SketchController } from "../viewport/sketchTools";
 import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/Viewport";
-import { Icon } from "./icons";
+import { Icon, type IconName } from "./icons";
 import { OrientationCube } from "./OrientationCube";
 import { DragHandles } from "./DragHandle";
 import { Slider } from "./controls";
@@ -61,6 +62,7 @@ const GLYPHS: Partial<Record<ConstraintType, string>> = {
   symmetric: "⇔",
   midpoint: "½",
   collinear: "⋯",
+  concentric: "◎",
 };
 
 interface ConstraintMark {
@@ -264,11 +266,58 @@ function ViewDock() {
   );
 }
 
+/** The sketch palette: look at the plane, grid, snap, slice and what the canvas labels. */
+function SketchPalette({ frame }: { frame: SketchFrame | null }) {
+  const sv = useApp((s) => s.sketchView);
+  const grid = useApp((s) => s.view.grid);
+  const sliceable = frame ? sliceAxis(frame) !== null : false;
+  const toggles: { key: string; label: string; icon: IconName; on: boolean; title: string; toggle: () => void; disabled?: boolean }[] = [
+    { key: "grid", label: "Grid", icon: "grid", on: grid, title: "Show the sketch grid", toggle: () => setView({ grid: !grid }) },
+    { key: "snap", label: "Snap", icon: "point", on: sv.snap, title: "Snap new points to the grid. Points on existing geometry still attract; hold Alt to place freely.", toggle: () => setSketchView({ snap: !sv.snap }) },
+    { key: "slice", label: "Slice", icon: "section", on: sv.slice && sliceable, title: sliceable ? "Cut the model away at the sketch plane so the profile is not hidden" : "Slice works on sketches lying on an origin plane or a flat face parallel to one", toggle: () => setSketchView({ slice: !sv.slice }), disabled: !sliceable },
+    { key: "points", label: "Points", icon: "point", on: sv.points, title: "Show the points of the sketch geometry", toggle: () => setSketchView({ points: !sv.points }) },
+    { key: "shade", label: "Profile", icon: "rect", on: sv.shading, title: "Shade the closed profiles", toggle: () => setSketchView({ shading: !sv.shading }) },
+    { key: "dims", label: "Dimensions", icon: "ruler", on: sv.dims, title: "Show the dimension values on the sketch", toggle: () => setSketchView({ dims: !sv.dims }) },
+    { key: "cons", label: "Constraints", icon: "link", on: sv.constraints, title: "Show constraint glyphs on the sketch", toggle: () => setSketchView({ constraints: !sv.constraints }) },
+  ];
+  return (
+    <div className="dock sketch-palette" role="toolbar" aria-label="Sketch palette">
+      <div className="dock__group">
+        <button className="dock__btn" onClick={() => requestView("normal")} title="Look at the sketch plane head-on">
+          <Icon name="camera" size={18} />
+          <span>Look at</span>
+        </button>
+      </div>
+      <div className="dock__group">
+        {toggles.map((t) => (
+          <button key={t.key} className={`dock__btn ${t.on ? "is-on" : ""}`} aria-pressed={t.on} disabled={t.disabled} title={t.title} onClick={t.toggle}>
+            <Icon name={t.icon} size={18} />
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The axis a sketch plane is perpendicular to, when it is one of x, y, z (the only planes a section view can follow). */
+function sliceAxis(f: SketchFrame): { axis: "x" | "y" | "z"; offset: number; flip: boolean } | null {
+  const [nx, ny, nz] = f.normal;
+  const ax = [Math.abs(nx), Math.abs(ny), Math.abs(nz)];
+  const i = ax.findIndex((v) => v > 0.9999);
+  if (i < 0) return null;
+  const axis = (["x", "y", "z"] as const)[i]!;
+  // The viewer sits on the normal's side; keep what is behind the plane.
+  // A hair toward the viewer, so a face lying exactly on the plane is kept whole instead of flickering in and out.
+  return { axis, offset: f.origin[i]! + (f.normal[i]! > 0 ? 0.002 : -0.002), flip: f.normal[i]! > 0 };
+}
+
 function SectionControl({ vp }: { vp: Viewport | null }) {
   const section = useApp((s) => s.view.section);
   const units = useApp((s) => s.doc.units);
   useApp((s) => s.regen);
-  if (!section) return null;
+  const slicing = useApp((s) => s.mode.kind === "sketch" && s.sketchView.slice);
+  if (!section || slicing) return null;
   const [lo, hi] = vp?.sectionRange(section.axis) ?? [-50, 50];
   const f = LENGTH_TO_MM[units];
   return (
@@ -405,6 +454,7 @@ export function ViewportView() {
   const radial = useApp((s) => s.radial);
   const selectedEntity = useApp((s) => s.selectedEntity);
   const sketchSel = useApp((s) => s.sketchSel);
+  const sketchView = useApp((s) => s.sketchView);
   const priority = useApp((s) => s.pickPriority);
   const viewRequest = useApp((s) => s.viewRequest);
   const regenBusy = useApp((s) => s.regenBusy);
@@ -421,6 +471,7 @@ export function ViewportView() {
       new SketchController({
         pixelSize: () => vpRef.current?.pixelSize ?? 1,
         gridSpacing: () => vpRef.current?.gridSpacing ?? 10,
+        gridSnap: () => useApp.getState().sketchView.snap,
         entities: () => {
           const s = useApp.getState();
           return s.mode.kind === "sketch" ? findFeature(s.doc, s.mode.sketchId, "sketch")?.entities ?? [] : [];
@@ -469,6 +520,10 @@ export function ViewportView() {
           addLines(pts, closed, (p) => (typeof p === "string" ? pointAt(o!.sk, p, o!.sol) : p), relations);
         },
         addArc: addArcGeometry,
+        addMidLine: (c, end) => {
+          const o = openSketch();
+          if (o) addMidpointLine(c, end, (p) => (typeof p === "string" ? pointAt(o.sk, p, o.sol) : p));
+        },
         addTangentArc: addTangentArcGeometry,
         addCircle: addCircleGeometry,
         addTangentCircle: addTangentCircleGeometry,
@@ -651,6 +706,17 @@ export function ViewportView() {
     setTyping(null);
   }, [controller, mode]);
 
+  // Slice: while sketching, cut the model away at the sketch plane. Restores the view it replaced when it stops.
+  const slice = useApp((s) => s.sketchView.slice);
+  useEffect(() => {
+    if (mode.kind !== "sketch" || !slice || !frame) return;
+    const cut = sliceAxis(frame);
+    if (!cut) return;
+    const before = useApp.getState().view.section;
+    setView({ section: cut });
+    return () => setView({ section: before });
+  }, [mode.kind, slice, frame?.id, frame?.origin[0], frame?.origin[1], frame?.origin[2]]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // View requests.
   useEffect(() => {
     if (!vp || !viewRequest) return;
@@ -709,7 +775,7 @@ export function ViewportView() {
         const isSel = active ? sketchSel.includes(g.id) : selected || inLoft;
         const isHover = active ? g.id === sketchUI?.hoverEntity : hovered;
         if (g.type === "point") {
-          if (active) markers.push({ p: g.p, tone: tone!, selected: isSel, hovered: isHover });
+          if (active && sketchView.points) markers.push({ p: g.p, tone: tone!, selected: isSel, hovered: isHover });
           continue;
         }
         shapes.push({ id: g.id, pts: geomOutline(g), closed: false, construction: g.construction, selected: isSel, hovered: isHover, tone });
@@ -722,10 +788,10 @@ export function ViewportView() {
             selected: chosen.has(i) || selection.some((p) => p.kind === "region" && p.sketchId === f.id && p.index === i),
             hovered: hover?.kind === "region" && hover.sketchId === f.id && hover.index === i,
           }));
-      list.push({ id: f.id, frame: fr, active, shapes, markers, regions, profile: !!profileOf, fill: active || selected || inLoft || (!!profileOf && !profileOf.regions?.length) || !isSketchConsumed(doc, f.id) ? fr.fill : undefined });
+      list.push({ id: f.id, frame: fr, active, shapes, markers, regions, profile: !!profileOf, fill: (active ? sketchView.shading : selected || inLoft) || (!!profileOf && !profileOf.regions?.length) || !isSketchConsumed(doc, f.id) ? fr.fill : undefined });
     }
     vp.setSketches(list);
-  }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature]);
+  }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature, sketchView.points, sketchView.shading]);
 
   // Interference boxes.
   const interference = useApp((s) => s.interference);
@@ -1015,6 +1081,7 @@ export function ViewportView() {
           // Glyphs that land on the same spot line up side by side.
           const taken = new Map<string, number>();
           return constraintMarks(sk, frame.solution, doc.units).map((m) => {
+            if (!(m.dim ? sketchView.dims : sketchView.constraints)) return null;
             const pos = vp.sketchToScreen(m.at, frame);
             if (!pos) return null;
             const spot = `${m.dim}:${Math.round(pos[0] / 6)}:${Math.round(pos[1] / 6)}`;
@@ -1101,6 +1168,7 @@ export function ViewportView() {
       <SectionControl vp={vp} />
       <ExplodeControl />
       {mode.kind !== "sketch" && <ViewDock />}
+      {mode.kind === "sketch" && <SketchPalette frame={frame} />}
       <OrientationCube viewport={vp} tick={tick} />
       {radial && <RadialMenu x={radial.x} y={radial.y} ids={radialFor(radialPick.current)} />}
     </section>

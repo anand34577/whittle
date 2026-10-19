@@ -60,6 +60,32 @@ interface Snapshot {
 /** Filled by applyOp, so the editor can show what the feature adds, cuts or keeps. */
 const ghostSink: { tool: Shape3D | null; op: BodyOp | null } = { tool: null, op: null };
 
+/** The straight edge across the narrowest flat face that edge `e` borders, parallel to it, and the gap between them. */
+function fullRoundPartner(body: Shape3D, e: Edge): { partner: Edge; width: number } | null {
+  if (e.geomType !== "LINE") return null;
+  const a = e.startPoint;
+  const d = [e.endPoint.x - a.x, e.endPoint.y - a.y, e.endPoint.z - a.z];
+  const len = Math.hypot(d[0]!, d[1]!, d[2]!);
+  if (len < 1e-9) return null;
+  let best: { partner: Edge; width: number } | null = null;
+  for (const face of body.faces) {
+    if (face.geomType !== "PLANE" || !face.edges.some((x) => x.isSame(e))) continue;
+    for (const x of face.edges) {
+      if (x.isSame(e) || x.geomType !== "LINE") continue;
+      const b = x.startPoint;
+      const dx = [x.endPoint.x - b.x, x.endPoint.y - b.y, x.endPoint.z - b.z];
+      const lx = Math.hypot(dx[0]!, dx[1]!, dx[2]!);
+      const cr = [d[1]! * dx[2]! - d[2]! * dx[1]!, d[2]! * dx[0]! - d[0]! * dx[2]!, d[0]! * dx[1]! - d[1]! * dx[0]!];
+      if (Math.hypot(cr[0]!, cr[1]!, cr[2]!) > 1e-6 * len * lx) continue;
+      const w = [b.x - a.x, b.y - a.y, b.z - a.z];
+      const c2 = [d[1]! * w[2]! - d[2]! * w[1]!, d[2]! * w[0]! - d[0]! * w[2]!, d[0]! * w[1]! - d[1]! * w[0]!];
+      const width = Math.hypot(c2[0]!, c2[1]!, c2[2]!) / len;
+      if (width > 1e-6 && (!best || width < best.width)) best = { partner: x, width };
+    }
+  }
+  return best;
+}
+
 function bboxOverlap(a: Shape3D, b: Shape3D): boolean {
   const [a0, a1] = a.boundingBox.bounds;
   const [b0, b1] = b.boundingBox.bounds;
@@ -571,15 +597,18 @@ export class Builder {
         if (!profile && !surf) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : "The sketch has no closed shapes yet. Draw a rectangle or circle first.");
         let tool: Shape3D;
         if (f.type === "extrude") {
+          const fromFace = f.startFace !== undefined ? distanceToFace(bodies, f.startFace ?? undefined, sk.frame, true) : 0;
+          const off = fromFace + (f.startOffset ? ev.num(f.startOffset, "length", "Start offset") : 0);
+          const start = Math.abs(off) > 1e-9 ? { ...sk.frame, origin: add(sk.frame.origin, scale(sk.frame.normal, off)) } : sk.frame;
           const d =
             f.extent === "through"
-              ? throughDistance(bodies, sk.frame)
+              ? throughDistance(bodies, start)
               : f.extent === "face"
-                ? distanceToFace(bodies, f.toFace, sk.frame)
+                ? distanceToFace(bodies, f.toFace, start)
                 : ev.num(f.distance, "length", "Distance");
           if (Math.abs(d) < 1e-6) throw new FeatureError("The distance can't be zero.");
           const sign = f.flip && f.extent !== "face" ? -1 : 1;
-          let frame = sk.frame;
+          let frame = start;
           let dist = d * sign;
           if (f.extent === "symmetric") {
             frame = { ...frame, origin: add(frame.origin, scale(frame.normal, -Math.abs(d) / 2)) };
@@ -831,10 +860,32 @@ export class Builder {
         if (d2 !== null && d2 <= 0) throw new FeatureError("The second distance must be greater than zero.");
         if (ang !== null && (ang <= 0 || ang >= 90)) throw new FeatureError("The chamfer angle must be between 0° and 90°.");
         const flip = f.type === "chamfer" && !!f.flip;
+        // Full round: pair each edge with the parallel edge across its narrow flat face; both get half that width.
+        const fullRound = f.type === "fillet" && !!f.fullRound;
+        const full = new Map<Id, { edge: Edge; r: number }[]>();
+        if (fullRound) {
+          for (const [id, edges] of byBody) {
+            const list: { edge: Edge; r: number }[] = [];
+            for (const e of [...edges]) {
+              const pair = fullRoundPartner(bodies.get(id)!, e);
+              if (!pair) throw new FeatureError("Full round needs the long edges of a narrow flat face. Pick one edge along such a face (a thin wall's top, for instance).");
+              for (const x of [e, pair.partner]) {
+                if (!list.some((y) => y.edge.isSame(x))) list.push({ edge: x, r: pair.width * 0.4995 });
+                if (!edges.some((y) => y.isSame(x))) edges.push(x);
+              }
+            }
+            full.set(id, list);
+          }
+        }
         const run = (size: number): Map<Id, Shape3D> => {
           const out = new Map<Id, Shape3D>();
           for (const [id, edges] of byBody) {
             const body = bodies.get(id)!;
+            if (fullRound) {
+              const list = full.get(id)!;
+              out.set(id, body.fillet((e: Edge) => list.find((x) => x.edge.isSame(e))?.r ?? null));
+              continue;
+            }
             if (f.type === "fillet") {
               out.set(id, body.fillet((e: Edge) => (edges.some((x) => x.isSame(e)) ? (end !== null ? [size, size * ratio] : size) : null)));
               continue;
@@ -859,6 +910,7 @@ export class Builder {
         try {
           for (const [id, s] of run(value)) bodies.set(id, s);
         } catch {
+          if (fullRound) throw new FeatureError("Full round could not be made here. It needs a flat face with two straight parallel edges and nothing else cutting into it.");
           const field = f.type === "fillet" ? "radius" : "distance";
           const fit = largestWorking(value, (v) => run(v));
           const what = f.type === "fillet" ? "fillet radius" : "chamfer distance";
@@ -1086,16 +1138,17 @@ const MIRROR_NORMALS: Record<"XY" | "XZ" | "YZ", Vec3> = { XY: [0, 0, 1], XZ: [0
 
 /** Long enough to pass through every body from the sketch plane. */
 /** The signed distance along the sketch's normal to a flat face's plane (negative when the face is behind the sketch). */
-function distanceToFace(bodies: Map<Id, Shape3D>, ref: FaceRef | undefined, frame: SketchFrame): number {
-  if (!ref) throw new FeatureError("Click the face to extrude up to.", undefined, true);
+function distanceToFace(bodies: Map<Id, Shape3D>, ref: FaceRef | undefined, frame: SketchFrame, start = false): number {
+  const verb = start ? "start from" : "extrude up to";
+  if (!ref) throw new FeatureError(`Click the face to ${verb}.`, undefined, true);
   const res = resolveFace(bodyForRefs(bodies, ref.bodyId), ref);
-  if (!res) throw new FeatureError("The face to extrude up to no longer exists. Click another face.");
+  if (!res) throw new FeatureError(`The face to ${verb} no longer exists. Click another face.`);
   const info = faceInfo(res.item);
-  if (info.surface !== "PLANE") throw new FeatureError("Extruding up to a face needs a flat face.");
+  if (info.surface !== "PLANE") throw new FeatureError(start ? "Starting from a face needs a flat face." : "Extruding up to a face needs a flat face.");
   const along = dot(frame.normal, info.normal);
-  if (Math.abs(along) < 1e-6) throw new FeatureError("That face is parallel to the sketch's direction, so the extrusion would never reach it. Click a face that faces across it.");
+  if (Math.abs(along) < 1e-6) throw new FeatureError(start ? "That face is square on to the sketch, so the extrusion can't start from it. Click a face that faces across the sketch plane." : "That face is parallel to the sketch's direction, so the extrusion would never reach it. Click a face that faces across it.");
   const t = dot(subv(info.center, frame.origin), info.normal) / along;
-  if (Math.abs(t) < 1e-6) throw new FeatureError("The sketch is already on that face, so there's no distance to extrude.");
+  if (!start && Math.abs(t) < 1e-6) throw new FeatureError("The sketch is already on that face, so there's no distance to extrude.");
   return t;
 }
 

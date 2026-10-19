@@ -3,8 +3,9 @@
  * defaults for new designs. Kept on this device (localStorage), applied live.
  */
 import type { LengthUnit } from "@whittle/core";
+import type { DrawingSettings } from "@whittle/kernel";
 
-export type ThemeId = "graphite" | "paper" | "midnight" | "blueprint" | "studio" | "contrast";
+export type ThemeId = "daylight" | "daylightdark" | "graphite" | "paper" | "midnight" | "blueprint" | "studio" | "contrast";
 export type ThemePref = ThemeId | "system";
 export type Accent = "orange" | "blue" | "green" | "violet" | "rose" | "teal" | "amber";
 export type Density = "compact" | "comfortable" | "spacious";
@@ -36,6 +37,8 @@ export interface Prefs {
   smartSketch: boolean | null;
   /** How finely mesh exports (STL, 3MF, OBJ, GLB, PLY) follow curved faces. */
   meshQuality: "draft" | "standard" | "fine";
+  /** What the 2D drawing export shows (sheet, scale, projection, section, parts list). */
+  drawing?: DrawingSettings;
   /** Single-key shortcuts: Whittle's own, or the classic CAD letters (H hole, J joint, T trim, O offset, P project). */
   keys: "whittle" | "classic";
   /** Send to slicer (desktop): an installed slicer by name, or "" for whatever opens .3mf files. */
@@ -54,6 +57,8 @@ export interface ThemeInfo {
 }
 
 export const THEMES: ThemeInfo[] = [
+  { id: "daylight", label: "Daylight", dark: false, blurb: "Light grey interface with a blue accent.", swatch: ["#dfe2e6", "#f4f5f6", "#0696d7"] },
+  { id: "daylightdark", label: "Daylight dark", dark: true, blurb: "Charcoal interface with a blue accent, easy on the eyes.", swatch: ["#25282c", "#34383d", "#0696d7"] },
   { id: "graphite", label: "Graphite", dark: true, blurb: "Warm dark grey. Easy on the eyes for long sessions.", swatch: ["#1b1a18", "#2b2926", "#ece6da"] },
   { id: "paper", label: "Paper", dark: false, blurb: "Warm light, like a drafting table.", swatch: ["#ece8df", "#f8f6f1", "#2b2722"] },
   { id: "midnight", label: "Midnight", dark: true, blurb: "Deep blue-black with crisp contrast.", swatch: ["#0e1117", "#171b24", "#e4e8f1"] },
@@ -63,7 +68,7 @@ export const THEMES: ThemeInfo[] = [
 ];
 
 export const ACCENTS: { id: Accent; label: string; color: string }[] = [
-  { id: "orange", label: "Marking orange", color: "#f08a3c" },
+  { id: "orange", label: "Theme default", color: "#0696d7" },
   { id: "amber", label: "Amber", color: "#e7b02f" },
   { id: "rose", label: "Rose", color: "#e8607a" },
   { id: "violet", label: "Violet", color: "#9b7ff0" },
@@ -104,7 +109,7 @@ import { writeStored } from "./stored";
 const KEY = "whittle.prefs";
 
 export const DEFAULT_PREFS: Prefs = {
-  theme: "graphite",
+  theme: "daylight",
   accent: "orange",
   density: "comfortable",
   scale: 1,
@@ -145,6 +150,7 @@ export function normalizePrefs(p: Partial<Prefs>): Prefs {
   if (!["draft", "standard", "fine"].includes(out.meshQuality)) out.meshQuality = "standard";
   if (!NAV_PRESETS.some((n) => n.id === out.nav)) out.nav = DEFAULT_PREFS.nav;
   if (out.keys !== "classic") out.keys = "whittle";
+  if (out.drawing && typeof out.drawing !== "object") out.drawing = undefined;
   out.updateCheck = out.updateCheck !== false;
   return out;
 }
@@ -166,9 +172,9 @@ export function smartSketchOn(p: Prefs): boolean {
 export function resolveTheme(t: ThemePref): ThemeId {
   if (t !== "system") return t;
   try {
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "paper" : "graphite";
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "daylight" : "daylightdark";
   } catch {
-    return "graphite";
+    return "daylight";
   }
 }
 

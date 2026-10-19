@@ -137,13 +137,26 @@ export type InspectResult =
   /** Outlines of the text in every sketch (sketch millimetres; holes, such as the inside of an "o", are loops too). */
   | { kind: "text"; items: { sketchId: Id; loops: [number, number][][] }[] };
 
+/** What the 2D drawing sheet shows (all optional: an A3 sheet, third-angle, scale picked to fit). */
+export interface DrawingSettings {
+  sheet?: "A4" | "A3" | "A2" | "A1";
+  /** Model-to-paper divisor: 1 is 1:1, 2 is 1:2, 0.5 is 2:1. Unset: the largest standard scale that fits. */
+  scale?: number;
+  angle?: "third" | "first";
+  /** Add a SECTION A-A view cut through the middle. */
+  section?: boolean;
+  /** Add a parts list (name, volume, material). */
+  parts?: boolean;
+  hidden?: boolean;
+}
+
 export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply" | "drawing";
 /** How finely curved faces are cut into triangles for mesh formats: smoother files are bigger. */
 export type MeshQuality = "draft" | "standard" | "fine";
 
 export type KernelRequest =
   | { type: "regen"; seq: number; doc: WhittleDocument; quality: "preview" | "final"; pickBefore?: Id; preview?: Id }
-  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[]; quality?: MeshQuality }
+  | { type: "export"; seq: number; doc: WhittleDocument; format: ExportFormat; bodyIds?: Id[]; quality?: MeshQuality; drawing?: DrawingSettings }
   | { type: "inspect"; seq: number; doc: WhittleDocument; kind: InspectKind; picks?: MeasurePick[] };
 
 export type KernelResponse =

@@ -172,11 +172,11 @@ export const DESIGN_TOOLS: ToolDef[] = [
         constraints: {
           type: "array",
           description:
-            'Constraints to add: {type, refs, value?}. refs are geometry names/ids, point references like "L1.start", or "origin", "xaxis", "yaxis". symmetric: [point, point, line] or [point, point, centre point]; midpoint: [point, line]; collinear: [line, line]. distance: [line] (length), [point, point], [point, line] or [line, line]; radius: [circle or arc]; angle: [line] (from horizontal) or [line, line]. value is in the design units (degrees for angles) or a formula.',
+            'Constraints to add: {type, refs, value?}. refs are geometry names/ids, point references like "L1.start", or "origin", "xaxis", "yaxis". symmetric: [point, point, line] or [point, point, centre point]; midpoint: [point, line]; collinear: [line, line]; concentric: [circle or arc, circle or arc]; distance: [line] (length), [point, point], [point, line] or [line, line]; radius: [circle or arc]; angle: [line] (from horizontal) or [line, line]. value is in the design units (degrees for angles) or a formula.',
           items: {
             type: "object",
             properties: {
-              type: { type: "string", enum: ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear", "distance", "radius", "diameter", "angle"] },
+              type: { type: "string", enum: ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear", "concentric", "distance", "radius", "diameter", "angle"] },
               refs: { type: "array", items: { type: "string" } },
               value: num,
             },

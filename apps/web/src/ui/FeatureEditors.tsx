@@ -187,6 +187,27 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
         <ExprInput label="Other side" kind="length" value={f.distance2 ?? "0"} min={0} onChange={(v) => upd(f, "Second distance", (d) => void (d.distance2 = v))} />
       )}
       {f.extent !== "symmetric" && f.extent !== "face" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
+      <Toggle
+        label="Start from a face"
+        hint="Begin on a flat face of the model instead of the sketch plane (the offset below then counts from that face)"
+        checked={f.startFace !== undefined}
+        onChange={(on) => upd(f, "Start from a face", (d) => void (d.type === "extrude" && (d.startFace = on ? null : undefined)))}
+      />
+      {f.startFace !== undefined && (
+        <PickLine
+          icon="plane"
+          text={f.startFace ? "Starts on the face you chose. Click another face to change it" : "Click the flat face to start from"}
+          clearable={!!f.startFace}
+          onClear={() => upd(f, "Clear start face", (d) => void (d.type === "extrude" && (d.startFace = null)))}
+        />
+      )}
+      <ExprInput
+        label="Start offset"
+        kind="length"
+        value={f.startOffset ?? "0"}
+        hint="Begin the extrusion this far above (or below) the sketch plane"
+        onChange={(v) => upd(f, "Start offset", (d) => void (d.type === "extrude" && (d.startOffset = v === "0" ? undefined : v)))}
+      />
       <Disclosure summary="Thin wall" defaultOpen={!!f.thin}>
         <ExprInput
           label="Wall"
@@ -266,7 +287,7 @@ function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
   const n = f.edges.length;
   const prefs = useApp((s) => s.prefs);
   const previewing = useApp((s) => s.hoverEdges?.length ?? 0);
-  const label = n === 0 ? "No edges yet: click edges in the view" : `${n} edge${n > 1 ? "s" : ""}`;
+  const label = n === 0 ? "No edges yet: click edges in the view (or a face for all its edges)" : `${n} edge${n > 1 ? "s" : ""}`;
   return (
     <>
       <div className="picker">
@@ -281,9 +302,10 @@ function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
       <Toggle label="Select tangent edges together" hint="Clicking an edge also takes the edges that continue smoothly from it, such as a whole rounded outline" checked={prefs.tangentChain} onChange={(v) => setPrefs({ tangentChain: v })} />
       {f.type === "fillet" ? (
         <>
-          <ExprInput label={f.radius2 ? "Start radius" : "Radius"} kind="length" value={f.radius} autoFocus min={0} onChange={(v) => upd(f, "Radius", (d) => void ((d as FilletFeature).radius = v))} />
-          <Toggle label="Variable radius" hint="The radius changes along each edge, from the start radius to the end radius" checked={!!f.radius2} onChange={(on) => upd(f, "Variable", (d) => void ((d as FilletFeature).radius2 = on ? String(Number.parseFloat(f.radius) * 2 || 2) : undefined))} />
-          {f.radius2 && <ExprInput label="End radius" kind="length" value={f.radius2} min={0} onChange={(v) => upd(f, "End radius", (d) => void ((d as FilletFeature).radius2 = v))} />}
+          <Toggle label="Full round" hint="Round a narrow flat face into a half-round: pick one long edge along it and the other side follows" checked={!!f.fullRound} onChange={(on) => upd(f, "Full round", (d) => void ((d as FilletFeature).fullRound = on || undefined))} />
+          {!f.fullRound && <ExprInput label={f.radius2 ? "Start radius" : "Radius"} kind="length" value={f.radius} autoFocus min={0} onChange={(v) => upd(f, "Radius", (d) => void ((d as FilletFeature).radius = v))} />}
+          {!f.fullRound && <Toggle label="Variable radius" hint="The radius changes along each edge, from the start radius to the end radius" checked={!!f.radius2} onChange={(on) => upd(f, "Variable", (d) => void ((d as FilletFeature).radius2 = on ? String(Number.parseFloat(f.radius) * 2 || 2) : undefined))} />}
+          {!f.fullRound && f.radius2 && <ExprInput label="End radius" kind="length" value={f.radius2} min={0} onChange={(v) => upd(f, "End radius", (d) => void ((d as FilletFeature).radius2 = v))} />}
         </>
       ) : (
         <>

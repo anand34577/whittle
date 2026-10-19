@@ -127,7 +127,7 @@ export function measure(picks: Pick[], bodies: BodyResult[], unit: LengthUnit, e
   const da = direction(a, bodies);
   const db = direction(b, bodies);
   if (exact) {
-    // As Fusion measures: the shortest distance between the things themselves (touching faces are 0 apart).
+    // The shortest distance between the things themselves (touching faces are 0 apart).
     lines.push({ label: "Distance", value: L(exact.d), primary: true });
     segment = [exact.a, exact.b];
   } else if (da && db && da.kind === "normal" && db.kind === "normal" && da.planar && db.planar && Math.abs(dot(da.v, db.v)) > 0.9999) {

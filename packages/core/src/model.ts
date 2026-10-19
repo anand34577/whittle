@@ -202,6 +202,7 @@ export type ConstraintType =
   | "symmetric"
   | "midpoint"
   | "collinear"
+  | "concentric"
   | "distance"
   | "radius"
   | "diameter"
@@ -400,6 +401,10 @@ export interface ExtrudeFeature extends FeatureBase {
   toFace?: FaceRef;
   distance2?: Expr;
   flip: boolean;
+  /** Start the extrusion this far above (or below) the sketch plane, along its normal. */
+  startOffset?: Expr;
+  /** Start from this flat face instead of the sketch plane (the offset then counts from the face). Present but empty while waiting for the click. */
+  startFace?: FaceRef | null;
   /** Draft angle: positive narrows the profile as it rises (mould and cast parts). */
   taper?: Expr;
   /** Twist the profile by this angle over the extrusion (vases, grips, springs). */
@@ -440,6 +445,11 @@ export interface FilletFeature extends FeatureBase {
   radius: Expr;
   /** Variable radius: the radius at the end of each edge (the start uses `radius`). */
   radius2?: Expr;
+  /**
+   * Full round: each picked straight edge and the parallel edge across its narrow flat face are rounded with half
+   * the face's width, so the face becomes a half-round (the radius is ignored).
+   */
+  fullRound?: boolean;
 }
 
 export interface ChamferFeature extends FeatureBase {
@@ -758,6 +768,8 @@ export interface BodyMeta {
   visible: boolean;
   /** Appearance preset (see MATERIAL_LOOKS in the web app). */
   look?: string;
+  /** Physical material (a MATERIALS id in the web app) for mass; unset uses the design default. */
+  material?: string;
   /** 0.05–1; overrides the finish's own transparency. */
   opacity?: number;
   /** Bodies sharing a component name move together under joints. */

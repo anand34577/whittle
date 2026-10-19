@@ -248,7 +248,7 @@ await step("14-move-copy", async () => {
 });
 
 await step("15-paper-and-screenshot", async () => {
-  await page.getByTitle("Light theme").click();
+  await page.getByTitle(/(Light|Dark) theme/).click();
   const dl = page.waitForEvent("download");
   await page.getByTitle(/^Save image/).click();
   const d = await dl;

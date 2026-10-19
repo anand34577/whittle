@@ -13,6 +13,7 @@ import "./styles/controls.css";
 import "./styles/feedback.css";
 import "./styles/themes.css";
 import "./styles/assist.css";
+import "./styles/daylight.css";
 import { App } from "./App";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { useApp } from "./state/store";

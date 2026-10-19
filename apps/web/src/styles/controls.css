@@ -904,7 +904,7 @@ textarea::placeholder {
   position: fixed;
   right: 16px;
   bottom: calc(var(--h-timeline) + var(--h-status) + 12px);
-  top: calc(var(--h-title) + var(--h-toolbar) + 12px);
+  top: calc(var(--h-title) + var(--h-tabs, 0px) + var(--h-toolbar) + 12px);
   width: min(400px, calc(100vw - 32px));
   /* Above the viewport and panels, below dialogs (.scrim is 60). */
   z-index: 55;

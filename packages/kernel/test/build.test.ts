@@ -250,3 +250,76 @@ describe("mesh export detail", () => {
     expect(plain.data.byteLength).toBe(standard.data.byteLength);
   });
 });
+
+describe("extrude start offset", () => {
+  it("starts the solid above the sketch plane without changing its length", () => {
+    const { doc, extrude } = plateDoc();
+    extrude.startOffset = "5";
+    const body = new Builder().regen(doc, "final").bodies[0]!;
+    expect(body.volume).toBeCloseTo(40 * 30 * 10, 3);
+    expect(body.bbox[0][2]).toBeCloseTo(5, 3);
+    expect(body.bbox[1][2]).toBeCloseTo(15, 3);
+  });
+
+  it("works below the plane and with a symmetric extent", () => {
+    const { doc, extrude } = plateDoc();
+    extrude.startOffset = "-5";
+    extrude.extent = "symmetric";
+    const body = new Builder().regen(doc, "final").bodies[0]!;
+    expect(body.bbox[0][2]).toBeCloseTo(-10, 3);
+    expect(body.bbox[1][2]).toBeCloseTo(0, 3);
+  });
+});
+
+describe("full round fillet", () => {
+  it("rounds a thin wall's top into a half-round from one picked edge", () => {
+    const doc = newDocument();
+    const box = makePrimitive(doc, "box");
+    if (box.type !== "primitive") throw new Error("box");
+    box.width = "40";
+    box.depth = "5";
+    box.height = "20";
+    doc.features.push(box);
+    doc.bodies[box.id] = { name: "Wall", color: "#ccc", visible: true };
+    const b = new Builder();
+    const body = b.regen(doc, "final").bodies[0]!;
+    // The top edge along X on the -Y side.
+    const i = body.edges.findIndex((e) => Math.abs(e.mid[2] - 20) < 1e-6 && Math.abs(e.mid[1] + 2.5) < 1e-6 && Math.abs(e.tangent[0]) > 0.99);
+    expect(i).toBeGreaterThanOrEqual(0);
+    const fillet = makeFillet(doc) as FilletFeature;
+    fillet.edges = [edgeRef(body, i)];
+    fillet.fullRound = true;
+    doc.features.push(fillet);
+    const r = b.regen(doc, "final");
+    expect(r.status.map((s) => s.state), JSON.stringify(r.status)).toEqual(["ok", "ok"]);
+    const radius = 2.5 * 0.999;
+    const removed = 2 * radius * radius * (1 - Math.PI / 4) * 40;
+    expect(r.bodies[0]!.volume).toBeCloseTo(40 * 5 * 20 - removed, 0);
+  });
+});
+
+describe("extrude from a face", () => {
+  it("starts on a face of another body, then offsets from it", () => {
+    const { doc, extrude } = plateDoc();
+    const b = new Builder();
+    const plate = b.regen(doc, "final").bodies[0]!;
+    const top = plate.faces.findIndex((f) => f.normal[2] > 0.99 && Math.abs(f.center[2] - 10) < 1e-6);
+    expect(top).toBeGreaterThanOrEqual(0);
+    const sk2 = makeSketch(doc, { kind: "origin", plane: "XY", offset: "0" }) as SketchFeature;
+    sk2.entities.push({ id: uid(), type: "rect", x: "0", y: "0", w: "5", h: "5", anchor: "center" });
+    doc.features.push(sk2);
+    const post = makeExtrude(doc, sk2.id) as ExtrudeFeature;
+    post.distance = "3";
+    post.op = "new";
+    post.startFace = faceRef(plate, top);
+    post.startOffset = "1";
+    doc.features.push(post);
+    doc.bodies[post.id] = { name: "Post", color: "#ccc", visible: true };
+    const r = b.regen(doc, "final");
+    expect(r.status.map((s) => s.state), JSON.stringify(r.status)).toEqual(["ok", "ok", "ok", "ok"]);
+    const body = r.bodies.find((x) => x.id === post.id)!;
+    expect(body.bbox[0][2]).toBeCloseTo(11, 3);
+    expect(body.bbox[1][2]).toBeCloseTo(14, 3);
+    void extrude;
+  });
+});

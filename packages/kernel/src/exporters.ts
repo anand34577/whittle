@@ -1,8 +1,8 @@
 import type { Id, WhittleDocument } from "@whittle/core";
 import { strToU8, zipSync } from "fflate";
-import { type Shape3D, exportSTEP, makeCompound } from "replicad";
+import { type Shape3D, exportSTEP, makeCompound, measureShapeVolumeProperties } from "replicad";
 import { buildDrawingSVG } from "./drawing";
-import type { ExportFormat, MeshQuality } from "./protocol";
+import type { DrawingSettings, ExportFormat, MeshQuality } from "./protocol";
 
 export interface ExportedFile {
   data: Uint8Array;
@@ -20,6 +20,7 @@ export async function exportShapes(
   format: ExportFormat,
   bodyIds?: Id[],
   quality: MeshQuality = "standard",
+  drawing?: DrawingSettings,
 ): Promise<ExportedFile> {
   const meshOptions = (shape: Shape3D) => meshOptionsFor(shape, quality);
   const entries = [...shapes.entries()].filter(([id]) => (bodyIds ? bodyIds.includes(id) : doc.bodies[id]?.visible !== false));
@@ -44,7 +45,8 @@ export async function exportShapes(
   }
 
   if (format === "drawing") {
-    return { data: strToU8(buildDrawingSVG(entries.map(([, s]) => s), { title: doc.name })), mime: "image/svg+xml", ext: "svg" };
+    const parts = drawing?.parts ? entries.map(([id, s]) => ({ name: doc.bodies[id]?.name ?? id, volume: measureShapeVolumeProperties(s).volume, material: doc.bodies[id]?.material })) : undefined;
+    return { data: strToU8(buildDrawingSVG(entries.map(([, s]) => s), { ...drawing, title: doc.name, parts })), mime: "image/svg+xml", ext: "svg" };
   }
   if (format === "obj") return { data: strToU8(buildOBJ(doc, entries, meshOptions)), mime: "model/obj", ext: "obj" };
   if (format === "ply") return { data: buildPLY(entries, meshOptions), mime: "application/x-ply", ext: "ply" };

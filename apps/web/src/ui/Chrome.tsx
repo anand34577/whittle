@@ -95,7 +95,7 @@ export function TitleBar() {
             <Icon name="assistant" size={18} />
           </button>
         )}
-        <button className="iconbtn" onClick={() => setTheme(dark ? "paper" : "graphite")} title={dark ? "Light theme" : "Dark theme"}>
+        <button className="iconbtn" onClick={() => setTheme(theme.startsWith("daylight") ? (dark ? "daylight" : "daylightdark") : dark ? "paper" : "graphite")} title={dark ? "Light theme" : "Dark theme"}>
           <Icon name={dark ? "sun" : "moon"} size={18} />
         </button>
         <button className="iconbtn" onClick={() => useApp.setState({ panel: "settings" })} title="Settings (Ctrl+,)">
@@ -317,13 +317,13 @@ const MODEL_FAMILIES: Record<string, { name: string; ids: string[] }> = {
 
 /** Sketch tool families: one button each, the other ways to draw it behind its arrow. */
 const SKETCH_CREATE: Record<string, string[]> = {
-  Line: ["tool-line", "tool-segment", "tool-path"],
+  Line: ["tool-line", "tool-segment", "tool-linem", "tool-path"],
   Rectangle: ["tool-rect", "tool-crect", "tool-rect3"],
   Circle: ["tool-circle", "tool-circle2", "tool-circle3", "tool-tan2c", "tool-tan3c"],
   Arc: ["tool-arc", "tool-carc", "tool-tarc"],
   Polygon: ["tool-polygon", "tool-polygonc", "tool-polygone"],
   Ellipse: ["tool-ellipse", "tool-earc"],
-  Slot: ["tool-slot"],
+  Slot: ["tool-slot", "tool-slotw", "tool-sloto", "tool-slotc", "tool-slota", "tool-slotp"],
   Spline: ["tool-spline", "tool-cspline", "tool-conic"],
 };
 /** The first five are corners and pieces, the rest copies and moves (the Modify menu splits them there). */
@@ -332,11 +332,11 @@ const SKETCH_MODIFY: Record<string, string[]> = {
   Trim: ["tool-trim", "tool-extend", "geo-break"],
   Offset: ["geo-offset"],
   Mirror: ["geo-mirror-line", "geo-mirror-y", "geo-mirror-x"],
-  Move: ["geo-move", "geo-copy", "geo-stretch", "geo-scale", "geo-grid"],
+  Move: ["geo-move", "geo-copy", "geo-stretch", "geo-scale", "geo-grid", "geo-circular"],
 };
-const SKETCH_CONSTRAINTS = ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear"].map((t) => `constrain-${t}`);
+const SKETCH_CONSTRAINTS = ["coincident", "horizontal", "vertical", "parallel", "perpendicular", "tangent", "equal", "fixed", "symmetric", "midpoint", "collinear", "concentric"].map((t) => `constrain-${t}`);
 /** Sketch tools whose command id isn't simply "tool-" and the tool's name. */
-const SKETCH_TOOL_IDS: Record<string, string> = { polygonC: "tool-polygonc", polygonE: "tool-polygone" };
+const SKETCH_TOOL_IDS: Record<string, string> = { polygonC: "tool-polygonc", polygonE: "tool-polygone", slotW: "tool-slotw", slotO: "tool-sloto", lineM: "tool-linem", slotC: "tool-slotc", slotA: "tool-slota", slotP: "tool-slotp" };
 
 /**
  * Which tools sit on the toolbar and which wait in the group menu depends on
@@ -362,7 +362,37 @@ const wheelX = (e: React.WheelEvent<HTMLElement>) => {
   if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY;
 };
 
+/** The ribbon: workspace tabs over the tool groups of the chosen tab (a sketch shows its own contextual tab). */
 export function Toolbar() {
+  const mode = useApp((s) => s.mode);
+  const tab = useApp((s) => s.ribbonTab);
+  const sketching = mode.kind === "sketch";
+  const tabs: { id: "solid" | "surface" | "tools"; label: string }[] = [
+    { id: "solid", label: "Solid" },
+    { id: "surface", label: "Surface" },
+    { id: "tools", label: "Tools" },
+  ];
+  return (
+    <div className="ribbon">
+      <div className="ribbon__tabs" role="tablist" aria-label="Workspace">
+        {sketching ? (
+          <button role="tab" aria-selected className="ribbon__tab ribbon__tab--sketch is-active">
+            Sketch
+          </button>
+        ) : (
+          tabs.map((t) => (
+            <button key={t.id} role="tab" aria-selected={tab === t.id} className={`ribbon__tab ${tab === t.id ? "is-active" : ""}`} onClick={() => useApp.setState({ ribbonTab: t.id })}>
+              {t.label}
+            </button>
+          ))
+        )}
+      </div>
+      <RibbonBody tab={tab} />
+    </div>
+  );
+}
+
+function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
   const mode = useApp((s) => s.mode);
   const profile = useApp((s) => s.prefs.profile);
   const labels = useApp((s) => s.prefs.toolLabels);
@@ -430,12 +460,29 @@ export function Toolbar() {
         </div>
         <span className="toolgroup__label">Start</span>
       </div>
-      <Group label="Create" ids={create.primary} more={create.more} />
-      <Group label="Modify" ids={modify.primary} more={modify.more} />
-      <Group label="Assemble" ids={[]} more={["#Components", "make-component", "ground", "#Motion", "joint", "#Check", "interference", "clear-interference", "explode", "component-colors"]} />
-      <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
-      <Group label="Surface" ids={[]} more={["#Make", "surface-patch", "surface-ruled", "surface-offset", "surface-extend", "#Edit", "surface-trim", "surface-untrim", "surface-stitch", "surface-unstitch", "surface-merge", "surface-reverse", "#To a solid", "surface-thicken"]} />
-      <Group label="Inspect" ids={["measure", "section"]} more={["#Measure", "measure", "section", "check-geometry", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra", "#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
+      {tab === "solid" && (
+        <>
+          <Group label="Create" ids={create.primary} more={create.more} />
+          <Group label="Modify" ids={modify.primary} more={modify.more} />
+          <Group label="Assemble" ids={[]} more={["#Components", "make-component", "ground", "#Motion", "joint", "#Check", "interference", "clear-interference", "explode", "component-colors"]} />
+          <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
+          <Group label="Inspect" ids={["measure", "section"]} more={["#Measure", "measure", "section", "check-geometry", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra", "#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
+        </>
+      )}
+      {tab === "surface" && (
+        <>
+          <Group label="Create" ids={["extrude", "revolve", "sweep", "loft", "surface-patch", "surface-ruled"]} more={["#Make", "extrude", "revolve", "sweep", "loft", "surface-patch", "surface-ruled", "surface-offset", "surface-extend"]} />
+          <Group label="Modify" ids={["surface-trim", "surface-untrim", "surface-stitch", "surface-unstitch", "surface-merge", "surface-reverse", "surface-thicken"]} more={["#Edit", "surface-offset", "surface-extend", "surface-trim", "surface-untrim", "surface-stitch", "surface-unstitch", "surface-merge", "surface-reverse", "#To a solid", "surface-thicken"]} />
+          <Group label="Inspect" ids={["curvature", "zebra", "measure"]} more={["#Surface quality", "curvature", "zebra", "min-radius", "#Measure", "measure", "check-geometry"]} />
+        </>
+      )}
+      {tab === "tools" && (
+        <>
+          <Group label="Inspect" ids={["measure", "section", "check-geometry", "overhang"]} more={["#Measure", "measure", "section", "check-geometry", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra"]} />
+          <Group label="Display" ids={["display-shaded", "display-edges", "display-wire", "display-xray", "ortho"]} more={["#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
+          <Group label="Make" ids={["send-to-slicer", "export-3mf", "export-stl", "export-step"]} more={["send-to-slicer", "export-step", "export-3mf", "export-stl", "screenshot", "history"]} />
+        </>
+      )}
       </div>
       <div className="toolbar__fixed">
         <Group label="Insert" ids={["parts"]} more={["#Ready-made", "parts", "#From a file", "import"]} />

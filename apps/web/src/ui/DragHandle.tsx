@@ -141,7 +141,7 @@ function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: stri
                 if (d.type !== "extrude") return;
                 d.distance = String(Math.round(Math.abs(x) * 1000) / 1000);
                 d.flip = flip0 !== x < 0;
-                // As in Fusion: pulled out of the face it joins, pushed into the body it cuts.
+                // Pulled out of the face it joins, pushed into the body it cuts.
                 if (onFace && (d.op === "join" || d.op === "cut")) d.op = d.flip ? "cut" : "join";
               },
               "drag" + f.id,

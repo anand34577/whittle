@@ -135,8 +135,9 @@ await step("06b-export-3mf", async () => {
   await d.saveAs(path);
   console.log("    downloaded", d.suggestedFilename());
 });
-await step("07-paper-theme", async () => {
-  await page.getByTitle("Light theme").click();
+await step("07-theme-toggle", async () => {
+  // The default is the light default theme, so the button offers the dark one; either way it flips.
+  await page.getByTitle(/(Light|Dark) theme/).click();
   await page.waitForTimeout(400);
 });
 

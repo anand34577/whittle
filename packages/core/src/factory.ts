@@ -31,7 +31,7 @@ export function uid(prefix = ""): Id {
 }
 
 /** Materials-inspired body palette: bone, steel, bronze, sage, clay, slate. */
-export const BODY_COLORS = ["#cfc8bb", "#8ea4b3", "#b98d5f", "#8aa186", "#b07c72", "#7a87a3", "#c2a96a"];
+export const BODY_COLORS = ["#b7bfc9", "#8ea4b3", "#b98d5f", "#8aa186", "#b07c72", "#7a87a3", "#c2a96a"];
 
 export function newDocument(name = "Untitled", units: LengthUnit = "mm"): WhittleDocument {
   const now = new Date().toISOString();
@@ -177,7 +177,7 @@ export function makeHole(doc: WhittleDocument): Feature {
     through: true,
     headDiameter: "9",
     headDepth: "3",
-    tipAngle: "118", // a blind hole ends in a drill point, as Fusion's does
+    tipAngle: "118", // a blind hole ends in a drill point
   };
 }
 
