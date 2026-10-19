@@ -22,7 +22,7 @@ fillets and real threads, not approximate meshes. On top of it is an interface b
 the next step is always on screen, every number accepts a formula, and when something can't be built, Whittle says
 why and suggests a fix.
 
-> **Status: 0.12, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
+> **Status: 0.13, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
 > work end to end. Full assemblies (mates, bills of materials), sheet metal and CAM are on the
 > [roadmap](PLAN.md#10-roadmap).
 
