@@ -209,6 +209,20 @@ export function addLines(pts: (Vec2 | Id)[], closed: boolean, at: (p: Vec2 | Id)
   });
 }
 
+/** A line held symmetric about its first point (a midpoint line): the point is its middle, the other end is where the pointer went. */
+export function addMidpointLine(c: Vec2 | Id, end: Vec2 | Id, at: (p: Vec2 | Id) => Vec2) {
+  drawMutate("Draw midpoint line", (sk) => {
+    const before = new Set((sk.geometry ?? []).map((g) => g.id));
+    const [cp, ep] = [at(c), at(end)];
+    if (Math.hypot(ep[0] - cp[0], ep[1] - cp[1]) < 1e-9) return;
+    const id = addLine(sk, [2 * cp[0] - ep[0], 2 * cp[1] - ep[1]], end);
+    addConstraint(sk, "midpoint", [typeof c === "string" ? c : addPoint(sk, cp), id]);
+    if (Math.abs(cp[1] - ep[1]) < AXIS_TOL) addConstraint(sk, "horizontal", [id]);
+    else if (Math.abs(cp[0] - ep[0]) < AXIS_TOL) addConstraint(sk, "vertical", [id]);
+    joinNewPoints(sk, before);
+  });
+}
+
 export function addArcGeometry(a: Vec2 | Id, b: Vec2 | Id, through: Vec2) {
   let failed = false;
   drawMutate("Draw arc", (sk) => {
@@ -301,6 +315,7 @@ export const CONSTRAINT_PICKS: Record<ConstraintType, string> = {
   symmetric: "click two points, then the line (or point) to mirror them about",
   midpoint: "click a point, then a line",
   collinear: "click two lines",
+  concentric: "click two circles or arcs",
   distance: "click a line, or two items",
   radius: "click a circle or an arc",
   diameter: "click a circle",
@@ -308,7 +323,7 @@ export const CONSTRAINT_PICKS: Record<ConstraintType, string> = {
 };
 
 /** The most picks a constraint takes: with this many and still no fit, the picks start over. */
-const MAX_PICKS: Record<ConstraintType, number> = { coincident: 2, horizontal: 2, vertical: 2, parallel: 2, perpendicular: 2, tangent: 2, equal: 2, fixed: 1, symmetric: 3, midpoint: 2, collinear: 2, distance: 2, radius: 1, diameter: 1, angle: 2 };
+const MAX_PICKS: Record<ConstraintType, number> = { coincident: 2, horizontal: 2, vertical: 2, parallel: 2, perpendicular: 2, tangent: 2, equal: 2, fixed: 1, symmetric: 3, midpoint: 2, collinear: 2, concentric: 2, distance: 2, radius: 1, diameter: 1, angle: 2 };
 
 /**
  * A constraint button: applies to the selection when it fits; otherwise waits, and applies as soon as the picked
@@ -901,4 +916,15 @@ export function pasteSketchClip() {
     useApp.setState({ selectedEntity: e.id });
   }
   if (added.length) useApp.setState({ sketchSel: added });
+}
+
+/** Copies of the selected geometry evenly round a center: count, sweep angle and the center's X, Y. */
+export async function circularPatternSelection() {
+  const sel = sketchSelection();
+  const u = useApp.getState().doc.units;
+  const r = await askNumbers("Circular pattern", `Copies, sweep (°), center X, center Y (center in ${u})`, "6, 360, 0, 0", "The original counts as one copy. 360° spaces them evenly all the way round; a smaller sweep fans them out.", ["number", "number", "length", "length"]);
+  if (!r) return;
+  const sweep = r[1]!;
+  if (!sweep) return void toast("info", "The sweep angle can't be zero.");
+  copyEdit("Circular pattern", (sk) => circularPattern(sk, sel, Math.round(r[0]!), [r[2]!, r[3]!], sweep));
 }

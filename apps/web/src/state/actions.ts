@@ -823,6 +823,16 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f && f.type === "extrude" && f.startFace === null && p?.kind === "face") {
+    const ref = faceRefFromPick(p);
+    if (!ref) return;
+    if (ref.surface !== "PLANE") return toast("warn", "Pick a flat face to start from.");
+    mutate("Pick start face", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (x && x.type === "extrude") x.startFace = ref;
+    });
+    return;
+  }
   if (f && f.type === "extrude" && f.extent === "face" && p?.kind === "face") {
     const ref = faceRefFromPick(p);
     if (!ref) return;
@@ -997,6 +1007,20 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f && (f.type === "fillet" || f.type === "chamfer") && p?.kind === "face") {
+    // A face stands for all its boundary edges (clicking it again takes them back out).
+    const body = pickableBodies().find((b) => b.id === p.bodyId);
+    const refs = (body?.faceEdges[p.index] ?? []).map((i) => edgeRefFromPick({ kind: "edge", bodyId: p.bodyId, index: i }, [body!])).filter((x): x is EdgeRef => !!x);
+    if (!refs.length) return;
+    mutate("Pick face edges", (d) => {
+      const x = d.features.find((y) => y.id === f.id);
+      if (!x || (x.type !== "fillet" && x.type !== "chamfer")) return;
+      const has = (r: EdgeRef) => x.edges.findIndex((e) => d3(e.mid, r.mid) < 1e-6);
+      if (refs.every((r) => has(r) >= 0)) x.edges = x.edges.filter((e) => !refs.some((r) => d3(e.mid, r.mid) < 1e-6));
+      else for (const r of refs) if (has(r) < 0) x.edges.push(r);
+    });
+    return;
+  }
   if (f && (f.type === "fillet" || f.type === "chamfer") && p?.kind === "edge") {
     const ref = edgeRefFromPick(p);
     if (!ref) return;
@@ -1041,7 +1065,7 @@ export function handlePick(p: Pick | null, additive: boolean) {
 }
 
 export type { Feature };
-/** Save the camera as a named view in the design (Fusion's Named Views). */
+/** Save the camera as a named view in the design (named views). */
 export async function saveNamedView() {
   const vp = viewportRef.current;
   if (!vp) return;

@@ -147,6 +147,13 @@ function constraintPrims(sk: SketchFeature, ev: Evaluator, radius: (id: Id) => n
         else add({ type: "point_on_line_pl", p_id: p, l_id: q });
         break;
       }
+      case "concentric": {
+        // Same center: join the two centers.
+        const g0 = geomById(sk, r0);
+        const g1 = geomById(sk, r1);
+        if (g0 && g1 && "c" in g0 && "c" in g1) add({ type: "p2p_coincident", p1_id: g0.c, p2_id: g1.c });
+        break;
+      }
       case "collinear": {
         // Both ends of the second line on the first.
         const g = geomById(sk, q);

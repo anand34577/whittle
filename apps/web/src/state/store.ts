@@ -47,7 +47,7 @@ export type Pick =
  * "path" draws an open polyline (for sweeps and guides). "segment", "arc" and
  * "pcircle" draw constraint-driven geometry; "trim" and "extend" edit it.
  */
-export type SketchTool = EntityType | "select" | "path" | "crect" | "rect3" | "circle2" | "circle3" | "dimension" | "project" | "spline" | "sfillet" | "schamfer" | "gpoint" | "segment" | "arc" | "tarc" | "carc" | "conic" | "polygonC" | "polygonE" | "pcircle" | "trim" | "extend" | "cspline" | "earc" | "tan2c" | "tan3c";
+export type SketchTool = EntityType | "select" | "path" | "crect" | "rect3" | "circle2" | "circle3" | "dimension" | "project" | "spline" | "sfillet" | "schamfer" | "gpoint" | "segment" | "arc" | "tarc" | "carc" | "conic" | "polygonC" | "polygonE" | "pcircle" | "slotW" | "slotO" | "slotC" | "slotA" | "slotP" | "lineM" | "trim" | "extend" | "cspline" | "earc" | "tan2c" | "tan3c";
 
 export type Mode =
   | { kind: "model" }
@@ -67,6 +67,23 @@ export interface ViewSettings {
   /** Exploded view: 0 (together) to 1 (fully apart). A display effect only; the model is untouched. */
   explode?: number;
 }
+
+export interface SketchViewSettings {
+  /** Snap new points to the grid (points on existing geometry still attract). */
+  snap: boolean;
+  /** Show the dimension values on the canvas. */
+  dims: boolean;
+  /** Show constraint glyphs (horizontal, tangent...) on the canvas. */
+  constraints: boolean;
+  /** Cut the model away at the sketch plane so the profile is not hidden behind the part. */
+  slice: boolean;
+  /** Show the points of constraint geometry (ends, centers). */
+  points: boolean;
+  /** Shade the closed profiles. */
+  shading: boolean;
+}
+
+export const DEFAULT_SKETCH_VIEW: SketchViewSettings = { snap: true, dims: true, constraints: true, slice: false, points: true, shading: true };
 
 export interface Session {
   featureId: Id;
@@ -138,6 +155,10 @@ export interface AppState {
   coach: string | false;
   toasts: Toast[];
   viewRequest: { kind: "home" | "fit" | "normal"; at: number } | null;
+  /** The sketch palette: what the sketch canvas shows and snaps to (the grid itself is `view.grid`). */
+  sketchView: SketchViewSettings;
+  /** Which ribbon tab shows outside a sketch. */
+  ribbonTab: "solid" | "surface" | "tools";
   /** Frame the model once the next rebuild arrives (after inserting things). */
   fitOnRegen: boolean;
   /** What a click selects in the model: anything, or only bodies, faces or edges. */
@@ -172,6 +193,8 @@ export const useApp = create<AppState>(() => ({
   theme: resolveTheme(initialPrefs.theme),
   prefs: initialPrefs,
   view: { display: "edges", section: null, analysis: null, grid: true, ortho: false },
+  sketchView: DEFAULT_SKETCH_VIEW,
+  ribbonTab: "solid",
   measure: [],
   radial: null,
   panel: null,
@@ -554,6 +577,10 @@ export function setPrefs(patch: Partial<Prefs>) {
 
 export function requestView(kind: "home" | "fit" | "normal") {
   set({ viewRequest: { kind, at: Date.now() } });
+}
+
+export function setSketchView(patch: Partial<SketchViewSettings>) {
+  set({ sketchView: { ...get().sketchView, ...patch } });
 }
 
 export function setView(patch: Partial<ViewSettings>) {

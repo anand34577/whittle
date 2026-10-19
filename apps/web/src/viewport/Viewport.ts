@@ -363,10 +363,10 @@ export class Viewport {
     (this.scene.background as THREE.Texture | null)?.dispose();
     this.scene.background = tex;
     this.scene.environmentIntensity = this.theme.envIntensity;
-    this.hemi.color.set(name === "paper" ? "#ffffff" : "#f4efe6");
-    this.hemi.groundColor.set(name === "paper" ? "#b9b2a5" : "#3b3833");
+    this.hemi.color.set(name === "paper" || name === "daylight" ? "#ffffff" : "#f4efe6");
+    this.hemi.groundColor.set(name === "paper" || name === "daylight" ? "#b9b2a5" : "#3b3833");
     for (const b of this.bodies.values()) (b.edges.material as LineMaterial).color.set(this.theme.edge);
-    (this.shadow.material as THREE.MeshBasicMaterial).opacity = name === "paper" ? 0.22 : 0.5;
+    (this.shadow.material as THREE.MeshBasicMaterial).opacity = name === "paper" || name === "daylight" ? 0.22 : 0.5;
     this.gridStep = 0;
     this.buildPlanes();
     this.invalidate();
@@ -777,7 +777,7 @@ export class Viewport {
     this.bodies.clear();
     for (const b of list) {
       const m = meta[b.id];
-      const v = this.makeBodyView(b, m?.color ?? "#cfc8bb", false, m?.look, m?.opacity);
+      const v = this.makeBodyView(b, m?.color ?? "#b7bfc9", false, m?.look, m?.opacity);
       v.visible = m?.visible !== false;
       if (!v.visible) v.mesh.visible = v.edges.visible = false;
       this.bodies.set(b.id, v);

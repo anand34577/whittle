@@ -334,6 +334,21 @@ describe("constraint solving", () => {
     expect(volume(r)).toBeCloseTo((40 * 20 - 10 * 5) * 10, 4);
   });
 
+  it("puts two circles on one center (concentric)", () => {
+    const { doc, sk } = setup();
+    const outer = addCircle(sk, [0, 0], 20);
+    const inner = addCircle(sk, [3, 2], 8);
+    ok(addConstraint(sk, "coincident", [(sk.geometry!.find((g) => g.id === outer) as { c: string }).c, "origin"]));
+    ok(addConstraint(sk, "concentric", [outer, inner]));
+    ok(addConstraint(sk, "radius", [outer], "20"));
+    ok(addConstraint(sk, "radius", [inner], "8"));
+    extrude(doc, sk);
+    const r = run(doc);
+    const sol = r.sketches[0]!.solution!;
+    expect(sol.state).toBe("full");
+    expect(volume(r)).toBeCloseTo(Math.PI * (400 - 64) * 10, 2);
+  });
+
   it("keeps old files and plain shape sketches working", () => {
     const doc = migrate({ schema: 1, name: "Old", units: "mm", parameters: [], features: [], bodies: {}, rollback: null });
     expect(doc.schema).toBe(SCHEMA_VERSION);

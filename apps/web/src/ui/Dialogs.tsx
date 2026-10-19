@@ -39,7 +39,7 @@ import { ProfilePicker } from "./Settings";
 import { Modal } from "./Modal";
 import { Spinner } from "./feedback";
 export { Modal };
-import type { ExportFormat } from "@whittle/kernel";
+import type { DrawingSettings, ExportFormat } from "@whittle/kernel";
 
 
 /* ───────────────────────────── Parameters ───────────────────────────── */
@@ -299,6 +299,37 @@ function SlicerCard() {
   );
 }
 
+/** The settings the 2D drawing export uses: sheet, scale, projection, and what to add. */
+function DrawingOptions() {
+  const d: DrawingSettings = useApp((s) => s.prefs.drawing) ?? {};
+  const set = (patch: Partial<DrawingSettings>) => setPrefs({ drawing: { ...d, ...patch } });
+  const seg = <T extends string | number | undefined>(label: string, value: T, options: [T, string, string?][], onPick: (v: T) => void) => (
+    <div className="export-quality" role="radiogroup" aria-label={label}>
+      <span className="export-quality__label">{label}</span>
+      <div className="seg">
+        {options.map(([v, text, title]) => (
+          <button key={String(v)} type="button" role="radio" aria-checked={value === v} className={`seg__btn ${value === v ? "is-on" : ""}`} title={title} onClick={() => onPick(v)}>
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <details className="export-drawing">
+      <summary className="export-quality__label">
+        2D drawing options <small>sheet, scale, projection, section view, parts list</small>
+      </summary>
+      {seg("Sheet", d.sheet ?? "A3", [["A4", "A4"], ["A3", "A3"], ["A2", "A2"], ["A1", "A1"]], (v) => set({ sheet: v }))}
+      {seg<number | undefined>("Scale", d.scale, [[undefined, "Auto", "The largest standard scale that fits"], [0.5, "2:1"], [1, "1:1"], [2, "1:2"], [5, "1:5"], [10, "1:10"], [20, "1:20"]], (v) => set({ scale: v }))}
+      {seg("Projection", d.angle ?? "third", [["third", "Third angle", "The top view above the front: ANSI and most of North America"], ["first", "First angle", "The top view below the front: ISO and most of Europe and Asia"]], (v) => set({ angle: v }))}
+      <Checkbox className="checkrow" checked={!!d.section} onChange={(v) => set({ section: v })} label="Section view A-A (cut through the middle, with hatching)" />
+      <Checkbox className="checkrow" checked={!!d.parts} onChange={(v) => set({ parts: v })} label="Parts list (name, volume, material)" />
+      <Checkbox className="checkrow" checked={d.hidden !== false} onChange={(v) => set({ hidden: v })} label="Hidden lines (dashed)" />
+    </details>
+  );
+}
+
 export function ExportDialog() {
   const bodies = useApp((s) => s.regen?.bodies.length ?? 0);
   useApp((s) => s.selection);
@@ -312,7 +343,7 @@ export function ExportDialog() {
     { f: "obj", title: "OBJ", sub: "Rendering & visualisation", body: "Opens in virtually every 3D modelling, animation and rendering app." },
     { f: "3mf", title: "3MF", sub: "3D printing", body: "The best choice for modern 3D-printing slicers. Keeps units, part names and colors." },
     { f: "stl", title: "STL", sub: "3D printing & meshes", body: "The universal mesh format. Works with every slicer, printing service and mesh tool." },
-    { f: "drawing", ext: "svg", title: "2D drawing (SVG)", sub: "Drawings & documentation", body: "Front, top, right and isometric views on an A3 sheet with hidden lines, overall dimensions and a title block. Opens in any browser or vector editor; print to PDF." },
+    { f: "drawing", ext: "svg", title: "2D drawing (SVG)", sub: "Drawings & documentation", body: "Front, top, right and isometric views with hidden lines, overall dimensions and a title block, on an A4 to A1 sheet at a standard scale. Optional section view and parts list (see 2D drawing options). Opens in any browser or vector editor; print to PDF." },
     { f: "ply", title: "PLY", sub: "Scanning & mesh analysis", body: "For point-cloud and mesh-analysis tools and scan-comparison workflows." },
   ];
   return (
@@ -339,6 +370,7 @@ export function ExportDialog() {
               ))}
             </div>
           </div>
+          <DrawingOptions />
           <SlicerCard />
           {items.map((it) => (
             <button

@@ -1,0 +1,711 @@
+/*
+ * The Daylight look: a light-grey (or charcoal) interface with a blue accent, a tabbed ribbon,
+ * a flat browser, a rounded-icon timeline and a light 3D canvas.
+ * Only the two "daylight" themes use it; the other themes keep the original frame.
+ */
+
+/* The ribbon's tab strip shows in every theme. */
+:root {
+  --h-tabs: 28px;
+}
+
+/* ── Daylight ─────────────────────────────────────────────── */
+[data-theme="daylight"] {
+  color-scheme: light;
+  --font-ui: "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --bg-0: #dde0e4;
+  --bg-1: #f5f6f7;
+  --bg-2: #ffffff;
+  --bg-3: #e3e6e9;
+  --bg-inset: #eceef0;
+  --line: #c9ced4;
+  --line-soft: #dadde1;
+  --line-strong: #a7aeb6;
+  --text-1: #20242a;
+  --text-2: #475059;
+  --text-3: #76808a;
+  --accent: #0696d7;
+  --accent-hover: #057fb8;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(6 150 215 / 0.14);
+  --select: #0696d7;
+  --select-soft: rgb(6 150 215 / 0.14);
+  --ok: #2f9a4a;
+  --warn: #c98a05;
+  --danger: #d33a2f;
+  --danger-soft: rgb(211 58 47 / 0.1);
+  --shadow: 0 1px 2px rgb(20 30 40 / 0.1), 0 6px 18px rgb(20 30 40 / 0.1);
+  --shadow-pop: 0 10px 32px rgb(20 30 40 / 0.22), 0 0 0 1px var(--line);
+  --tick: rgb(32 36 42 / 0.16);
+  --r-1: 2px;
+  --r-2: 3px;
+  --r-3: 4px;
+  --h-title: 38px;
+  --h-tabs: 30px;
+  --h-timeline: 54px;
+}
+
+/* ── Daylight dark ──────────────────────────────────────────────── */
+[data-theme="daylightdark"] {
+  color-scheme: dark;
+  --bg-0: #25282c;
+  --bg-1: #33373c;
+  --bg-2: #3e4349;
+  --bg-3: #4a5057;
+  --bg-inset: #2b2e33;
+  --line: #4d535a;
+  --line-soft: #41464c;
+  --line-strong: #666d76;
+  --text-1: #eceef0;
+  --text-2: #bcc2c9;
+  --text-3: #8e96a0;
+  --accent: #0696d7;
+  --accent-hover: #2aaae6;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(6 150 215 / 0.2);
+  --select: #3fb4f0;
+  --select-soft: rgb(63 180 240 / 0.18);
+  --ok: #6cc27c;
+  --warn: #e6b13a;
+  --danger: #f0665a;
+  --danger-soft: rgb(240 102 90 / 0.16);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.35);
+  --shadow-pop: 0 12px 36px rgb(0 0 0 / 0.5), 0 0 0 1px var(--line);
+  --tick: rgb(236 238 240 / 0.16);
+  --h-title: 38px;
+  --h-tabs: 30px;
+  --h-timeline: 54px;
+}
+
+/* The default accent in the Daylight themes is blue. */
+[data-theme^="daylight"][data-accent="orange"] {
+  --accent: #0696d7;
+  --accent-hover: #057fb8;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(6 150 215 / 0.16);
+}
+[data-theme="daylightdark"][data-accent="orange"] {
+  --accent-hover: #2aaae6;
+}
+
+/* ═════════════════════════ Layout ═════════════════════════ */
+
+.app {
+  grid-template-rows: var(--h-title) calc(var(--h-tabs) + var(--h-toolbar)) minmax(0, 1fr) var(--h-timeline) var(--h-status);
+  grid-template-columns: var(--w-browser) minmax(0, 1fr) var(--w-panel);
+}
+
+/* ═════════════════════════ Application bar ═════════════════════════ */
+
+[data-theme^="daylight"] .titlebar {
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--line);
+  gap: var(--sp-2);
+}
+[data-theme^="daylight"] .brand__word {
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+[data-theme^="daylight"] .brand svg {
+  filter: none;
+  color: var(--text-1);
+}
+[data-theme^="daylight"] .brand svg path:last-child {
+  stroke: var(--accent);
+}
+[data-theme^="daylight"] .iconbtn {
+  border-radius: var(--r-2);
+}
+[data-theme^="daylight"] .iconbtn:hover:not(:disabled),
+[data-theme^="daylight"] .iconbtn.is-on {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+[data-theme^="daylight"] .iconbtn.is-on {
+  color: var(--accent);
+}
+
+/* The design name is a document tab: raised, with a blue top rule. */
+[data-theme^="daylight"] .docname {
+  flex: 0 1 auto;
+  min-width: 220px;
+  justify-content: space-between;
+  margin-left: var(--sp-3);
+  align-self: flex-end;
+  height: calc(var(--h-title) - 6px);
+  padding: 0 14px;
+  gap: 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-top: 2px solid var(--accent);
+  border-radius: 4px 4px 0 0;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 1;
+}
+[data-theme^="daylight"] .docname__input {
+  font-weight: 600;
+  color: var(--text-1);
+  text-align: left;
+}
+[data-theme^="daylight"] .docname__state {
+  font-size: 11px;
+}
+[data-theme^="daylight"] .titlebar__right {
+  margin-left: auto;
+}
+[data-theme^="daylight"] .searchbtn {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--text-2);
+}
+[data-theme^="daylight"] .searchbtn:hover {
+  border-color: var(--accent);
+}
+
+/* ═════════════════════════ Ribbon ═════════════════════════ */
+
+.ribbon {
+  grid-area: tools;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.ribbon > .toolbar {
+  grid-area: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ribbon__tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  height: var(--h-tabs);
+  padding: 0 var(--sp-3);
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--line);
+}
+.ribbon__tab {
+  position: relative;
+  height: 26px;
+  padding: 0 18px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  margin-bottom: -1px;
+}
+.ribbon__tab:hover {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--bg-1) 55%, transparent);
+}
+.ribbon__tab.is-active {
+  color: var(--text-1);
+  background: var(--bg-1);
+  border-color: var(--line);
+  height: 27px;
+}
+.ribbon__tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--bg-1);
+}
+.ribbon__tab--sketch {
+  color: var(--accent);
+}
+
+[data-theme^="daylight"] .toolbar {
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 var(--bg-2) inset;
+  padding: 0 var(--sp-3);
+  gap: 0;
+}
+[data-theme^="daylight"] .toolbar--sketch {
+  background: var(--bg-1);
+  border-bottom: 2px solid var(--accent);
+}
+[data-theme^="daylight"] .toolgroup {
+  padding: 4px 8px 2px;
+}
+[data-theme^="daylight"] .toolgroup + .toolgroup::before,
+[data-theme^="daylight"] .toolbar__mode + .toolgroup::before {
+  top: 8px;
+  bottom: 6px;
+  background: var(--line);
+}
+[data-theme^="daylight"] .toolgroup__label,
+[data-theme^="daylight"] .groupmenu__btn {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-2);
+}
+[data-theme^="daylight"] .groupmenu__btn:hover,
+[data-theme^="daylight"] .groupmenu__btn.is-open {
+  color: var(--text-1);
+  background: var(--bg-3);
+}
+[data-theme^="daylight"] .tool {
+  min-width: 50px;
+  border-radius: var(--r-2);
+  color: var(--text-1);
+  border: 1px solid transparent;
+}
+[data-theme^="daylight"] .tool svg {
+  color: var(--text-1);
+}
+[data-theme^="daylight"] .tool:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--line);
+}
+[data-theme^="daylight"] .tool.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+[data-theme^="daylight"] .tool.is-active svg {
+  color: var(--accent);
+}
+[data-theme^="daylight"] .tool__label {
+  font-size: 11px;
+}
+[data-theme^="daylight"] .toolbar .pill--accent {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 3px;
+}
+[data-theme^="daylight"] .btn--accent {
+  border-radius: var(--r-2);
+  font-weight: 600;
+}
+[data-theme^="daylight"] .toolbar__finish {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+[data-theme^="daylight"] .split__more:hover {
+  background: var(--bg-3);
+}
+
+/* ═════════════════════════ Menus and pop-ups ═════════════════════════ */
+
+[data-theme^="daylight"] .groupmenu__pop {
+  border-radius: var(--r-3);
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-pop);
+}
+[data-theme^="daylight"] .groupmenu__head {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+  background: var(--bg-inset);
+}
+[data-theme^="daylight"] .groupmenu__item:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+[data-theme^="daylight"] .groupmenu__item:hover:not(:disabled) small,
+[data-theme^="daylight"] .groupmenu__item:hover:not(:disabled) kbd {
+  color: rgb(255 255 255 / 0.85);
+}
+
+/* ═════════════════════════ Browser ═════════════════════════ */
+
+[data-theme^="daylight"] .browser {
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+}
+[data-theme^="daylight"] .browser::before {
+  content: "Browser";
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: block;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--bg-0);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line);
+}
+[data-theme^="daylight"] .tree__head {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-1);
+  padding-block: 6px;
+}
+[data-theme^="daylight"] .tree__count {
+  background: var(--bg-3);
+  border-radius: 9px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+[data-theme^="daylight"] .tree__row {
+  border-radius: 0;
+  font-size: 12.5px;
+}
+[data-theme^="daylight"] .tree__row:hover {
+  background: var(--bg-3);
+}
+[data-theme^="daylight"] .tree__row.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ═════════════════════════ Canvas overlays ═════════════════════════ */
+
+/* The navigation bar along the bottom of the canvas. */
+[data-theme^="daylight"] .dock {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  box-shadow: var(--shadow);
+  backdrop-filter: none;
+  padding: 2px 4px;
+}
+[data-theme^="daylight"] .dock__group + .dock__group {
+  border-left: 1px solid var(--line);
+}
+[data-theme^="daylight"] .dock__btn {
+  color: var(--text-1);
+  border-radius: var(--r-2);
+}
+[data-theme^="daylight"] .dock__btn:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+[data-theme^="daylight"] .dock__btn.is-on,
+[data-theme^="daylight"] .dock__btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+[data-theme^="daylight"] .context-bar {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+/* The view cube: pale faces, blue when hovered. */
+[data-theme^="daylight"] .orientcube__face {
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
+  color: var(--text-2);
+  border: 1px solid var(--line-strong);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+[data-theme="daylightdark"] .orientcube__face {
+  background: color-mix(in srgb, var(--bg-3) 92%, transparent);
+  color: var(--text-1);
+}
+[data-theme^="daylight"] .orientcube__zone:hover {
+  background: var(--accent);
+  opacity: 0.7;
+}
+[data-theme^="daylight"] .orientcube__home {
+  color: var(--text-2);
+}
+[data-theme^="daylight"] .orientcube__home:hover {
+  color: var(--accent);
+}
+
+/* ═════════════════════════ Inspector (properties panel) ═════════════════════════ */
+
+/* A header with the item's icon on a blue chip, bar-style section titles, label-and-value rows, an OK/Cancel footer. */
+[data-theme^="daylight"] .panel {
+  background: var(--bg-1);
+  border-left: 1px solid var(--line);
+}
+[data-theme^="daylight"] .panel__head {
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+[data-theme^="daylight"] .panel__head::before {
+  content: "Inspector";
+  position: absolute;
+  top: 3px;
+  right: 12px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+[data-theme^="daylight"] .panel__head > svg {
+  box-sizing: content-box;
+  margin: 0;
+  padding: 7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+[data-theme^="daylight"] .panel__head h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+[data-theme^="daylight"] .panel__head p {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+[data-theme^="daylight"] .panel__body {
+  padding: 0;
+  background: var(--bg-1);
+}
+
+/* Sections are stacked groups under grey title bars. */
+[data-theme^="daylight"] .panel__section {
+  padding: 0 0 10px;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+}
+[data-theme^="daylight"] .panel__section + .panel__section {
+  border-top: 0;
+  padding-top: 0;
+}
+[data-theme^="daylight"] .panel__section > * {
+  margin-inline: 14px;
+}
+[data-theme^="daylight"] .panel__section > * + * {
+  margin-top: 8px;
+}
+[data-theme^="daylight"] .panel .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 10px;
+  padding: 6px 14px;
+  background: var(--bg-3);
+  border-block: 1px solid var(--line);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-weight: 600;
+  color: var(--text-1);
+}
+[data-theme^="daylight"] .panel .eyebrow::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--text-2);
+}
+[data-theme^="daylight"] .panel__section > .eyebrow {
+  margin-inline: 0;
+}
+
+/* Fields: a quiet label on the left, a flat white value box on the right. */
+[data-theme^="daylight"] .field {
+  grid-template-columns: 104px 1fr;
+}
+[data-theme^="daylight"] .field__label {
+  color: var(--text-2);
+  font-size: 12px;
+}
+[data-theme^="daylight"] .field__box,
+[data-theme^="daylight"] .input,
+[data-theme^="daylight"] .select {
+  height: 26px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.05);
+}
+[data-theme="daylightdark"] .field__box,
+[data-theme="daylightdark"] .input,
+[data-theme="daylightdark"] .select {
+  background: var(--bg-inset);
+}
+[data-theme^="daylight"] .field__box:hover {
+  border-color: var(--line-strong);
+}
+[data-theme^="daylight"] .field__box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+[data-theme^="daylight"] .field__input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+[data-theme^="daylight"] .field__unit {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  background: var(--bg-3);
+  border-left: 1px solid var(--line);
+  color: var(--text-2);
+}
+
+/* Read-outs alternate like a spec table. */
+[data-theme^="daylight"] .stats {
+  gap: 0;
+  margin-inline: 0 !important;
+  font-size: 12px;
+}
+[data-theme^="daylight"] .stats dt,
+[data-theme^="daylight"] .stats dd {
+  padding: 5px 14px;
+  min-height: 26px;
+  align-items: center;
+}
+[data-theme^="daylight"] .stats dt:nth-of-type(odd),
+[data-theme^="daylight"] .stats dd:nth-of-type(odd) {
+  background: var(--bg-inset);
+}
+[data-theme^="daylight"] .stats dt {
+  color: var(--text-2);
+}
+[data-theme^="daylight"] .stats {
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+[data-theme^="daylight"] .stats dd {
+  min-width: 0;
+  overflow: hidden;
+}
+[data-theme^="daylight"] .stats dd > button,
+[data-theme^="daylight"] .stats dd .select {
+  min-width: 0;
+  max-width: 130px;
+}
+
+/* Suggestions become a plain list with hairlines. */
+[data-theme^="daylight"] .nextsteps {
+  gap: 0;
+  margin-inline: 0 !important;
+}
+[data-theme^="daylight"] .nextstep {
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 14px;
+}
+[data-theme^="daylight"] .nextstep:hover {
+  background: var(--accent-soft);
+  border-color: var(--line-soft);
+}
+[data-theme^="daylight"] .nextstep b {
+  font-size: 12.5px;
+}
+
+/* Buttons and notes inside the panel. */
+[data-theme^="daylight"] .panel .btn {
+  border-radius: 3px;
+  background: var(--bg-2);
+}
+[data-theme^="daylight"] .panel .btn:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+[data-theme^="daylight"] .panel .btn--accent {
+  background: var(--accent);
+  color: #fff;
+}
+[data-theme^="daylight"] .panel .btn--accent:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+[data-theme^="daylight"] .panel .btn--ghost {
+  background: transparent;
+}
+[data-theme^="daylight"] .note {
+  margin-inline: 14px;
+  border-radius: 3px;
+}
+[data-theme^="daylight"] .tips {
+  margin-inline: 14px;
+}
+
+/* The footer is an OK / Cancel bar, as in a dialog. */
+[data-theme^="daylight"] .panel__foot {
+  justify-content: flex-end;
+  flex-direction: row-reverse;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-0);
+  border-top: 1px solid var(--line);
+}
+[data-theme^="daylight"] .panel__foot .btn {
+  flex: none;
+  min-width: 84px;
+}
+
+[data-theme^="daylight"] input:focus,
+[data-theme^="daylight"] select:focus {
+  border-color: var(--accent);
+}
+
+/* ═════════════════════════ Timeline ═════════════════════════ */
+
+[data-theme^="daylight"] .timeline {
+  background: var(--bg-0);
+  border-top: 1px solid var(--line);
+  padding: 0 var(--sp-2);
+}
+[data-theme^="daylight"] .timeline__controls {
+  border-right: 1px solid var(--line);
+  margin-right: var(--sp-1);
+}
+[data-theme^="daylight"] .timeline__track {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  height: 40px;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.06);
+}
+[data-theme^="daylight"] .step {
+  width: 30px;
+  height: 30px;
+  border-radius: 5px;
+  background: var(--bg-2);
+  border-color: var(--line);
+  color: var(--text-1);
+}
+[data-theme^="daylight"] .step.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* ═════════════════════════ Status bar ═════════════════════════ */
+
+[data-theme^="daylight"] .statusbar {
+  background: var(--bg-0);
+  border-top: 1px solid var(--line);
+  color: var(--text-2);
+}
+
+/* ═════════════════════════ Dialogs ═════════════════════════ */
+
+[data-theme^="daylight"] .modal,
+[data-theme^="daylight"] .dialog {
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+}

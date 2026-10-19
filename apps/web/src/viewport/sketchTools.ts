@@ -44,7 +44,7 @@ export interface DrawnRelation {
 }
 
 /** Tools that draw constraint-driven geometry. */
-const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "tarc", "carc", "conic", "pcircle", "spline", "earc", "tan2c", "tan3c"]);
+const GEOM_TOOLS = new Set<SketchTool>(["segment", "arc", "tarc", "carc", "slotA", "slotP", "lineM", "conic", "pcircle", "spline", "earc", "tan2c", "tan3c"]);
 /** Tools that take three clicks (the rest of the simple shapes take two). */
 /** Counter-clockwise arc about `c` from `s`, ending on the ray toward `e`. */
 function centerArc(c: Vec2, s: Vec2, e: Vec2): { start: Vec2; end: Vec2; through: Vec2 } | null {
@@ -55,6 +55,57 @@ function centerArc(c: Vec2, s: Vec2, e: Vec2): { start: Vec2; end: Vec2; through
   while (sweep <= 1e-6) sweep += 2 * Math.PI;
   const at = (t: number): Vec2 => [c[0] + r * Math.cos(a0 + t), c[1] + r * Math.sin(a0 + t)];
   return { start: s, end: at(sweep), through: at(sweep / 2) };
+}
+
+/** The circle through three points (center and radius), or null when they are in a line. */
+function circleThrough(a: Vec2, b: Vec2, c: Vec2): { c: Vec2; r: number } | null {
+  const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+  if (Math.abs(d) < 1e-9) return null;
+  const sq = (p: Vec2) => p[0] * p[0] + p[1] * p[1];
+  const ux = (sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d;
+  const uy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
+  return { c: [ux, uy], r: Math.hypot(a[0] - ux, a[1] - uy) };
+}
+
+/** An arc given as center, radius, start angle and a positive (counter-clockwise) sweep. */
+interface ArcSpan {
+  c: Vec2;
+  r: number;
+  a0: number;
+  sweep: number;
+}
+
+/** The arc from `s` through `m` to `e`, turned so its sweep is counter-clockwise. */
+function arcThrough(s: Vec2, m: Vec2, e: Vec2): ArcSpan | null {
+  const k = circleThrough(s, m, e);
+  if (!k) return null;
+  const ang = (p: Vec2) => Math.atan2(p[1] - k.c[1], p[0] - k.c[0]);
+  const wrap = (t: number) => ((t % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  const ccw = wrap(ang(m) - ang(s)) < wrap(ang(e) - ang(s));
+  return ccw ? { c: k.c, r: k.r, a0: ang(s), sweep: wrap(ang(e) - ang(s)) } : { c: k.c, r: k.r, a0: ang(e), sweep: wrap(ang(s) - ang(e)) };
+}
+
+/**
+ * A slot bent along an arc: the arc's two edges (`hw` either side of it) closed with a round end at each
+ * end. Null when the slot would fold through the center (half width at least the radius).
+ */
+function arcSlot(arc: ArcSpan, hw: number): { pts: Vec2[]; closed: true; outline: Vec2[] } | null {
+  const { c, r, a0, sweep } = arc;
+  if (hw < 1e-6 || hw >= r - 1e-6 || sweep < 1e-6) return null;
+  const at = (t: number, rad: number): Vec2 => [c[0] + rad * Math.cos(t), c[1] + rad * Math.sin(t)];
+  const a1 = a0 + sweep;
+  // An outline: each "mid" is the middle of a three-point arc between its neighbours.
+  const capEnd: Vec2 = [at(a1, r)[0] - hw * Math.sin(a1), at(a1, r)[1] + hw * Math.cos(a1)];
+  const capStart: Vec2 = [at(a0, r)[0] + hw * Math.sin(a0), at(a0, r)[1] - hw * Math.cos(a0)];
+  const pts: Vec2[] = [at(a0, r + hw), at(a0 + sweep / 2, r + hw), at(a1, r + hw), capEnd, at(a1, r - hw), at(a0 + sweep / 2, r - hw), at(a0, r - hw), capStart];
+  // A dense outline, for the preview.
+  const outline: Vec2[] = [];
+  const n = 24;
+  for (let i = 0; i <= n; i++) outline.push(at(a0 + (sweep * i) / n, r + hw));
+  for (let i = 1; i < n; i++) outline.push([at(a1, r)[0] + hw * Math.cos(a1 + Math.PI * (i / n)), at(a1, r)[1] + hw * Math.sin(a1 + Math.PI * (i / n))]);
+  for (let i = n; i >= 0; i--) outline.push(at(a0 + (sweep * i) / n, r - hw));
+  for (let i = 1; i < n; i++) outline.push([at(a0, r)[0] + hw * Math.cos(a0 + Math.PI + Math.PI * (i / n)), at(a0, r)[1] + hw * Math.sin(a0 + Math.PI + Math.PI * (i / n))]);
+  return { pts, closed: true, outline };
 }
 
 /** Points on an ellipse arc: center, end of the major axis, a point giving the minor radius, then the arc's start and end (counter-clockwise). */
@@ -106,7 +157,9 @@ function conicPoints(s: Vec2, e: Vec2, apex: Vec2, rho: number, n = 12): Vec2[] 
   return out;
 }
 
-const THREE_POINT = new Set<SketchTool>(["rect3", "circle3"]);
+const THREE_POINT = new Set<SketchTool>(["rect3", "circle3", "slotW", "slotO", "slotC"]);
+/** Three-point tools whose last click is a distance off the first edge (a width), with a typed value for it. */
+const WIDTH_THIRD = new Set<SketchTool>(["rect3", "slotW", "slotO", "slotC"]);
 
 export interface DimField {
   key: "a" | "b";
@@ -133,6 +186,8 @@ export interface SketchUIState {
 export interface SketchEnv {
   pixelSize(): number;
   gridSpacing(): number;
+  /** Grid snapping (the sketch palette's Snap switch); points on geometry attract either way. */
+  gridSnap?(): boolean;
   entities(): SketchEntity[];
   evaluator(): Evaluator;
   /** Add a shape; `select` selects it and switches back to the Select tool. `sizes` were typed (mm) and become dimensions. */
@@ -147,6 +202,8 @@ export interface SketchEnv {
   addArc(a: Vec2 | Id, b: Vec2 | Id, through: Vec2): void;
   /** An arc leaving the end of a line or arc smoothly, ending at the point. */
   addTangentArc(from: Id | undefined, to: Vec2): void;
+  /** A line whose middle is the first point and whose end is the second. */
+  addMidLine(c: Vec2 | Id, end: Vec2 | Id): void;
   addCircle(c: Vec2 | Id, r: number): void;
   /** A circle tangent to the given curves, its center near the point. */
   addTangentCircle(refs: Id[], guess: Vec2): void;
@@ -305,11 +362,12 @@ export class SketchController {
     const alignX = cands.find((c) => Math.abs(c.p[0] - raw[0]) < atol);
     const alignY = cands.find((c) => Math.abs(c.p[1] - raw[1]) < atol);
     const g = this.env.gridSpacing() / 2;
-    const x = alignX ? alignX.p[0] : Math.round(raw[0] / g) * g;
-    const y = alignY ? alignY.p[1] : Math.round(raw[1] / g) * g;
+    const snapGrid = this.env.gridSnap?.() ?? true;
+    const x = alignX ? alignX.p[0] : snapGrid ? Math.round(raw[0] / g) * g : raw[0];
+    const y = alignY ? alignY.p[1] : snapGrid ? Math.round(raw[1] / g) * g : raw[1];
     if (alignX) this.guides.push([alignX.p, [x, y]]);
     if (alignY) this.guides.push([alignY.p, [x, y]]);
-    return { p: [x, y], kind: alignX || alignY ? "align" : "grid" };
+    return { p: [x, y], kind: alignX || alignY ? "align" : snapGrid ? "grid" : "free" };
   }
 
   /** Where the line being drawn starts, for the line tools (null otherwise). */
@@ -383,6 +441,10 @@ export class SketchController {
         return [a[0] + r * Math.cos(ang), a[1] + r * Math.sin(ang)];
       }
       case "slot":
+      case "slotW":
+      case "slotO":
+      case "slotC":
+      case "lineM":
       case "segment":
       case "path":
       case "polyline": {
@@ -435,6 +497,21 @@ export class SketchController {
       if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
       if (this.points.length === 2) return [{ pts: conicPoints(a, this.points[1]!, c, this.conicRho(), 24), closed: false }, { pts: [a, c, this.points[1]!], closed: false }];
     }
+    if (this.tool === "lineM") {
+      const end = this.secondPoint(a, c);
+      return [{ pts: [[2 * a[0] - end[0], 2 * a[1] - end[1]], end], closed: false }];
+    }
+    if (this.tool === "slotA" || this.tool === "slotP") {
+      const pts = this.points;
+      if (pts.length === 1) return [{ pts: [a, c], closed: false }];
+      if (pts.length === 2) {
+        if (this.tool === "slotP") return [{ pts: [...arcPoints(a, pts[1]!, c, 32), pts[1]!], closed: false }];
+        const arc = centerArc(a, pts[1]!, c);
+        return [{ pts: [a, pts[1]!], closed: false }, ...(arc ? [{ pts: [...arcPoints(arc.start, arc.end, arc.through, 32), arc.end], closed: false }] : [])];
+      }
+      const slot = this.arcSlotFor(pts as Vec2[], c);
+      return slot ? [{ pts: slot.outline, closed: true }] : [];
+    }
     if (this.tool === "carc") {
       if (this.points.length === 1) return [{ pts: [a, c], closed: false }];
       const arc = centerArc(a, this.points[1]!, c);
@@ -451,8 +528,8 @@ export class SketchController {
       return [{ pts: [...done, ...next.slice(1)], closed: false }];
     }
     if (THREE_POINT.has(this.tool)) {
-      if (this.points.length === 1) return [{ pts: [a, this.tool === "rect3" ? this.secondPoint(a, c) : c], closed: false }];
-      const e = this.build([a, this.points[1]!, this.tool === "rect3" ? this.thirdPoint(c) : c]);
+      if (this.points.length === 1) return [{ pts: [a, WIDTH_THIRD.has(this.tool) ? this.secondPoint(a, c) : c], closed: false }];
+      const e = this.build([a, this.points[1]!, WIDTH_THIRD.has(this.tool) ? this.thirdPoint(c) : c]);
       return e ? this.outlineOf(e) : [{ pts: [a, this.points[1]!, c], closed: false }];
     }
     const e = this.build([a, this.secondPoint(a, c)]);
@@ -474,7 +551,9 @@ export class SketchController {
     const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) || 1;
     const n: Vec2 = [-(p2[1] - p1[1]) / len, (p2[0] - p1[0]) / len];
     const sign = (c[0] - p1[0]) * n[0] + (c[1] - p1[1]) * n[1] < 0 ? -1 : 1;
-    return [p1[0] + sign * n[0] * this.typed.a, p1[1] + sign * n[1] * this.typed.a];
+    // A slot's typed value is its whole width; the click sits half a width off the line.
+    const off = this.tool === "rect3" ? this.typed.a : this.typed.a / 2;
+    return [p1[0] + sign * n[0] * off, p1[1] + sign * n[1] * off];
   }
 
   /** The finished shape for the points placed so far (null when degenerate). */
@@ -505,6 +584,35 @@ export class SketchController {
         e.h = fmt(Math.abs(d));
         e.anchor = "center";
         e.angle = fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI);
+        return e;
+      }
+      case "slotC": {
+        // The first click is the slot's middle, the second the center of one end, the third sets the width.
+        if (!c) return null;
+        const r = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (r < 1e-6) return null;
+        const half = Math.abs((c[0] - a[0]) * -(b[1] - a[1]) / r + (c[1] - a[1]) * (b[0] - a[0]) / r);
+        if (half < 1e-6) return null;
+        const e = makeEntity("slot", [2 * a[0] - b[0], 2 * a[1] - b[1]], b);
+        if (e.type !== "slot") return null;
+        e.length = fmt(2 * r);
+        e.width = fmt(2 * half);
+        return e;
+      }
+      case "slotW":
+      case "slotO": {
+        // Two clicks fix the slot's axis (its end centers, or its overall ends); the third sets half the width.
+        if (!c) return null;
+        const axis = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (axis < 1e-6) return null;
+        const n: Vec2 = [-(b[1] - a[1]) / axis, (b[0] - a[0]) / axis];
+        const half = Math.abs((c[0] - a[0]) * n[0] + (c[1] - a[1]) * n[1]);
+        const length = this.tool === "slotW" ? axis : axis - 2 * half;
+        if (half < 1e-6 || length < 1e-6) return null;
+        const e = makeEntity("slot", a, b);
+        if (e.type !== "slot") return null;
+        e.length = fmt(length);
+        e.width = fmt(2 * half);
         return e;
       }
       case "circle2": {
@@ -551,12 +659,12 @@ export class SketchController {
   private dims(): DimField[] {
     const c = this.cursor;
     if (!c || this.points.length === 0) return [];
-    if (this.tool === "rect3" && this.points.length === 2) {
+    if (WIDTH_THIRD.has(this.tool) && this.points.length === 2) {
       const [p1, p2] = this.points as [Vec2, Vec2];
       const p3 = this.thirdPoint(c);
       const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) || 1;
       const h = Math.abs(((p3[0] - p1[0]) * -(p2[1] - p1[1]) + (p3[1] - p1[1]) * (p2[0] - p1[0])) / len);
-      return [{ key: "a", label: "H", value: h, at: p3 }];
+      return this.tool === "rect3" ? [{ key: "a", label: "H", value: h, at: p3 }] : [{ key: "a", label: "W", value: 2 * h, at: p3 }];
     }
     if (this.tool === "circle3") return [];
     if (this.tool === "conic") return this.points.length === 2 ? [{ key: "a", label: "ρ", value: this.conicRho(), at: c }] : [];
@@ -589,6 +697,9 @@ export class SketchController {
         return [{ key: "a", label: "R", value: Math.hypot(b[0] - a[0], b[1] - a[1]), at: b }];
       case "rect3":
       case "slot":
+      case "slotW":
+      case "slotO":
+      case "slotC":
       case "segment":
       case "path":
       case "polyline": {
@@ -651,7 +762,7 @@ export class SketchController {
   /** A click with a three-point tool: the first two points are kept, the third finishes the shape. */
   private commitThreePoint(c: Vec2) {
     const [a, b] = this.points as [Vec2, Vec2];
-    const e = this.build([a, b, this.tool === "rect3" ? this.thirdPoint(c) : c]);
+    const e = this.build([a, b, WIDTH_THIRD.has(this.tool) ? this.thirdPoint(c) : c]);
     if (!e) return;
     this.env.add(e);
     this.points = [];
@@ -793,6 +904,9 @@ export class SketchController {
     if (this.tool === "pcircle" && this.points.length === 2) {
       this.env.addCircle(at(0), Math.hypot(p[0] - this.points[0]![0], p[1] - this.points[0]![1]));
       this.reset();
+    } else if (this.tool === "lineM" && this.points.length === 2) {
+      this.env.addMidLine(at(0), at(1));
+      this.reset();
     } else if (this.tool === "tarc" && this.points.length === 2) {
       this.env.addTangentArc(this.refs[0], p);
       this.reset();
@@ -800,6 +914,15 @@ export class SketchController {
       // Start, end, apex; a typed value (0.01 to 0.99) sets rho.
       const [s0, e0, a0] = this.points as [Vec2, Vec2, Vec2];
       this.env.addSpline([s0, ...conicPoints(s0, e0, a0, this.conicRho()).slice(1, -1), e0], false);
+      this.reset();
+    } else if ((this.tool === "slotA" || this.tool === "slotP") && this.points.length === 4) {
+      // Three points fix the arc, the fourth the width.
+      const slot = this.arcSlotFor(this.points.slice(0, 3), this.points[3]!);
+      if (slot) {
+        const e = makeEntity("polyline", slot.pts[0]!, slot.pts[1]!);
+        if (e.type === "polyline") e.points = slot.pts.map(([x, y], i) => (i % 2 === 1 ? [fmt(x), fmt(y), "arc"] : [fmt(x), fmt(y)]));
+        this.env.add(e);
+      }
       this.reset();
     } else if (this.tool === "carc" && this.points.length === 3) {
       // Center, start, then the end direction (counter-clockwise from the start).
@@ -827,6 +950,18 @@ export class SketchController {
       this.reset();
     }
     this.typed = {};
+  }
+
+  /** The arc slot for the three arc points placed so far and a width point (null when degenerate). */
+  private arcSlotFor(pts: Vec2[], w: Vec2): ReturnType<typeof arcSlot> {
+    let arc: ArcSpan | null = null;
+    if (this.tool === "slotA") {
+      const [c0, s0, e0] = pts as [Vec2, Vec2, Vec2];
+      const k = centerArc(c0, s0, e0);
+      if (k) arc = { c: c0, r: Math.hypot(s0[0] - c0[0], s0[1] - c0[1]), a0: Math.atan2(s0[1] - c0[1], s0[0] - c0[0]), sweep: arcThrough(k.start, k.through, k.end)?.sweep ?? 0 };
+    } else arc = arcThrough(pts[0]!, pts[2]!, pts[1]!);
+    if (!arc) return null;
+    return arcSlot(arc, Math.abs(Math.hypot(w[0] - arc.c[0], w[1] - arc.c[1]) - arc.r));
   }
 
   private commitSpline(closed: boolean) {

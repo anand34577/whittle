@@ -973,6 +973,12 @@ const P = {
       <path d="M8 11.3 L12 9" strokeDasharray="1.2 1.4" opacity=".5" />
     </>
   ),
+  concentric: (
+    <>
+      <circle cx="10" cy="10" r="7" />
+      <circle cx="10" cy="10" r="3.2" />
+    </>
+  ),
   settings: (
     <>
       <circle cx="10" cy="10" r="2.6" />

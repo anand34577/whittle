@@ -643,6 +643,33 @@ export const MATERIALS = [
   { id: "gold", label: "Gold (18k)", density: 15.6, group: "Metals" },
 ].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
 
+/** The finish and color a physical material suggests when it is given to a body (as in other CAD, the material carries its look). */
+const MATERIAL_LOOKS: Record<string, { color: string; look: string }> = {
+  al: { color: "#c5c9cf", look: "brushed" },
+  al7075: { color: "#c5c9cf", look: "brushed" },
+  steel: { color: "#8a9099", look: "metal" },
+  stainless: { color: "#b8bcc2", look: "brushed" },
+  castiron: { color: "#5d6066", look: "matte" },
+  zinc: { color: "#a7acb2", look: "metal" },
+  brass: { color: "#c9a24a", look: "polished" },
+  copper: { color: "#c0714a", look: "polished" },
+  gold: { color: "#d8b24a", look: "polished" },
+  silver: { color: "#d6d9dd", look: "polished" },
+  titanium: { color: "#9a9ea6", look: "brushed" },
+  glass: { color: "#bcd8e6", look: "glass" },
+  acrylic: { color: "#cfe3ee", look: "glass" },
+  silicone: { color: "#d9d4cb", look: "rubber" },
+  tpu: { color: "#2f3236", look: "rubber" },
+  pine: { color: "#d2ae7a", look: "matte" },
+  oak: { color: "#b58a55", look: "matte" },
+  walnut: { color: "#6b4a30", look: "matte" },
+  plywood: { color: "#c9a574", look: "matte" },
+  bamboo: { color: "#cdb677", look: "matte" },
+  mdf: { color: "#a98c68", look: "matte" },
+  ceramic: { color: "#f1efe9", look: "gloss" },
+  concrete: { color: "#9b9b97", look: "matte" },
+};
+
 function Inspector() {
   const doc = useApp((s) => s.doc);
   const regen = useApp((s) => s.regen);
@@ -650,7 +677,8 @@ function Inspector() {
   const mat = useApp((s) => (MATERIALS.some((m) => m.id === s.prefs.material) ? s.prefs.material : "pla"));
   const unit = doc.units;
   const L = (v: number) => formatQuantity(v, "length", unit);
-  const density = MATERIALS.find((m) => m.id === mat)!.density;
+  const densityOf = (id?: string) => (MATERIALS.find((m) => m.id === (id ?? mat)) ?? MATERIALS.find((m) => m.id === mat)!).density;
+  const density = densityOf();
   const p = selection[0];
 
   const bodyId = p && (p.kind === "body" || p.kind === "face" || p.kind === "edge") ? p.bodyId : undefined;
@@ -797,13 +825,26 @@ function Inspector() {
                 <dd className="mono">{volumeText(body ? body.volume : totalVolume, unit, 2)}</dd>
                 <dt>Mass</dt>
                 <dd className="mono">
-                  <span style={{ whiteSpace: "nowrap", marginRight: 8 }}>{massText(((body ? body.volume : totalVolume) / 1000) * density)}</span>
+                  <span style={{ whiteSpace: "nowrap", marginRight: 8 }}>{massText((body ? (body.volume / 1000) * densityOf(meta?.material) : bodies.reduce((a, b) => a + (b.volume / 1000) * densityOf(doc.bodies[b.id]?.material), 0)))}</span>
                   <Select
                     size="sm"
                     ariaLabel="Material"
-                    value={mat}
-                    onChange={(v) => setPrefs({ material: v })}
-                    options={MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))}
+                    value={body ? (meta?.material ?? "") : mat}
+                    onChange={(v) =>
+                      body
+                        ? mutate("Body material", (d) => {
+                            const m = d.bodies[body.id]!;
+                            m.material = v || undefined;
+                            const ap = MATERIAL_LOOKS[v];
+                            if (ap) {
+                              m.color = ap.color;
+                              m.look = ap.look;
+                              m.opacity = undefined;
+                            }
+                          })
+                        : setPrefs({ material: v })
+                    }
+                    options={[...(body ? [{ value: "", label: `Design default (${MATERIALS.find((m) => m.id === mat)!.label})`, group: "" }] : []), ...MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))]}
                   />
                 </dd>
               </>

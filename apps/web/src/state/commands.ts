@@ -49,7 +49,7 @@ import { downloadCopy, exportDesign, sendToSlicer, newDesign, openDesign, openFr
 import { exportSketch, importDxfIntoSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
 import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS, SURFACE_OPS, type SurfaceOp } from "@whittle/core";
-import { stretchSelection, breakSelection, gridPatternSelection, moveSelection, scaleSelection, deleteSketchSelection, startConstraint, makeConstrainable, autoConstrainSketch, copySketchSelection, pasteSketchClip, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
+import { stretchSelection, breakSelection, gridPatternSelection, circularPatternSelection, moveSelection, scaleSelection, deleteSketchSelection, startConstraint, makeConstrainable, autoConstrainSketch, copySketchSelection, pasteSketchClip, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { intersectIntoSketch } from "./sectionCurves";
 import { copySteps, folderSteps, pasteSteps } from "./steps";
@@ -70,6 +70,7 @@ import {
   setSketchTool,
   setTheme,
   setView,
+  setSketchView,
   sketchMutate,
   undo,
   useApp,
@@ -130,6 +131,7 @@ const CONSTRAINT_HINTS: Record<ConstraintType, string> = {
   symmetric: "Mirror two points about a line (or about a third point, picked last)",
   midpoint: "Put a point at the middle of a line",
   collinear: "Make two lines lie on one line",
+  concentric: "Give two circles or arcs the same center",
   distance: "A length, or the gap between points and lines",
   radius: "The radius of a circle or arc",
   diameter: "The diameter of a circle",
@@ -284,6 +286,7 @@ export const COMMANDS: Command[] = [
   { id: "show-all", label: "Show all bodies", group: "View", icon: "eye", keywords: "unhide reveal", run: () => mutate("Show all", (d) => void Object.values(d.bodies).forEach((b) => (b.visible = true))) },
   // Sketch tools
   { id: "tool-line", label: "Line", group: "Sketch", icon: "line", keys: "L", keywords: "polyline polygon outline profile", hint: "Click points; click the first point to close", when: inSketch, run: () => setSketchTool("polyline") },
+  { id: "tool-linem", label: "Midpoint line", short: "Midpoint line", group: "Sketch", icon: "midpoint", keywords: "line center middle symmetric from the middle", hint: "The middle first, then one end", when: inSketch, run: () => setSketchTool("lineM") },
   { id: "tool-path", label: "Path", group: "Sketch", icon: "path", keys: "A", keywords: "open line wire rail spine curve for sweep guide", hint: "An open line: a path for sweeps (Enter to finish)", when: inSketch, run: () => setSketchTool("path") },
   { id: "tool-rect", short: "Rectangle", label: "2-point rectangle", group: "Sketch", icon: "rect", keys: "R", keywords: "square box", hint: "Two corners", when: inSketch, run: () => setSketchTool("rect") },
   { id: "tool-crect", label: "Center rectangle", group: "Sketch", icon: "rectCenter", keywords: "square box centre middle", hint: "Center, then a corner", when: inSketch, run: () => setSketchTool("crect") },
@@ -294,6 +297,11 @@ export const COMMANDS: Command[] = [
   { id: "tool-ellipse", label: "Ellipse", group: "Sketch", icon: "ellipse", keys: "E", keywords: "oval egg", hint: "Center, then a corner of its box", when: inSketch, run: () => setSketchTool("ellipse") },
   { id: "tool-polygon", short: "Polygon", label: "Inscribed polygon", group: "Sketch", icon: "polygon", keys: "P", keywords: "hexagon nut sides triangle", hint: "Center, then a corner", when: inSketch, run: () => setSketchTool("polygon") },
   { id: "tool-slot", label: "Slot", group: "Sketch", icon: "slot", keys: "O", keywords: "oblong obround", hint: "Two centers", when: inSketch, run: () => setSketchTool("slot") },
+  { id: "tool-slotw", label: "Center-to-center slot", short: "Center slot", group: "Sketch", icon: "slot", keywords: "oblong obround slot width centers", hint: "The two end centers, then the width", when: inSketch, run: () => setSketchTool("slotW") },
+  { id: "tool-slotc", label: "Center point slot", short: "Center-point slot", group: "Sketch", icon: "slot", keywords: "oblong obround slot middle", hint: "The middle, one end, then the width", when: inSketch, run: () => setSketchTool("slotC") },
+  { id: "tool-slota", label: "Center point arc slot", short: "Arc slot", group: "Sketch", icon: "slot", keywords: "curved bent slot arc oblong radius", hint: "The arc center, its start and end, then the width", when: inSketch, run: () => setSketchTool("slotA") },
+  { id: "tool-slotp", label: "3-point arc slot", short: "3-pt arc slot", group: "Sketch", icon: "slot", keywords: "curved bent slot arc three point", hint: "The two ends and a point on the arc, then the width", when: inSketch, run: () => setSketchTool("slotP") },
+  { id: "tool-sloto", label: "Overall slot", short: "Overall slot", group: "Sketch", icon: "slot", keywords: "oblong obround slot width overall length outside", hint: "The two outside ends, then the width", when: inSketch, run: () => setSketchTool("slotO") },
   { id: "tool-text", label: "Text", group: "Sketch", icon: "text", keys: "T", keywords: "label lettering engrave emboss name tag font", hint: "Click where the text starts", when: inSketch, run: () => setSketchTool("text") },
   { id: "tool-gear", label: "Gear", group: "Sketch", icon: "gear", keys: "G", keywords: "spur cog teeth involute", hint: "Center, then drag the size", when: inSketch, run: () => setSketchTool("gear") },
   { id: "import-image", label: "Picture to trace", short: "Picture", group: "Sketch", icon: "image", keywords: "image photo reference canvas underlay background trace scan blueprint jpg png attach", hint: "Put a photo or drawing on the sketch to draw over. Also: paste or drop one", run: importImage },
@@ -332,6 +340,7 @@ export const COMMANDS: Command[] = [
   { id: "geo-copy", label: "Copy geometry", short: "Copy", group: "Sketch", icon: "duplicate", keywords: "duplicate clone offset translate", hint: "Select geometry, then type how far to place the copy", when: hasGeometry, run: () => void moveSelection(true) },
   { id: "geo-scale", label: "Scale geometry", short: "Scale", group: "Sketch", icon: "scale", keywords: "resize bigger smaller factor enlarge shrink", hint: "Select geometry, then type a scale factor", when: hasGeometry, run: () => void scaleSelection() },
   { id: "geo-grid", label: "Rectangular pattern", short: "Grid pattern", group: "Sketch", icon: "duplicate", keywords: "array rows columns repeat grid", hint: "Select geometry, then give columns, rows and gaps", when: hasGeometry, run: () => void gridPatternSelection() },
+  { id: "geo-circular", label: "Circular pattern", short: "Circular pattern", group: "Sketch", icon: "pattern", keywords: "array radial polar repeat round center copies", hint: "Select geometry, then give the number of copies, the sweep and the center", when: hasGeometry, run: () => void circularPatternSelection() },
   { id: "geo-break", label: "Break line at crossing", short: "Break", group: "Sketch", icon: "breakLine", keywords: "split cut divide intersect segment", hint: "Select the line to split, then the line that crosses it", when: hasGeometry, run: () => breakSelection() },
   { id: "geo-offset", label: "Offset lines and arcs", short: "Offset", group: "Sketch", icon: "offset", keywords: "inset outset parallel concentric grow shrink wall", hint: "Select lines, arcs or circles, then give a distance", when: hasGeometry, run: () => void offsetSelection() },
   { id: "geo-mirror-y", label: "Mirror geometry across the Y axis", short: "Mirror ↔", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy left right", hint: "A mirrored copy held symmetric to the original", when: hasGeometry, run: () => mirrorSelection("y") },
@@ -379,6 +388,13 @@ export const COMMANDS: Command[] = [
       });
     },
   },
+  { id: "sketch-look-at", label: "Look at sketch", group: "Sketch", icon: "camera", keywords: "normal face on head-on straight plane view", hint: "Turn the view to face the sketch plane", when: inSketch, run: () => requestView("normal") },
+  { id: "sketch-snap", label: "Snap to grid", group: "Sketch", icon: "point", keywords: "grid snap magnet round", hint: "New points land on the grid (Alt places freely)", when: inSketch, on: (s) => s.sketchView.snap, run: () => setSketchView({ snap: !get().sketchView.snap }) },
+  { id: "sketch-slice", label: "Slice model", group: "Sketch", icon: "section", keywords: "cut away section plane hide part see profile", hint: "Cut the model away at the sketch plane", when: inSketch, on: (s) => s.sketchView.slice, run: () => setSketchView({ slice: !get().sketchView.slice }) },
+  { id: "sketch-show-points", label: "Show points", group: "Sketch", icon: "point", keywords: "markers vertices ends centers hide", when: inSketch, on: (s) => s.sketchView.points, run: () => setSketchView({ points: !get().sketchView.points }) },
+  { id: "sketch-show-profile", label: "Show profile shading", group: "Sketch", icon: "rect", keywords: "fill shade areas regions hide", when: inSketch, on: (s) => s.sketchView.shading, run: () => setSketchView({ shading: !get().sketchView.shading }) },
+  { id: "sketch-show-dims", label: "Show dimensions", group: "Sketch", icon: "ruler", keywords: "labels values hide", when: inSketch, on: (s) => s.sketchView.dims, run: () => setSketchView({ dims: !get().sketchView.dims }) },
+  { id: "sketch-show-constraints", label: "Show constraints", group: "Sketch", icon: "link", keywords: "glyphs relations hide", when: inSketch, on: (s) => s.sketchView.constraints, run: () => setSketchView({ constraints: !get().sketchView.constraints }) },
   { id: "finish-sketch", label: "Finish sketch", group: "Sketch", icon: "finish", keys: "Esc", keywords: "done exit close stop", when: inSketch, run: finishSketch },
   // Document
   { id: "ok", label: "OK (apply)", group: "Edit", icon: "check", keys: "Enter", when: (s) => !!s.session && s.mode.kind === "model", run: () => commitSession(true) },

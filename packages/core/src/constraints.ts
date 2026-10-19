@@ -248,6 +248,7 @@ export const CONSTRAINT_LABELS: Record<ConstraintType, string> = {
   symmetric: "Symmetric",
   midpoint: "Midpoint",
   collinear: "Collinear",
+  concentric: "Concentric",
   distance: "Distance",
   radius: "Radius",
   diameter: "Diameter",
@@ -305,6 +306,8 @@ export function constraintFits(type: ConstraintType, kinds: GeomType[]): boolean
     }
     case "midpoint":
       return pair(is("point"), is("line"));
+    case "concentric":
+      return two && round(a!) && round(b!);
     case "collinear":
       return pair(is("line"), is("line"));
     case "distance":

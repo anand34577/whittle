@@ -382,7 +382,7 @@ export async function exportDesign(format: ExportFormat, bodyId?: string) {
   commitSession();
   const { doc, prefs } = useApp.getState();
   try {
-    const file = await withTask(`Exporting ${format.toUpperCase()}…`, () => getKernel().export(doc, format, bodyId ? [bodyId] : undefined, prefs.meshQuality));
+    const file = await withTask(`Exporting ${format.toUpperCase()}…`, () => getKernel().export(doc, format, bodyId ? [bodyId] : undefined, prefs.meshQuality, format === "drawing" ? prefs.drawing : undefined));
     const name = bodyId ? `${safeName(doc.name)} - ${safeName(doc.bodies[bodyId]?.name ?? "body")}` : safeName(doc.name);
     if (await saveBytes(file.data, `${name}.${file.ext}`, file.mime, EXPORT_FILTERS[file.ext]!)) toast("ok", `Exported ${format.toUpperCase()}`);
   } catch (e) {

@@ -8,7 +8,7 @@ import type { InterferenceItem, MeasurePick, RadiusItem } from "./protocol";
 
 const volume = (s: Shape3D) => measureShapeVolumeProperties(s).volume;
 
-/** The shortest distance between two picked faces, edges or bodies, and where it runs (Fusion's Measure). */
+/** The shortest distance between two picked faces, edges or bodies, and where it runs. */
 export function minDistance(shapes: Map<Id, Shape3D>, picks: MeasurePick[]): { d: number; a: Vec3; b: Vec3 } | null {
   const shapeOf = (p: MeasurePick) => {
     const s = shapes.get(p.bodyId);
