@@ -220,6 +220,12 @@ export interface SketchConstraint {
   value?: Expr;
   /** A reference dimension: it shows the measured value but doesn't drive the sketch (added when a normal one would over-constrain it). */
   driven?: boolean;
+  /**
+   * Where a dimension's value was dragged to, kept relative to what it measures so it follows the geometry:
+   * a length's [offset beside it, shift along it] (mm), a radius or diameter's [angle (radians), distance beyond the curve (mm)],
+   * an angle's [arc radius (mm), 0].
+   */
+  label?: [number, number];
 }
 
 /* ───────────────────────────── Features ───────────────────────────── */

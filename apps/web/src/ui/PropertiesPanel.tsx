@@ -518,7 +518,7 @@ function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
           {sketch.constraints!.map((c) => (
             <li key={c.id} className={`${sol?.bad.includes(c.id) ? "is-bad" : ""} ${sel.includes(c.id) ? "is-selected" : ""}`}>
               {c.value !== undefined ? (
-                <ExprInput label={constraintLabel(sketch, c)} kind={c.type === "angle" ? "angle" : "length"} value={c.value} onChange={(v) => setDimension(c.id, v)} />
+                <ExprInput label={constraintLabel(sketch, c)} kind={c.type === "angle" ? "angle" : "length"} value={c.value} onChange={(v, live) => setDimension(c.id, v, live)} />
               ) : (
                 <button className="constraints__name" onClick={() => useApp.setState({ sketchSel: [c.id], selectedEntity: null })}>
                   {CONSTRAINT_LABELS[c.type]}
@@ -580,7 +580,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
                 <b>Draw:</b> pick a tool above, then click twice. Start typing to enter exact sizes.
               </p>
               <p>
-                <b>Profiles:</b> every enclosed area is its own profile. Extrude uses the shaded area (shapes inside shapes are holes), or click just the areas you want, such as only the inner circle.
+                <b>Profiles:</b> every enclosed area is shaded and is its own profile. Extrude on its own uses the outer shapes with the shapes inside them as holes; click the areas you want instead, such as only the inner circle, or the ring and the inner circle together.
               </p>
               <p>
                 <b>Snapping:</b> points, centers and the grid. Hold Alt to place freely.

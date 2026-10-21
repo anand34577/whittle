@@ -101,6 +101,7 @@ jobs:
           node tests/e2e/sketching.mjs http://localhost:4173/ test-results/sketching
           node tests/e2e/audit.mjs http://localhost:4173/ test-results/audit
           node tests/e2e/direct.mjs http://localhost:4173/ test-results/direct
+          node tests/e2e/sketchchecks.mjs http://localhost:4173/ test-results/sketchchecks
       - name: Self-hosted server (accounts, storage, versions)
         run: |
           cargo build --locked --manifest-path apps/server/Cargo.toml

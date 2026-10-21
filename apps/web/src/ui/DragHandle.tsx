@@ -67,7 +67,26 @@ function center(fill: Float32Array | undefined, fallback: Vec3): Vec3 {
   const lo = [Infinity, Infinity, Infinity];
   const hi = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i + 2 < fill.length; i += 3) for (let j = 0; j < 3; j++) (lo[j] = Math.min(lo[j]!, fill[i + j]!)), (hi[j] = Math.max(hi[j]!, fill[i + j]!));
-  return [(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2, (lo[2]! + hi[2]!) / 2];
+  const c: Vec3 = [(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2, (lo[2]! + hi[2]!) / 2];
+  // The middle of the box can fall in a hole (a ring, a frame): then use the nearest spot on the profile itself.
+  let best: Vec3 = c;
+  let bestD = Infinity;
+  for (let i = 0; i + 8 < fill.length; i += 9) {
+    const a: Vec3 = [fill[i]!, fill[i + 1]!, fill[i + 2]!];
+    const v0 = sub([fill[i + 3]!, fill[i + 4]!, fill[i + 5]!], a);
+    const v1 = sub([fill[i + 6]!, fill[i + 7]!, fill[i + 8]!], a);
+    const v2 = sub(c, a);
+    const d00 = dot(v0, v0), d01 = dot(v0, v1), d11 = dot(v1, v1), d20 = dot(v2, v0), d21 = dot(v2, v1);
+    const den = d00 * d11 - d01 * d01;
+    if (Math.abs(den) < 1e-12) continue;
+    const v = (d11 * d20 - d01 * d21) / den;
+    const w = (d00 * d21 - d01 * d20) / den;
+    if (v >= -1e-9 && w >= -1e-9 && v + w <= 1 + 1e-9) return c;
+    const m: Vec3 = [a[0] + (v0[0] + v1[0]) / 3, a[1] + (v0[1] + v1[1]) / 3, a[2] + (v0[2] + v1[2]) / 3];
+    const d = dot(sub(m, c), sub(m, c));
+    if (d < bestD) (bestD = d), (best = m);
+  }
+  return best;
 }
 
 function bodyBox(regen: RegenResult | null, id?: string) {
@@ -170,9 +189,11 @@ function specsFor(f: Feature, regen: RegenResult | null, mm: number, units: stri
     }
     case "shell": {
       const v = num(f.thickness);
-      const face = f.faces[0];
+      // Closed (no open face yet): the handle hangs down from the middle of the body's top.
+      const b = f.faces[0] ? null : regen?.bodies.find((x) => x.id === f.bodyId) ?? regen?.bodies[regen.bodies.length - 1];
+      const face = f.faces[0] ?? (b && { center: [(b.bbox[0][0] + b.bbox[1][0]) / 2, (b.bbox[0][1] + b.bbox[1][1]) / 2, b.bbox[1][2]] as Vec3, normal: [0, 0, 1] as Vec3 });
       if (v === null || !face) return out;
-      len({ key: "t", anchor: face.center, dir: neg(face.normal), off: v * mm, per: 1 / mm, min: 0.01, value: v, primary: true, set: (x) => void updateFeature(f.id, "Drag " + f.name, (d) => void (d.type === "shell" && (d.thickness = String(x))), "drag" + f.id) });
+      len({ key: "t", label: "Wall", anchor: face.center, dir: neg(face.normal), off: v * mm, per: 1 / mm, min: 0.01, value: v, primary: true, set: (x) => void updateFeature(f.id, "Drag " + f.name, (d) => void (d.type === "shell" && (d.thickness = String(x))), "drag" + f.id) });
       return out;
     }
     case "fillet":

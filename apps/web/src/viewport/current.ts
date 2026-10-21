@@ -6,4 +6,11 @@ export interface CameraState {
   phi: number;
 }
 
-export const viewportRef: { current: { getCamera(): CameraState; setCamera(c: CameraState): void } | null } = { current: null };
+export const viewportRef: {
+  current: {
+    getCamera(): CameraState;
+    setCamera(c: CameraState): void;
+    /** Where a point of the open sketch is on the canvas (CSS px), or null outside a sketch. */
+    sketchToScreen(p: [number, number]): [number, number] | null;
+  } | null;
+} = { current: null };

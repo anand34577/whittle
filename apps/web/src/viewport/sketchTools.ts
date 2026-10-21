@@ -212,7 +212,20 @@ export interface SketchEnv {
   /** The Project tool: pick the model under this window position and copy it into the sketch. */
   project(client: Vec2): void;
   /** The Dimension tool picked this geometry (`additive`: start a pair instead of measuring one item). */
-  dimension(id: Id, additive: boolean, at?: Vec2): void;
+  dimension(id: Id, additive: boolean, at?: Vec2, place?: Vec2): void;
+  /** A picked dimension is following the pointer, waiting for a click to place it. */
+  dimPlacing(): boolean;
+  dimPlaceMove(p: Vec2): void;
+  /** A click while placing: false when it hit other geometry (then it picks as usual). */
+  dimPlaceClick(hit: Id | null, p: Vec2, at: Vec2): boolean;
+  dimPlaceCancel(): void;
+  /** The Offset tool picked this curve: offset its whole outline (`at`: where to put the value box). */
+  offset(id: Id, at?: Vec2): void;
+  /** The pointer moved while an offset is being placed: it drives the distance. False when none is live. */
+  offsetDrag(p: Vec2, px: number, fine: boolean, screen: Vec2): boolean;
+  /** A click while an offset is being placed applies it. False when none is live. */
+  offsetPlace(): boolean;
+  offsetCancel(): void;
   /** Fillet or chamfer the corner at this point. */
   corner(id: Id, kind: "fillet" | "chamfer", at?: Vec2): void;
   trim(id: Id, p: Vec2): void;
@@ -256,6 +269,8 @@ export class SketchController {
 
   setTool(tool: SketchTool) {
     if (tool === this.tool) return;
+    if (this.tool === "soffset") this.env.offsetCancel();
+    if (this.tool === "dimension") this.env.dimPlaceCancel();
     this.tool = tool;
     this.reset();
   }
@@ -1012,13 +1027,49 @@ export class SketchController {
       const hit = geom && !(plainHit && (geom === "xaxis" || geom === "yaxis" || geom === "origin")) ? geom : null;
       const plain = hit ? null : plainHit;
       this.hoverEntity = hit ?? plain;
+      // A picked dimension follows the pointer; a click places it (or, on other geometry, pairs with it).
+      if (this.env.dimPlacing()) {
+        if (e.type === "move") this.env.dimPlaceMove(e.p);
+        if (e.type !== "down" || this.env.dimPlaceClick(hit, e.p, e.screen)) {
+          this.publish();
+          return;
+        }
+      }
       if (e.type === "down") {
-        if (hit) this.env.dimension(hit, e.shift, e.screen);
+        if (hit) this.env.dimension(hit, e.shift, e.screen, e.p);
         else if (plain) {
           // One click does it: the shape becomes lines and arcs, then the one under the pointer gets its dimension.
           this.env.convert(plain);
           const now = this.geomAt(e.p);
-          if (now) this.env.dimension(now, e.shift, e.screen);
+          if (now) this.env.dimension(now, e.shift, e.screen, e.p);
+        }
+      }
+      this.publish();
+      return;
+    }
+    if (this.tool === "soffset") {
+      this.cursor = e.p;
+      this.snap = null;
+      // While an offset is being placed the pointer drives its distance and a click applies it.
+      if (e.type === "move" && this.env.offsetDrag(e.p, this.env.pixelSize(), e.alt, e.screen)) {
+        this.hoverEntity = null;
+        this.publish();
+        return;
+      }
+      if (e.type === "down" && this.env.offsetPlace()) {
+        this.publish();
+        return;
+      }
+      const hit = this.geomAt(e.p, true);
+      const plain = hit ? null : this.entityAt(e.p);
+      this.hoverEntity = hit ?? plain;
+      if (e.type === "down") {
+        if (hit) this.env.offset(hit, e.screen);
+        else if (plain) {
+          // A drawn shape becomes lines and arcs first, then the outline under the pointer is offset.
+          this.env.convert(plain);
+          const now = this.geomAt(e.p, true);
+          if (now) this.env.offset(now, e.screen);
         }
       }
       this.publish();
@@ -1188,6 +1239,10 @@ export class SketchController {
 
   /** Keyboard while sketching. Returns true when handled. */
   key(e: KeyboardEvent): boolean {
+    if (e.key === "Escape" && this.tool === "dimension" && this.env.dimPlacing()) {
+      this.env.dimPlaceCancel();
+      return true;
+    }
     // A toggles arcs while drawing an outline or path (the A shortcut picks the Path tool otherwise).
     if (this.multi && this.points.length && e.key.toLowerCase() === "a" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       this.arcMode = !this.arcMode;

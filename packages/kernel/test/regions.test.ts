@@ -38,6 +38,18 @@ describe("sketch regions", () => {
     expect(r.bodies[0]!.volume).toBeCloseTo(plate - disc, 0);
   });
 
+  it("shades the inner shape as well as the ring around it", () => {
+    const s = new Builder().regen(ringDoc().doc, "final").sketches[0]!;
+    const area = (f: Float32Array) => {
+      let a = 0;
+      for (let t = 0; t + 8 < f.length; t += 9) a += Math.abs((f[t + 3]! - f[t]!) * (f[t + 7]! - f[t + 1]!) - (f[t + 6]! - f[t]!) * (f[t + 4]! - f[t + 1]!)) / 2;
+      return a;
+    };
+    // The whole rectangle, the disc included (to the tolerance of the circle's triangles).
+    expect(area(s.fill!)).toBeCloseTo(40 * 30, -1);
+    expect(s.fill!.length).toBe(s.regions!.reduce((n, r) => n + r.fill.length, 0));
+  });
+
   it("extrudes just the inner disc", () => {
     const r = new Builder().regen(ringDoc([[0, 0]]).doc, "final");
     expect(r.status.every((s) => s.state === "ok")).toBe(true);

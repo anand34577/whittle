@@ -577,7 +577,9 @@ export class Builder {
         } catch (e) {
           error = describeError(f, e);
         }
-        sketches.set(f.id, { frame, drawing, error, source, solution, fill: drawing ? profileFill(drawing, frame) : undefined, regions: drawing ? builtRegions(source, frame, ev) : undefined });
+        const regions = drawing ? builtRegions(source, frame, ev) : undefined;
+        // Every enclosed area is shaded, an island inside another shape as much as the ring around it.
+        sketches.set(f.id, { frame, drawing, error, source, solution, fill: regions ? joinFills(regions.map((r) => r.fill)) : drawing ? profileFill(drawing, frame) : undefined, regions });
         if (error) throw new FeatureError(error);
         return warning;
       }
@@ -927,8 +929,9 @@ export class Builder {
       case "shell": {
         const t = ev.num(f.thickness, "length", "Thickness");
         if (t <= 0) throw new FeatureError("The wall thickness must be greater than zero.");
-        if (f.faces.length === 0) throw new FeatureError("Pick at least one face to remove (the open side).", undefined, true);
-        const bodyId = f.bodyId ?? f.faces[0]!.bodyId;
+        // No open face: walls all round, hollow inside (picking faces then opens them).
+        const bodyId = f.bodyId ?? f.faces[0]?.bodyId ?? lastBody(bodies);
+        if (!bodyId || (!f.faces.length && !bodies.has(bodyId))) throw new FeatureError("Pick a body to hollow, or the face to open.", undefined, true);
         const body = bodyForRefs(bodies, bodyId);
         let warning: string | undefined;
         const faces: Face[] = [];
@@ -939,6 +942,7 @@ export class Builder {
           faces.push(res.item);
         }
         const shellOf = (v: number) => {
+          if (!faces.length) return shellBySubtraction(body, [], v);
           const before = measureShapeVolumeProperties(body).volume;
           try {
             const out = body.shell(v, (finder) => finder.when(({ element }) => faces.some((x) => x.isSame(element))));
@@ -1605,6 +1609,14 @@ function regionProfile(sk: SketchBuilt, points: [number, number][]): { drawing: 
   }
   const drawing = [...chosen].map((r) => r.drawing.clone()).reduce((a, b) => a.fuse(b));
   return { drawing, warning: moved ? "The sketch changed, so a chosen profile was matched to the nearest area. Check the selected profiles." : undefined };
+}
+
+/** Triangles from several fills in one array. */
+function joinFills(fills: (Float32Array | undefined)[]): Float32Array {
+  const out = new Float32Array(fills.reduce((n, f) => n + (f?.length ?? 0), 0));
+  let at = 0;
+  for (const f of fills) if (f) out.set(f, at), (at += f.length);
+  return out;
 }
 
 /** Triangulate a sketch's closed regions for the translucent profile fill. */

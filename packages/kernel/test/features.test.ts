@@ -294,6 +294,18 @@ describe("shell after a fillet", () => {
   });
 });
 
+describe("closed shell", () => {
+  it("hollows a body with walls all round when no face is opened", () => {
+    const doc = newDocument();
+    const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+    push(doc, { id: uid(), type: "shell", name: "S", bodyId: box.id, faces: [], thickness: "2" } as Feature);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    // 40 x 30 x 20 outside, 36 x 26 x 16 hollow inside.
+    expect(r.bodies[0]!.volume).toBeCloseTo(40 * 30 * 20 - 36 * 26 * 16, 0);
+  });
+});
+
 describe("chamfer types", () => {
   // A 40 x 30 x 20 box; the top front edge (40 long) is cut, so the removed volume is a triangle x 40.
   const cut = (set: (c: Extract<Feature, { type: "chamfer" }>) => void) => {
