@@ -22,7 +22,7 @@ fillets and real threads, not approximate meshes. On top of it is an interface b
 the next step is always on screen, every number accepts a formula, and when something can't be built, Whittle says
 why and suggests a fix.
 
-> **Status: 0.14, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
+> **Status: 0.15, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
 > work end to end. Full assemblies (mates, bills of materials), sheet metal and CAM are on the
 > [roadmap](PLAN.md#10-roadmap).
 
@@ -46,6 +46,7 @@ why and suggests a fix.
 - **Guided from the first click.** A short first-run question tunes the workspace to you. A hint line always shows the next step, tools that can't run yet say what they need, and a guided first part walks you through sketch, extrude and fillet.
 - **Precise when it matters.** Type exact sizes while you draw, constrain sketches, drive everything from named parameters and formulas such as `width / 2 + 3 mm`. Change one number and the whole part follows.
 - **Live, visual feedback.** Every feature previews as you edit it: blue for a new body, green where it adds material, red where it cuts. Drag the on-canvas arrows or type a value; the model updates as you go.
+- **On any screen.** The side panels collapse on a laptop and slide over the model on a tablet or phone; one finger orbits, two pinch and pan, and an installed web app opens `.whittle` files from your file manager.
 - **Nothing is lost.** Unlimited undo, autosave, crash recovery and a version history with restore, on every platform.
 - **Yours to keep.** Free and open source under MPL-2.0. No account, no telemetry, works fully offline (the web app too, once opened). The desktop app checks once a day for a new version; switch that off in Settings.
 
