@@ -34,6 +34,7 @@ import { nextSteps } from "../state/problems";
 import { getKernel } from "../state/kernel";
 import { cancelImagePick, imagePickPointer, placeImage, useImagePick } from "../state/refImage";
 import { type Pick, editFeature, findFeature, requestView, setSketchTool, setSketchView, setView, sketchMutate, toast, useApp } from "../state/store";
+import { touchGuard } from "../viewport/current";
 import { type SketchUIState, SketchController } from "../viewport/sketchTools";
 import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/Viewport";
 import { Icon, type IconName } from "./icons";
@@ -205,7 +206,7 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
   const cy = host ? Math.min(Math.max(y, R + 26), host.clientHeight - R - 26 - (dock ? dock + 18 : 0)) : y;
   return (
     <div className="radial" style={{ left: cx, top: cy }} role="menu" aria-label="Quick actions" onPointerDown={(e) => e.stopPropagation()}>
-      <button className="radial__hub" onClick={cancel} aria-label={sketchTool ? "Cancel the tool" : "Close"} title={sketchTool ? "Cancel the tool" : "Close"}>
+      <button className="radial__hub" onClick={() => performance.now() >= touchGuard.until && cancel()} aria-label={sketchTool ? "Cancel the tool" : "Close"} title={sketchTool ? "Cancel the tool" : "Close"}>
         <Icon name="close" size={14} />
       </button>
       {items.map((c, i) => {
@@ -220,6 +221,7 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
             className={`radial__item ${c.on?.(state) ? "is-on" : ""}`}
             style={{ transform: `translate(calc(${cos * R}px + ${hang}%), ${Math.sin(a) * R}px)`, animationDelay: `${i * 14}ms` }}
             onClick={() => {
+              if (performance.now() < touchGuard.until) return;
               close();
               c.run();
             }}
@@ -1010,7 +1012,7 @@ export function ViewportView() {
   })();
 
   return (
-    <section className={`viewport ${mode.kind === "sketch" ? "is-sketching" : ""} ${mode.kind === "pickPlane" || mode.kind === "measure" ? "is-picking" : ""}`} aria-label="3D view">
+    <section className={`viewport ${mode.kind === "sketch" ? "is-sketching" : ""} ${mode.kind === "pickPlane" || mode.kind === "measure" ? "is-picking" : ""}`} aria-label="3D view" role="main">
       <div ref={host} className="viewport__host" />
 
       {!kernelReady && (

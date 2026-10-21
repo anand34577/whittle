@@ -441,6 +441,9 @@ export interface RevolveFeature extends FeatureBase {
   axis: "x" | "y" | "line";
   axisLine?: Id;
   angle: Expr;
+  /** "symmetric" splits the angle evenly either side of the profile; "two" turns `angle` one way and `angle2` the other. */
+  extent?: "one" | "symmetric" | "two";
+  angle2?: Expr;
   op: BodyOp;
   target?: Id;
 }
@@ -477,6 +480,8 @@ export interface ShellFeature extends FeatureBase {
   bodyId?: Id;
   faces: FaceRef[];
   thickness: Expr;
+  /** Which way the wall grows from the original surface: into the body (default), out from it, or half each way. */
+  direction?: "inside" | "outside" | "both";
 }
 
 export type PrimitiveShape = "box" | "cylinder" | "sphere" | "cone" | "torus" | "tube";

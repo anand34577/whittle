@@ -3,7 +3,7 @@
  * left unfinished, each with where it is and (when there is one) a one-click fix.
  */
 import type { Id } from "@whittle/core";
-import { activeEnd } from "@whittle/core";
+import { activeEnd, documentEvaluator, featureValueIssues } from "@whittle/core";
 import { type AppState, editFeature, mutate, updateFeature, useApp } from "./store";
 import { fixInUnits } from "../ui/DragHandle";
 
@@ -41,6 +41,13 @@ export function problemsOf(s: Pick<AppState, "doc" | "regen" | "session">): Prob
         : { label: "Edit", run: () => editFeature(st.id) },
     });
   }
+
+  const ev = documentEvaluator(doc);
+  doc.features.slice(0, end).forEach((f) => {
+    if (f.suppressed || f.type === "sketch" || regen?.status.some((st) => st.id === f.id && st.state === "error")) return;
+    const issues = featureValueIssues(f, ev);
+    if (issues.length) out.push({ key: `val-${f.id}`, severity: "error", title: `${f.name} has a value that can't work`, detail: issues.join(" "), featureId: f.id, fix: { label: "Edit", run: () => editFeature(f.id) } });
+  });
 
   doc.features.slice(0, end).forEach((f) => {
     if (f.type !== "sketch" || f.suppressed) return;

@@ -44,6 +44,8 @@ export interface BodyResult {
   volume: number;
   area: number;
   centerOfMass: Vec3;
+  /** Inertia tensor about the center of mass for unit density, in mm⁵: [Ixx, Iyy, Izz, Ixy, Iyz, Izx]. Solids only. */
+  inertia?: [number, number, number, number, number, number];
   bbox: [Vec3, Vec3];
 }
 

@@ -282,6 +282,8 @@ export const COMMANDS: Command[] = [
   display("xray", "X-ray", "transparent see through ghost"),
   { id: "grid", label: "Grid", group: "View", icon: "grid", keywords: "floor lines show hide", on: (s) => s.view.grid, run: () => setView({ grid: !get().view.grid }) },
   { id: "ortho", label: "Orthographic", group: "View", icon: "ortho", keywords: "perspective parallel projection camera", on: (s) => s.view.ortho, run: () => setView({ ortho: !get().view.ortho }) },
+  { id: "toggle-browser", label: "Browser panel", group: "View", icon: "sidebarLeft", keywords: "sidebar left tree bodies sketches show hide", hint: "Show or hide the design browser", on: (s) => s.browserOpen, run: () => useApp.setState({ browserOpen: !get().browserOpen }) },
+  { id: "toggle-panel", label: "Properties panel", group: "View", icon: "sidebarRight", keywords: "sidebar right inspector show hide", hint: "Show or hide the properties panel", on: (s) => s.panelOpen, run: () => useApp.setState({ panelOpen: !get().panelOpen }) },
   { id: "screenshot", label: "Save image", group: "View", icon: "camera", keywords: "screenshot png picture render capture", run: () => void saveScreenshot() },
   { id: "show-all", label: "Show all bodies", group: "View", icon: "eye", keywords: "unhide reveal", run: () => mutate("Show all", (d) => void Object.values(d.bodies).forEach((b) => (b.visible = true))) },
   // Sketch tools

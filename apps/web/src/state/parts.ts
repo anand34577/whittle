@@ -15,6 +15,7 @@ import {
   type SketchEntity,
   type SketchFeature,
   type WhittleDocument,
+  makeCoil,
   makeExtrude,
   makePrimitive,
   makeLoft,
@@ -334,6 +335,87 @@ export const PARTS: PartDef[] = [
       b.add(rv, "Pulley");
     },
   },
+  {
+    id: "bolt",
+    title: "Hex bolt",
+    blurb: "Hex head and plain shank; M3 by default",
+    category: "Fasteners",
+    build: (b) => {
+      const d = b.p("diameter", "3 mm", "length", "Shank diameter (M3)");
+      const len = b.p("length", "12 mm", "length", "Under the head");
+      const af = b.p("across_flats", "5.5 mm", "length", "Wrench size");
+      const head = b.p("head_height", "2 mm");
+      const hex = b.sketch("XY", [{ type: "polygon", cx: "0", cy: "0", r: `${af} / (2 * cos(30°))`, sides: "6", angle: "0" }]);
+      const h = b.extrude(hex, head, {}, "Bolt");
+      const shank = b.sketch("XY", [{ type: "circle", cx: "0", cy: "0", r: `${d} / 2` }], `-${len}`);
+      b.extrude(shank, `${len} + ${head} / 2`, { op: "join", target: h.id });
+    },
+  },
+  {
+    id: "boss",
+    title: "Screw boss",
+    blurb: "Round post for a self-tapping screw, braced by four ribs",
+    category: "Enclosures",
+    build: (b) => {
+      const od = b.p("diameter", "8 mm", "length", "Outer diameter");
+      const hole = b.p("hole", "2.5 mm", "length", "Pilot hole for an M3 screw");
+      const h = b.p("height", "10 mm");
+      const rib = b.p("rib", "1.2 mm", "length", "Rib thickness");
+      const reach = b.p("reach", "6 mm", "length", "How far each rib reaches from the post");
+      const post = b.sketch("XY", [
+        { type: "circle", cx: "0", cy: "0", r: `${od} / 2` },
+        { type: "circle", cx: "0", cy: "0", r: `${hole} / 2` },
+      ]);
+      const body = b.extrude(post, h, {}, "Boss");
+      const reachTo = `${od} / 2 + ${reach}`;
+      const ribs = b.sketch("XY", [
+        { type: "rect", x: "0", y: "0", w: `2 * (${reachTo})`, h: rib, anchor: "center" },
+        { type: "rect", x: "0", y: "0", w: rib, h: `2 * (${reachTo})`, anchor: "center" },
+      ]);
+      b.extrude(ribs, `${h} * 0.6`, { op: "join", target: body.id });
+      // The pilot hole stays open through the ribs where they cross it.
+      const bore = b.sketch("XY", [{ type: "circle", cx: "0", cy: "0", r: `${hole} / 2` }]);
+      b.extrude(bore, h, { op: "cut", target: body.id });
+    },
+  },
+  {
+    id: "grille",
+    title: "Vent grille",
+    blurb: "Plate with a row of long slots for airflow",
+    category: "Enclosures",
+    build: (b) => {
+      const w = b.p("width", "50 mm");
+      const d = b.p("depth", "30 mm");
+      const t = b.p("thickness", "2 mm");
+      const slot = b.p("slot", "3 mm", "length", "Slot width");
+      const pitch = b.p("pitch", "6 mm", "length", "Distance between slot centres");
+      const slots = [-3, -2, -1, 0, 1, 2, 3].map((i) => ({
+        type: "slot" as const,
+        cx: `${i} * ${pitch}`,
+        cy: "0",
+        length: `${d} - 8 mm`,
+        width: slot,
+        angle: "90",
+      }));
+      const s = b.sketch("XY", [{ type: "rect", x: "0", y: "0", w, h: d, anchor: "center", corner: "2" }, ...slots]);
+      b.extrude(s, t, {}, "Grille");
+    },
+  },
+  {
+    id: "spring",
+    title: "Compression spring",
+    blurb: "Round-wire coil; set radius, pitch, height and wire",
+    category: "Mechanical",
+    build: (b) => {
+      const r = b.p("radius", "6 mm", "length", "To the middle of the wire");
+      const pitch = b.p("pitch", "3 mm");
+      const h = b.p("height", "24 mm");
+      const wire = b.p("wire", "1 mm", "length", "Wire diameter");
+      const coil = makeCoil(b.doc, "spring");
+      if (coil.type === "coil") Object.assign(coil, { radius: r, pitch, height: h, size: wire });
+      b.add(coil, "Spring");
+    },
+  },
 ];
 
 /** X extent of each part at its default sizes (used to place it beside what's there). */
@@ -350,6 +432,10 @@ const EXTENT: Record<string, [number, number]> = {
   nametag: [-35, 35],
   vase: [-32, 32],
   pulley: [-20, 20],
+  bolt: [-3.2, 3.2],
+  boss: [-10, 10],
+  grille: [-25, 25],
+  spring: [-7, 7],
 };
 
 /** Insert a library part into the current design as one undo step. */

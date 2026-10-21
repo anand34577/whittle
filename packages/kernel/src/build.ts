@@ -12,6 +12,7 @@ import { type BodyOp, type EdgeRef, type Evaluator, type FaceRef, type Feature, 
 import { Drawing, type Edge, type Face, type FaceFinder, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeSolid, Vector, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
 import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
+import "./fastTopo";
 import { stlToShape } from "./stl";
 import { circleOf, constructFrame } from "./construct";
 import { surfaceTool, prismSurface, revolveSurface } from "./surface";
@@ -638,7 +639,20 @@ export class Builder {
         } else {
           const angle = ev.num(f.angle, "angle", "Angle");
           if (Math.abs(angle) < 1e-6) throw new FeatureError("The angle can't be zero.");
-          const d = Math.min(Math.abs(deg(angle)), 360) * Math.sign(angle);
+          let d = Math.min(Math.abs(deg(angle)), 360) * Math.sign(angle);
+          // Where the turn starts, relative to the profile: symmetric straddles it, two-sided runs back by the second angle.
+          let startBack = 0;
+          if (f.extent === "symmetric") {
+            d = Math.min(Math.abs(d), 360) * Math.sign(d);
+            startBack = Math.abs(d) / 2;
+          } else if (f.extent === "two") {
+            const a2 = ev.num(f.angle2 ?? "0", "angle", "Second angle");
+            if (a2 < 0) throw new FeatureError("The second angle can't be negative.");
+            const back = Math.min(deg(a2), 360);
+            if (Math.abs(d) + back > 360) d = Math.sign(d) * (360 - back);
+            startBack = back;
+            d = Math.sign(d || 1) * (Math.abs(d) + back);
+          }
           const { origin, dir } = revolveAxis(f.axis, f.axisLine, sk, ev);
           if (surf) {
             const axisEntity = f.axis === "line" ? (f.axisLine ?? sk.source?.entities.find((x) => x.type === "polyline" && (x.open || x.construction))?.id) : undefined;
@@ -647,6 +661,7 @@ export class Builder {
             const sketch = profile!.clone().sketchOnPlane(planeFromFrame(sk.frame));
             tool = clean(sketch.revolve(dir, { origin, angle: d }) as Shape3D);
           }
+          if (startBack > 1e-9 && Math.abs(d) < 360 - 1e-9) tool = tool.rotate(-startBack * Math.sign(d || 1), origin, dir);
         }
         return applyOp(bodies, f.id, surf ? "new" : f.op, f.target, tool) ?? regionWarning;
       }
@@ -766,7 +781,7 @@ export class Builder {
         const src = bodies.get(id)!;
         let out: Shape3D;
         try {
-          out = makeOffset(src as unknown as Face, d, 1e-4);
+          out = hasConeTip(src) ? offsetSharp(src, d) : makeOffset(src as unknown as Face, d, 1e-4);
           // A shrunk body that lost all its volume is a failure, not a result.
           if (!(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");
         } catch {
@@ -909,12 +924,14 @@ export class Builder {
           }
           return out;
         };
+        const started = performance.now();
         try {
           for (const [id, s] of run(value)) bodies.set(id, s);
         } catch {
           if (fullRound) throw new FeatureError("Full round could not be made here. It needs a flat face with two straight parallel edges and nothing else cutting into it.");
           const field = f.type === "fillet" ? "radius" : "distance";
-          const fit = largestWorking(value, (v) => run(v));
+          // A first try that already took seconds means every further try will too: report the failure instead.
+          const fit = performance.now() - started > 3000 ? null : largestWorking(value, (v) => run(v));
           const what = f.type === "fillet" ? "fillet radius" : "chamfer distance";
           throw new FeatureError(
             fit
@@ -953,10 +970,12 @@ export class Builder {
           }
           return shellBySubtraction(body, faces, v);
         };
+        const walled = (v: number) => (f.direction === "outside" ? shellBySubtraction(body, faces, 0, v) : f.direction === "both" ? shellBySubtraction(body, faces, v / 2, v / 2) : shellOf(v));
+        const started = performance.now();
         try {
-          bodies.set(bodyId, shellOf(t));
+          bodies.set(bodyId, walled(t));
         } catch {
-          const fit = largestWorking(t, shellOf);
+          const fit = performance.now() - started > 3000 ? null : largestWorking(t, walled);
           throw new FeatureError(
             fit ? `A ${fmt(t)} mm wall is too thick for this body. About ${fmt(fit)} mm fits.` : FRIENDLY.shell!,
             fit ? { label: `Use ${fmt(fit)} mm`, field: "thickness", value: `${fmt(fit)} mm` } : undefined,
@@ -1467,43 +1486,63 @@ function pickedAxis(g: { edge?: EdgeRef; face?: FaceRef }, bodies: Map<Id, Shape
  * Shell the long way: the body less its inward offset, opened through each removed (flat) face. Used when
  * OpenCascade's thick solid fails, which it does whenever a fillet runs into an open face.
  */
-function shellBySubtraction(body: Shape3D, faces: Face[], t: number): Shape3D {
-  const before = measureShapeVolumeProperties(body).volume;
-  let inner: Shape3D | undefined;
-  // ponytail: an offset exactly equal to a fillet radius degenerates; a hair more gives the sharp inner corner.
-  for (const d of [t, t * 1.001, t * 1.01]) {
-    try {
-      // Sharp (intersection) joins: rounded ones fail once the wall is thicker than a fillet's radius.
-      const oc = getOC();
-      const b = new oc.BRepOffsetAPI_MakeOffsetShape();
-      b.PerformByJoin(body.wrapped, -d, 1e-4, oc.BRepOffset_Mode.BRepOffset_Skin, false, false, oc.GeomAbs_JoinType.GeomAbs_Intersection, false, new oc.Message_ProgressRange());
-      let s = cast(downcast(b.Shape())) as unknown as Shape3D;
-      b.delete();
-      if (s.constructor.name === "Shell") s = makeSolid([s as never]) as unknown as Shape3D;
-      const v = measureShapeVolumeProperties(s).volume;
-      if (v > 1e-9 && v < before) {
-        inner = s;
-        break;
-      }
-    } catch {
-      /* next */
-    }
+/**
+ * A body grown (d > 0) or shrunk (d < 0) with sharp, intersecting joins: every corner stays a corner, and it is quick on
+ * shapes where the rounded offset can stall for good.
+ */
+function offsetSharp(body: Shape3D, d: number): Shape3D {
+  const oc = getOC();
+  const b = new oc.BRepOffsetAPI_MakeOffsetShape();
+  try {
+    b.PerformByJoin(body.wrapped, d, 1e-4, oc.BRepOffset_Mode.BRepOffset_Skin, false, false, oc.GeomAbs_JoinType.GeomAbs_Intersection, false, new oc.Message_ProgressRange());
+    const s = cast(downcast(b.Shape())) as unknown as Shape3D;
+    return s.constructor.name === "Shell" ? (makeSolid([s as never]) as unknown as Shape3D) : s;
+  } finally {
+    b.delete();
   }
-  if (!inner) throw new Error("no inner offset");
+}
+
+/** A cone that ends in a point (not a truncated one). OpenCascade's rounded offset never returns when it has to round that tip. */
+function hasConeTip(shape: Shape3D): boolean {
+  // The tip appears as a circle edge of no length.
+  return shape.faces.some((f) => f.geomType === "CONE" && f.edges.some((e) => e.geomType === "CIRCLE" && e.length < 1e-6));
+}
+
+function shellBySubtraction(body: Shape3D, faces: Face[], t: number, outward = 0): Shape3D {
+  const before = measureShapeVolumeProperties(body).volume;
+  /** The body grown (`grow`) or shrunk by `d`, with sharp (intersection) joins: rounded ones fail once the wall is thicker than a fillet's radius. */
+  const offsetBody = (d: number, grow: boolean): Shape3D => {
+    // ponytail: an offset exactly equal to a fillet radius degenerates; a hair more gives the sharp inner corner.
+    for (const k of [1, 1.001, 1.01]) {
+      try {
+        const s = offsetSharp(body, grow ? d * k : -d * k);
+        const v = measureShapeVolumeProperties(s).volume;
+        if (grow ? v > before : v > 1e-9 && v < before) return s;
+      } catch {
+        /* next */
+      }
+    }
+    throw new Error("no offset");
+  };
+  const inner = t > 0 ? offsetBody(t, false) : body;
+  const outer = outward > 0 ? offsetBody(outward, true) : body;
   let cutter: Shape3D = inner;
   for (const face of faces) {
     if (face.geomType !== "PLANE") throw new Error("curved opening");
     const { center, normal } = faceInfo(face);
     // The inner solid's copy of this face, pushed out through the wall.
-    const under = inner.faces.find((x) => {
-      if (x.geomType !== "PLANE") return false;
-      const i = faceInfo(x);
-      return dot(i.normal, normal) > 0.999 && Math.abs(dot(subv(i.center, center), normal) + t) < Math.max(1e-3, t * 0.01);
-    });
+    const under =
+      t > 0
+        ? inner.faces.find((x) => {
+            if (x.geomType !== "PLANE") return false;
+            const i = faceInfo(x);
+            return dot(i.normal, normal) > 0.999 && Math.abs(dot(subv(i.center, center), normal) + t) < Math.max(1e-3, t * 0.01);
+          })
+        : face;
     if (!under) throw new Error("no inner face");
-    cutter = cutter.fuse(basicFaceExtrusion(under, new Vector(scale(normal, t * 1.5))) as unknown as Shape3D);
+    cutter = cutter.fuse(basicFaceExtrusion(under, new Vector(scale(normal, (t + outward) * 1.5))) as unknown as Shape3D);
   }
-  const out = clean(body.cut(cutter));
+  const out = clean(outer.cut(cutter));
   if (!(measureShapeVolumeProperties(out).volume > 1e-9)) throw new Error("empty");
   return out;
 }
@@ -1639,11 +1678,17 @@ function profileFill(drawing: Drawing, frame: SketchFrame): Float32Array | undef
 
 const fmt = (v: number) => String(Math.round(v * 100) / 100);
 
-/** Find (roughly) the largest value below `start` for which `attempt` succeeds. */
-function largestWorking(start: number, attempt: (v: number) => unknown): number | null {
+/**
+ * Find (roughly) the largest value below `start` for which `attempt` succeeds. Each attempt is a whole failed build, so on
+ * a heavy body the search is cut short after `budgetMs`: a quick "can't be applied" beats a minute of looking for a number.
+ */
+function largestWorking(start: number, attempt: (v: number) => unknown, budgetMs = 6000): number | null {
+  const t0 = performance.now();
+  const spent = () => performance.now() - t0 > budgetMs;
   let lo: number | null = null;
   let hi = start;
   for (const k of [0.9, 0.75, 0.5, 0.25, 0.1]) {
+    if (spent()) return null;
     try {
       attempt(start * k);
       lo = start * k;
@@ -1654,7 +1699,7 @@ function largestWorking(start: number, attempt: (v: number) => unknown): number 
   }
   if (lo === null) return null;
   let good: number = lo;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 4 && !spent(); i++) {
     const mid: number = (good + hi) / 2;
     try {
       attempt(mid);
@@ -1691,12 +1736,14 @@ function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyRes
   let volume = 0;
   let area = 0;
   let centerOfMass: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  let inertia: BodyResult["inertia"];
   try {
     const props = measureShapeVolumeProperties(shape);
     // Surfaces (shells, loose faces) have no volume, whatever the integral says about their open shape.
     if (hasSolid(shape)) {
       volume = props.volume;
       centerOfMass = props.centerOfMass;
+      inertia = inertiaTensor(props, centerOfMass);
     }
     area = measureArea(shape);
   } catch {
@@ -1733,6 +1780,37 @@ function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyRes
     volume,
     area,
     centerOfMass,
+    inertia,
     bbox: [min, max],
   };
+}
+
+/**
+ * The inertia tensor about `com` for unit density, from the moments about six axes through it: the three coordinate
+ * axes give Ixx, Iyy, Izz, and the moment about a diagonal axis n gives the product term (I(n) = (Ia + Ib) / 2 + I_ab).
+ */
+function inertiaTensor(props: ReturnType<typeof measureShapeVolumeProperties>, com: Vec3): BodyResult["inertia"] {
+  const oc = getOC();
+  const about = (d: Vec3): number => {
+    const n = Math.hypot(...d);
+    const pt = new oc.gp_Pnt(com[0], com[1], com[2]);
+    const dir = new oc.gp_Dir(d[0] / n, d[1] / n, d[2] / n);
+    const ax = new oc.gp_Ax1(pt, dir);
+    try {
+      return props.wrapped.MomentOfInertia(ax);
+    } finally {
+      pt.delete();
+      dir.delete();
+      ax.delete();
+    }
+  };
+  try {
+    const [ixx, iyy, izz] = [about([1, 0, 0]), about([0, 1, 0]), about([0, 0, 1])];
+    const ixy = about([1, 1, 0]) - (ixx + iyy) / 2;
+    const iyz = about([0, 1, 1]) - (iyy + izz) / 2;
+    const izx = about([1, 0, 1]) - (izz + ixx) / 2;
+    return [ixx, iyy, izz, ixy, iyz, izx].every(Number.isFinite) ? [ixx, iyy, izz, ixy, iyz, izx] : undefined;
+  } catch {
+    return undefined;
+  }
 }

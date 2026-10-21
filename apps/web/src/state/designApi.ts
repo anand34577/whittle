@@ -40,6 +40,7 @@ import {
   trimGeometry,
   activeEnd,
   documentEvaluator,
+  featureValueIssues,
   formatQuantity,
   makeChamfer,
   makeCoil,
@@ -196,14 +197,14 @@ export const DESIGN_TOOLS: ToolDef[] = [
     name: "add_feature",
     description: `Add a 3D feature at the end of the timeline. Types: ${[
       "extrude {sketch, distance, extent: one|symmetric|two|through|face (through = all bodies; face = stop exactly at to_face: {body, face: top|bottom|front|back|left|right}), distance2, flip, taper, twist, thin (wall thickness: walls along outlines, open paths become ribs), thinSide: center|inside|outside, op, regions: [[x, y], ...] (optional: only the sketch areas holding these points, e.g. just the circle inside a rectangle; unset = the whole sketch with inner shapes as holes)}",
-      "revolve {sketch, axis: x|y|line (line = the sketch's first path or construction line), angle, op, regions}",
+      "revolve {sketch, axis: x|y|line (line = the sketch's first path or construction line), angle, extent: one|symmetric|two (symmetric splits the angle either side of the sketch; two turns angle one way and angle2 the other), angle2, op, regions}",
       "loft {sketches: [ids], ruled, op}",
       "sweep {profile, path, orientation: fixed|frenet, op}",
       "primitive {shape: box|cylinder|sphere|cone|torus|tube, width, depth, height, radius, radius2, position: [x,y,z], op}",
       "coil {section: circle|triangle|square, radius, pitch, height, size, lefthand, position, op}",
       "fillet {body, edges: selector, radius}",
       "chamfer {body, edges: selector, distance, mode: equal|two|angle, distance2 (two), angle (angle, degrees), flip}",
-      "shell {body, face: selector (\"none\": closed, hollow inside), thickness}",
+      "shell {body, face: selector (\"none\": closed, hollow inside), thickness, direction: inside|outside|both (which way the wall grows from the surface; default inside)}",
       "hole {body, face: selector, points: [[x,y]...] in the face frame, diameter, through, depth, style: simple|counterbore|countersink, headDiameter, headDepth, sinkAngle (deg, default 90), tipAngle (deg drill point of a blind hole, default 118; \"\" for a flat bottom)}",
       "draft {body, faces: 'sides', angle, pull: x|y|z}",
       "mirror {body, plane: XY|XZ|YZ, offset (moves the plane along its normal), merge, features: [earlier feature names to mirror instead of the whole body]}",
@@ -413,9 +414,15 @@ function entityFrom(s: Record<string, unknown>): SketchEntity {
 
 const EXPR_KEYS = new Set([
   "distance", "distance2", "taper", "twist", "angle", "width", "depth", "height", "radius", "radius2", "pitch", "size", "thickness",
-  "diameter", "headDiameter", "headDepth", "sinkAngle", "count", "spacing", "offset", "factor", "neutral", "scale", "padding", "thin", "count2", "spacing2",
+  "diameter", "headDiameter", "headDepth", "sinkAngle", "count", "spacing", "offset", "factor", "neutral", "scale", "padding", "thin", "count2", "spacing2", "angle2",
 ]);
-const ENUM_KEYS = new Set(["extent", "mode", "flip", "op", "axis", "axis2", "thinSide", "shape", "ruled", "orientation", "section", "lefthand", "style", "through", "plane", "merge", "pattern", "copy", "keepTools", "keep", "center", "pull"]);
+const ENUM_KEYS = new Set(["extent", "mode", "flip", "op", "axis", "axis2", "thinSide", "shape", "ruled", "orientation", "section", "lefthand", "style", "through", "plane", "merge", "pattern", "copy", "keepTools", "keep", "center", "pull", "direction"]);
+
+/** Refuse values that cannot make a solid, with every reason at once, before anything is changed. */
+function refuseBadValues(f: Feature) {
+  const issues = featureValueIssues(f, documentEvaluator(doc()));
+  if (issues.length) throw new ApiInputError(`${FEATURE_LABELS[f.type]}: ${issues.join(" ")}`);
+}
 
 /** Apply API settings onto a feature draft (resolving names, selectors and formulas). */
 function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
@@ -757,6 +764,7 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
         const settings = (input.settings ?? {}) as Record<string, unknown>;
         const f = make(doc(), settings);
         applySettings(f as Draft<Feature>, settings);
+        refuseBadValues(f as Feature);
         if (input.name) f.name = String(input.name);
         mutate(label(`add ${f.name}`), (d) => {
           const at = d.rollback === null ? d.features.length : d.rollback;
@@ -774,7 +782,10 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
         const trial = structuredClone(f) as Feature;
         if (trial.type === "sketch") {
           if (settings.shapes) trial.entities = (settings.shapes as Record<string, unknown>[]).map(entityFrom);
-        } else applySettings(trial as Draft<Feature>, settings);
+        } else {
+          applySettings(trial as Draft<Feature>, settings);
+          refuseBadValues(trial);
+        }
         mutate(label(`edit ${f.name}`), (d) => {
           const i = d.features.findIndex((x) => x.id === f.id);
           if (i < 0) return;

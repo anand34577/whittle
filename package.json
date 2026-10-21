@@ -1,7 +1,7 @@
 {
   "name": "whittle",
   "private": true,
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Whittle: open-source parametric 3D CAD. Sketch, model and export precise parts on Windows, macOS, Linux, a server or the browser.",
   "license": "MPL-2.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "preview": "node node_modules/vite/bin/vite.js preview --config apps/web/vite.config.ts",
     "test": "node node_modules/vitest/vitest.mjs run",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
-    "test:e2e": "node tests/e2e/smoke.mjs && node tests/e2e/features.mjs && node tests/e2e/advanced.mjs && node tests/e2e/modeling.mjs && node tests/e2e/constraints.mjs && node tests/e2e/pictures.mjs && node tests/e2e/shapes.mjs && node tests/e2e/sketching.mjs && node tests/e2e/audit.mjs && node tests/e2e/direct.mjs && node tests/e2e/guidance.mjs && node tests/e2e/curves.mjs && node tests/e2e/previews.mjs && node tests/e2e/palette.mjs && node tests/e2e/appearance.mjs && node tests/e2e/drawing.mjs && node tests/e2e/sketchchecks.mjs"
+    "test:e2e": "node tests/e2e/smoke.mjs && node tests/e2e/features.mjs && node tests/e2e/advanced.mjs && node tests/e2e/modeling.mjs && node tests/e2e/constraints.mjs && node tests/e2e/pictures.mjs && node tests/e2e/shapes.mjs && node tests/e2e/sketching.mjs && node tests/e2e/audit.mjs && node tests/e2e/direct.mjs && node tests/e2e/guidance.mjs && node tests/e2e/curves.mjs && node tests/e2e/previews.mjs && node tests/e2e/palette.mjs && node tests/e2e/appearance.mjs && node tests/e2e/drawing.mjs && node tests/e2e/sketchchecks.mjs && node tests/e2e/responsive.mjs && node tests/e2e/fusion.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.134.0",

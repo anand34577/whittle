@@ -103,6 +103,14 @@ Every launch opens the **start screen**, which offers:
 └────────────────────────────── Status bar ───────────────────────────────┘
 ```
 
+### Panels, tablets and phones
+
+The two side panels (Browser, Properties) have toggle buttons at the far ends of the title bar. On a wide window they are
+columns that collapse to give the model the whole width. Below 1100 px (tablets, small windows, phones) they become
+slide-over drawers that start closed: tap the toggle to open one, or tap the model to close it. Opening a feature or a
+sketch opens the Properties drawer by itself; on a phone it is a bottom sheet, so the model stays in view for picking
+edges and faces. On touch screens the small controls get larger touch targets.
+
 ### Title bar
 
 - File buttons: New, Open, Save, Export, then Undo and Redo (their tooltips name the step).
@@ -399,12 +407,12 @@ While the panel is open, the feature's shape is tinted by its Result, as in othe
 | Feature | Key | How to start | Fields |
 |---|---|---|---|
 | **Extrude** | E | Uses the selected sketch, or the newest unused one. On a face sketch it defaults to Join | Profile, Distance, Direction (One side / Symmetric / Two sides / **Through all** / **Up to a face**), Flip, **Thin wall** (wall thickness, Inside / Centered / Outside), Taper, Twist, Result, Body |
-| **Revolve** | R | Same sketch rule | Profile, Axis (sketch vertical, sketch horizontal, or **a line** drawn in the sketch), Angle (up to 360°), Result |
+| **Revolve** | R | Same sketch rule | Profile, Axis (sketch vertical, sketch horizontal, or **a line** drawn in the sketch), Direction (One side / **Symmetric** / **Two sides**), Angle (up to 360°; Angle 2 for the other side), Result |
 | **Loft** | | Selected sketches (Shift-click several), or the two newest unused sketches. Click sketches to add or remove profiles | Profiles in order, Add, Straight sides (ruled), Result. Each profile must be a single closed shape |
 | **Hole** | D | Select a flat face (the click point becomes the first hole), or click a face after starting. Each click on the face adds a hole | Type (Simple / Counterbore / Countersink), Diameter, Through all or Depth, Head Ø, Head depth (counterbore), position of each hole (X, Y) |
 | **Fillet** | F | Select edges or faces first, or click them after starting (click again to deselect). Clicking an edge also takes the edges that continue smoothly from it (a whole rounded outline); switch that off in the panel | Radius |
 | **Chamfer** | | Same as fillet | Distance |
-| **Shell** | | Click the face(s) to remove (the open side) | Wall thickness |
+| **Shell** | | Click the face(s) to remove (the open side) | Direction (**Inside** keeps the outer size, **Outside** keeps the cavity size, **Both** splits the wall), Wall thickness |
 | **Move / Copy** | M | Selected body or the newest one; click a body to change it | X, Y, Z move; Rotate around X/Y/Z by Angle (about the body's own centre); Keep the original (make a copy) |
 | **Combine** | J | Selected bodies (first = target, rest = tools). Click bodies to set the target, then toggle tools | Operation (Join / Cut / Keep overlap), Target, Tools, Keep tool bodies |
 | **Mirror** | | Selected body or the newest | Repeat (A whole body / **Features**), Mirror plane (YZ, XZ, XY), Plane offset, Merge with the original |
@@ -483,6 +491,10 @@ Each part inserts as **ordinary features** with its own parameters, prefixed wit
 | Name tag | Everyday | width 70, height 24, thickness 3 mm | Rounded plate with key-ring hole + raised bold text "Whittle" |
 | Vase | Everyday | height 90, radius 24, wall 1.6 mm | Loft through four circles + shell (top open) |
 | Pulley | Mechanical | radius 20, width 10, groove 3, bore 5 mm | V-groove profile revolved |
+| Hex bolt | Fasteners | diameter 3 mm, length 12 mm, across_flats 5.5 mm, head_height 2 mm | Hexagon head + round shank |
+| Screw boss | Enclosures | diameter 8, hole 2.5 mm (M3 pilot), height 10, rib 1.2, reach 6 mm | Post with pilot hole + four ribs |
+| Vent grille | Enclosures | width 50, depth 30, thickness 2, slot 3, pitch 6 mm | Rounded plate with seven slots |
+| Compression spring | Mechanical | radius 6, pitch 3, height 24, wire 1 mm | Round-wire coil |
 
 ---
 
@@ -516,8 +528,8 @@ hole / 2
 | Supported | Details |
 |---|---|
 | Operators | `+ - * / ^`, parentheses, unary minus |
-| Units | `mm`, `cm`, `m`, `in`, `ft`, `"` (inches), `deg`, `°`, `rad` |
-| Functions | `sin cos tan asin acos atan atan2 sqrt abs round floor ceil min max` |
+| Units | `mm`, `cm`, `m`, `µm` (or `um`), `in` (or `inch`, `"`), `ft` (or `'`), `yd`, `mil` (or `thou`), `deg`, `°`, `rad` |
+| Functions | `sin cos tan asin acos atan atan2 sqrt cbrt abs sign round floor ceil trunc min max pow exp ln log hypot mod` (`log` is base 10) |
 | Constants | `pi`, `tau` |
 | Unit checking | Adding a length to an angle is an error, with a clear message |
 | Bare numbers | Use the field's unit (the design unit for lengths, degrees for angles) |
@@ -538,7 +550,7 @@ Changing a parameter rebuilds everything that uses it.
   - **Roll back to before this**
   - **Move earlier** / **Move later**
   - **Delete**: warns and lists the later steps that depend on it.
-- **Drag a step** to reorder the timeline. Moves that would break the design (a step placed before something it uses) are refused with the reason.
+- **Drag a step** to reorder the timeline, or focus it and press **Alt + ←/→** (Enter edits the step). Moves that would break the design (a step placed before something it uses) are refused with the reason.
 - **Rollback marker:** drag the orange marker to rebuild only up to that point. New features are inserted at the marker. Buttons: go to start, step back, step forward, go to end.
 - Step states: OK, warning (yellow dot), error (red dot), suppressed, rolled back (greyed).
 
@@ -600,7 +612,7 @@ Colours faces red where they point downward more than 45° from vertical and are
 
 ### Inspector numbers
 
-Volume (cm³ or in³), mass for the chosen material, size, surface area, feature count, body count.
+Volume (cm³ or in³), mass for the chosen material, center of mass, **moments of inertia** (the three principal moments about the center of mass, in g·cm², for a body or for all bodies together), size, surface area, feature count, body count.
 
 ---
 
@@ -818,6 +830,8 @@ Press **?** in the app for the full list.
 | Drag a field label | Scrub its value |
 | Drop a file | Open `.whittle` or import STEP/STL |
 
+**Touch screens:** one finger drags to orbit (a tap selects); two fingers pinch to zoom and drag together to pan. While sketching, one finger draws and two fingers move the view.
+
 ---
 
 ## 17. Architecture
@@ -863,7 +877,7 @@ Newer rebuild requests replace older pending ones.
 
 | Suite | Command | Covers |
 |---|---|---|
-| Unit and geometry | `npm test` | 278 tests, including constraint solving (solved profiles extrude to exact volumes, a dimension or parameter change re-solves, named conflicts, tangent slots, revolve about a construction line) and trim / extend; also expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part |
+| Unit and geometry | `npm test` | 330+ tests, including constraint solving (solved profiles extrude to exact volumes, a dimension or parameter change re-solves, named conflicts, tangent slots, revolve about a construction line) and trim / extend; also expressions and units, undo history, file format, sketch extrude, references surviving upstream edits (fillet stays on its edges when the sketch width changes, with an exact volume check), fix suggestions, face sketches, shell, patterns, exports, new shapes, ellipse/gear/text/rounded outlines, holes (counterbore, countersink, misses), loft, move, combine, touching holes, text placement, STEP and STL import round trips, every library part (and save / STEP / STL round trips of a sample of them), revolve and shell directions, moments of inertia, listing big shapes' faces in linear time |
 | Core browser flow | `node tests/e2e/smoke.mjs [url]` | Start screen, template, parameter change, sketch with typed size, extrude, fillet, 3MF export, theme |
 | Feature tour | `node tests/e2e/features.mjs [url]` | Parts library, vase and print check, section, X-ray, new sketch tools, text, arrange tools, extrude, counterbore hole, measure, radial menu, box + combine cut, move copy, image export |
 | Modelling depth | `node tests/e2e/modeling.mjs [url]` | Arcs drawn with the mouse, offset, thin extrude, through all, grid, offset mirror, revolve about a line, ribs |
@@ -876,6 +890,8 @@ Newer rebuild requests replace older pending ones.
 | Direct editing | `node tests/e2e/direct.mjs [url]` | Drag handles, on-canvas values, reference dimensions, first-dimension scaling, box select |
 | Drawing guidance | `node tests/e2e/guidance.mjs [url]` | Perpendicular and midpoint snaps, starting on an end, a curve or a crossing; the relations are kept, redundant ones tidied in the same undo step |
 | Curves | `node tests/e2e/curves.mjs [url]` | Ellipse drawn to typed sizes is fully defined and extrudes exactly; Dimension tool sets its major then minor radius; the assistant draws one |
+| Responsive and touch | `node tests/e2e/responsive.mjs [url]` | Panels collapse on a wide window and become drawers on a phone (the editor opens by itself), one finger orbits, two pinch and pan |
+| Third audit | `node tests/e2e/fusion.mjs [url]` | Symmetric and two-sided revolve, outside shell, moments of inertia, the new library parts, the wider formula language |
 | Previews | `node tests/e2e/previews.mjs [url]` | Resting on an edge in Fillet previews it (simulated and with a real mouse) without picking it; moving off restores |
 
 `npm run test:e2e` runs them all against the dev server (`npm run dev`); they pass with no console errors. The offline web app

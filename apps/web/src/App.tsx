@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { commandById, commandForKey, isAvailable } from "./state/commands";
-import { openDroppedFile, startAutosave, startDesktop } from "./state/files";
+import { openDroppedFile, startAutosave, startDesktop, startLaunchQueue } from "./state/files";
 import { aiAvailable, apiHooks, detectPlatform } from "./state/platform";
 import { startKernel } from "./state/kernel";
 import { startOffline } from "./state/offline";
 import { checkForUpdate } from "./state/updates";
 import { forgetUserSettings, loadUserSettings } from "./state/userSettings";
-import { cancelSession, commitSession, finishSketch, setSketchTool, toast, useApp } from "./state/store";
+import { cancelSession, commitSession, finishSketch, isNarrow, setSketchTool, toast, useApp } from "./state/store";
 import { Browser } from "./ui/Browser";
 import { CommandPalette, QuickBox, StatusBar, TitleBar, Toasts, Toolbar } from "./ui/Chrome";
 import { AccountDialog, SignIn, UsersDialog } from "./ui/Account";
@@ -48,6 +48,11 @@ function onKey(e: KeyboardEvent) {
     return;
   }
   if (s.panel || isTyping(e)) return;
+  // A drawer over the model closes with Escape, before Escape means anything for the model underneath.
+  if (e.key === "Escape" && isNarrow() && s.browserOpen) {
+    useApp.setState({ browserOpen: false });
+    return;
+  }
 
   // Sketch tools get first go (typed dimensions, Esc, Enter, Backspace).
   if (sketchKeys.handle?.(e)) {
@@ -112,6 +117,7 @@ export function App() {
     startKernel();
     startAutosave();
     startOffline();
+    startLaunchQueue();
     // Every launch opens on the start screen (new, open, recover, templates),
     // unless the desktop app was started by double-clicking a design.
     useApp.setState({ panel: "welcome" });
@@ -163,10 +169,26 @@ export function App() {
     };
   }, []);
 
-  const panelOpen = !!session || mode.kind === "sketch";
+  const editing = !!session || mode.kind === "sketch";
+  const browserOpen = useApp((s) => s.browserOpen);
+  const sideOpen = useApp((s) => s.panelOpen);
+
+  // On narrow windows the properties drawer opens by itself when a feature or sketch needs it, so the editor is never
+  // hidden, and closes again when the editing ends, so it doesn't sit over the model.
+  useEffect(() => {
+    if (isNarrow()) useApp.setState(editing ? { panelOpen: true, browserOpen: false } : { panelOpen: false });
+  }, [editing]);
+  // Crossing the breakpoint: drawers start closed when narrow, columns open when wide.
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1100px)");
+    const on = () => useApp.setState({ browserOpen: !mq.matches, panelOpen: !mq.matches });
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
 
   return (
-    <div className={`app ${panelOpen ? "has-session" : ""} ${prefs.hints ? "" : "no-hints"}`}>
+    <div className={`app ${editing ? "has-session" : ""} ${prefs.hints ? "" : "no-hints"} ${browserOpen ? "browser-open" : "browser-closed"} ${sideOpen ? "panel-open" : "panel-closed"}`}>
+      {(browserOpen || (sideOpen && !editing)) && <div className="app__drawer-scrim" onClick={() => useApp.setState({ browserOpen: false, panelOpen: false })} />}
       <TitleBar />
       <Toolbar />
       <Browser />

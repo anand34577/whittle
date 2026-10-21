@@ -14,13 +14,15 @@ import "./styles/feedback.css";
 import "./styles/themes.css";
 import "./styles/assist.css";
 import "./styles/daylight.css";
+import "./styles/responsive.css";
 import { App } from "./App";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
-import { useApp } from "./state/store";
+import { editFeature, useApp } from "./state/store";
 import { designApi } from "./state/designApi";
 import { dimensionPick } from "./state/constraintOps";
 import { COMMANDS } from "./state/commands";
 import { handlePick } from "./state/actions";
+import { viewportRef } from "./viewport/current";
 
 // Debugging, end-to-end tests and scripting: `await whittle.api.run("get_design", {})`. Off in normal use, so a
 // script injected into the page doesn't get the whole app handed to it; turn it on with
@@ -31,7 +33,7 @@ try {
 } catch {
   /* storage may be unavailable */
 }
-if (debug) (window as unknown as { whittle: unknown }).whittle = { useApp, api: designApi, dimensionPick, commands: COMMANDS, handlePick };
+if (debug) (window as unknown as { whittle: unknown }).whittle = { useApp, api: designApi, dimensionPick, commands: COMMANDS, handlePick, viewportRef, editFeature };
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

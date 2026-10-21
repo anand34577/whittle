@@ -149,6 +149,9 @@ export interface AppState {
   panel: "palette" | "quick" | "params" | "export" | "welcome" | "shortcuts" | "parts" | "versions" | "account" | "users" | "settings" | null;
   /** The AI assistant panel (stays open alongside dialogs). */
   assistant: boolean;
+  /** Side panels: collapsed columns on wide windows, slide-over drawers on narrow ones. */
+  browserOpen: boolean;
+  panelOpen: boolean;
   /** Desktop app, self-hosted server or plain browser (see platform.ts). */
   platform: Platform;
   platformReady: boolean;
@@ -199,6 +202,8 @@ export const useApp = create<AppState>(() => ({
   radial: null,
   panel: null,
   assistant: false,
+  browserOpen: !isNarrow(),
+  panelOpen: !isNarrow(),
   platform: { kind: "browser" },
   platformReady: false,
   coach: false,
@@ -548,6 +553,11 @@ export function deleteEntity(id: Id) {
 /* ───────────────────────────── UI helpers ───────────────────────────── */
 
 let toastId = 0;
+/** Narrow windows (phones, small tablets) show the side panels as drawers that start closed. */
+export function isNarrow(): boolean {
+  return typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(max-width: 1100px)").matches;
+}
+
 export function toast(kind: Toast["kind"], text: string, action?: Toast["action"], nextStep?: boolean) {
   const id = ++toastId;
   set({ toasts: [...get().toasts.slice(-3), { id, kind, text, action, nextStep }] });

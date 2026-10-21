@@ -57,6 +57,11 @@ A ZIP container holding `manifest.json`, `document.json` (the source of truth), 
 
 The UI talks to geometry only through the `KernelHost` interface (`client.ts`). Today the default runs OCCT in a Web Worker everywhere. A native OCCT sidecar (desktop) or a remote kernel (server) can implement the same messages later without touching the UI.
 
+**Two workarounds for OpenCascade behaviour, both in `packages/kernel`:**
+
+- `fastTopo.ts` replaces replicad's `faces` / `edges` / `solids` / `wires` listing, which compared every piece with every earlier piece across the WebAssembly boundary (quadratic: a pattern of 100 filleted parts spent 20 s just listing its faces). Hash buckets make it linear, with the same results and order.
+- A body **Offset** of a pointed cone never returns when OpenCascade has to round the tip, so bodies with a cone tip are offset with sharp joins instead (`hasConeTip` / `offsetSharp` in `build.ts`). Searches for a fix that works ("A 9 mm wall is too thick. About 4.8 mm fits") are cut short after a few seconds, because each try is a whole failed build.
+
 ## Platforms
 
 The same web app runs in three places. `apps/web/src/state/platform.ts` detects which one at start-up
