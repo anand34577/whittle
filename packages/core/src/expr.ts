@@ -68,9 +68,10 @@ function tokenize(src: string): Token[] {
       i += m[0].length;
       continue;
     }
-    if (/[A-Za-z_]/.test(c)) {
-      const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(src.slice(i))!;
-      out.push({ k: "id", v: m[0], pos: i });
+    if (/[A-Za-z_µμ]/.test(c)) {
+      const m = /^[A-Za-z_µμ][A-Za-z0-9_µμ]*/.exec(src.slice(i))!;
+      // µm (micro sign or Greek mu) is written um internally.
+      out.push({ k: "id", v: m[0].replace(/[µμ]/g, "u"), pos: i });
       i += m[0].length;
       continue;
     }
@@ -79,8 +80,13 @@ function tokenize(src: string): Token[] {
       i++;
       continue;
     }
-    if (c === '"') {
+    if (c === '"' || c === "”" || c === "″") {
       out.push({ k: "id", v: "in", pos: i });
+      i++;
+      continue;
+    }
+    if (c === "'" || c === "’" || c === "′") {
+      out.push({ k: "id", v: "ft", pos: i });
       i++;
       continue;
     }
@@ -272,15 +278,18 @@ function evalBinary(n: Extract<Node, { t: "bin" }>, ctx: EvalContext): Quantity 
         bare: scalesBare(a, b),
         radians: keepsRadians(a, b),
       };
-    case "^": {
-      if (!isDimensionless(b.dim)) throw new ExprError("Exponents must be plain numbers", n.pos);
-      const e = b.value;
-      if (!isDimensionless(a.dim) && !Number.isInteger(e)) {
-        throw new ExprError("Only whole-number powers of units are supported", n.pos);
-      }
-      return { value: Math.pow(a.value, e), dim: { len: a.dim.len * e, ang: a.dim.ang * e }, bare: a.bare };
-    }
+    case "^":
+      return power(a, b, n.pos);
   }
+}
+
+function power(a: Quantity, b: Quantity, pos: number): Quantity {
+  if (!isDimensionless(b.dim)) throw new ExprError("Exponents must be plain numbers", pos);
+  const e = b.value;
+  if (!isDimensionless(a.dim) && !Number.isInteger(e)) {
+    throw new ExprError("Only whole-number powers of units are supported", pos);
+  }
+  return { value: Math.pow(a.value, e), dim: { len: a.dim.len * e, ang: a.dim.ang * e }, bare: a.bare };
 }
 
 function evalNode(n: Node, ctx: EvalContext): Quantity {
@@ -320,9 +329,13 @@ function callFn(name: string, args: Quantity[], ctx: EvalContext, pos: number): 
     case "cos":
       arity(1);
       return plain(Math.cos(angleArg(args[0]!, ctx, name)));
-    case "tan":
+    case "tan": {
       arity(1);
-      return plain(Math.tan(angleArg(args[0]!, ctx, name)));
+      const r = angleArg(args[0]!, ctx, name);
+      // 90 degrees is a straight-up line: report it rather than return a huge number.
+      if (Math.abs(Math.cos(r)) < 1e-12) throw new ExprError("tan() isn't defined at this angle", pos);
+      return plain(Math.tan(r));
+    }
     case "asin":
     case "acos":
     case "atan": {
@@ -346,9 +359,48 @@ function callFn(name: string, args: Quantity[], ctx: EvalContext, pos: number): 
     case "abs":
       arity(1);
       return { ...args[0]!, value: Math.abs(args[0]!.value) };
+    case "sign":
+      arity(1);
+      return plain(Math.sign(args[0]!.value));
+    case "pow":
+      arity(2);
+      return power(args[0]!, args[1]!, pos);
+    case "exp":
+    case "ln":
+    case "log": {
+      arity(1);
+      const a = args[0]!;
+      if (!isDimensionless(a.dim)) throw new ExprError(`${name}() needs a plain number, got ${describeDim(a.dim)}`, pos);
+      if (name !== "exp" && !(a.value > 0)) throw new ExprError(`${name}() needs a number above zero`, pos);
+      return plain(name === "exp" ? Math.exp(a.value) : name === "ln" ? Math.log(a.value) : Math.log10(a.value));
+    }
+    case "cbrt": {
+      arity(1);
+      const a = args[0]!;
+      if (a.dim.len % 3 || a.dim.ang % 3) throw new ExprError("cbrt() of this unit has no unit", pos);
+      return { value: Math.cbrt(a.value), dim: { len: a.dim.len / 3, ang: a.dim.ang / 3 }, bare: a.bare };
+    }
+    case "hypot": {
+      if (args.length < 1) throw new ExprError("hypot() needs at least one value", pos);
+      let acc = args[0]!;
+      let sum = acc.value * acc.value;
+      for (const nextArg of args.slice(1)) {
+        const [x, y] = sameDims(acc, nextArg, ctx, "combine");
+        acc = x;
+        sum += y.value * y.value;
+      }
+      return { ...acc, value: Math.sqrt(sum) };
+    }
+    case "mod": {
+      arity(2);
+      const [a, b] = sameDims(args[0]!, args[1]!, ctx, "compare");
+      if (b.value === 0) throw new ExprError("mod() by zero", pos);
+      return { ...a, value: a.value - b.value * Math.floor(a.value / b.value) };
+    }
     case "round":
     case "floor":
-    case "ceil": {
+    case "ceil":
+    case "trunc": {
       arity(1);
       // Round in the units people read: `round(1.4 in)` is 1 in, not 36 mm.
       const a = args[0]!;

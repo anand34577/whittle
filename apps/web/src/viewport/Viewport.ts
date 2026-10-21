@@ -7,7 +7,7 @@
  * - Picking: raycast for faces, screen-space distance for edges (with
  *   occlusion test), so edges are easy to hit even when thin.
  */
-import { type CameraState, viewportRef } from "./current";
+import { type CameraState, touchGuard, viewportRef } from "./current";
 import * as THREE from "three";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
@@ -236,6 +236,8 @@ export class Viewport {
     container.appendChild(this.renderer.domElement);
     this.renderer.domElement.className = "viewport-canvas";
     this.renderer.domElement.tabIndex = 0;
+    this.renderer.domElement.setAttribute("role", "application");
+    this.renderer.domElement.setAttribute("aria-label", "3D model. Drag to orbit, scroll or pinch to zoom, right-drag or two fingers to pan.");
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -265,6 +267,8 @@ export class Viewport {
     el.addEventListener("pointerdown", this.onPointerDown);
     el.addEventListener("pointermove", this.onPointerMove);
     el.addEventListener("pointerup", this.onPointerUp);
+    el.addEventListener("pointercancel", this.onPointerCancel);
+    el.style.touchAction = "none"; // fingers navigate the model; the page never scrolls or zooms under them
     el.addEventListener("pointerleave", this.onPointerLeave);
     el.addEventListener("wheel", this.onWheel, { passive: false });
     el.addEventListener("dblclick", this.onDblClick);
@@ -498,11 +502,15 @@ export class Viewport {
     c.width = Math.ceil(g.measureText(text).width) + 24;
     c.height = px + 16;
     g.font = `600 ${px}px "IBM Plex Sans", system-ui, sans-serif`;
-    g.fillStyle = "rgba(0,0,0,0.55)";
+    // A dark pill with white text reads on every theme; the plane's colour is the pill's outline.
+    g.fillStyle = "rgba(14,22,34,0.86)";
     g.beginPath();
     g.roundRect(0, 0, c.width, c.height, 8);
     g.fill();
-    g.fillStyle = color;
+    g.strokeStyle = color;
+    g.lineWidth = 3;
+    g.stroke();
+    g.fillStyle = "#f4f7fb";
     g.textBaseline = "middle";
     g.fillText(text, 12, c.height / 2 + 1);
     const tex = new THREE.CanvasTexture(c);
@@ -1499,11 +1507,81 @@ export class Viewport {
     return out;
   }
 
+  /** Fingers on the screen. Two together pinch to zoom and drag to pan; one orbits (model) or draws (sketch). */
+  private touches = new Map<number, Vec2>();
+  private pinch: { dist: number; cx: number; cy: number } | null = null;
+  /** Holding one finger still is the touch screen's right-click: the quick-action menu. */
+  private longPress: ReturnType<typeof setTimeout> | null = null;
+
+  /** A long press has opened the menu and the finger is still down. */
+  private pressed = false;
+
+  private cancelLongPress() {
+    if (this.longPress) clearTimeout(this.longPress);
+    this.longPress = null;
+  }
+
+  /** The lift after a long press: the click that follows it belongs to nobody. */
+  private endLongPress() {
+    if (this.pressed) touchGuard.until = performance.now() + 500;
+    this.pressed = false;
+  }
+
+  private startLongPress(e: PointerEvent) {
+    this.cancelLongPress();
+    const at = { clientX: e.clientX, clientY: e.clientY };
+    this.longPress = setTimeout(() => {
+      this.longPress = null;
+      if (!this.drag || this.drag.moved || this.pinch) return;
+      this.drag = null; // the lift that follows is not a click
+      this.pressed = true;
+      this.box?.el?.remove();
+      this.box = null;
+      this.cb.onContext(this.sketchFrame ? null : this.pick(at), this.screen(at));
+    }, 550);
+  }
+
+  private pinchState(): { dist: number; cx: number; cy: number } {
+    const [a, b] = [...this.touches.values()] as [Vec2, Vec2];
+    return { dist: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2 };
+  }
+
+  /** Move the camera toward (factor < 1) or away from the point under the given screen position. */
+  private zoomAt(factor: number, clientX: number, clientY: number) {
+    this.raycaster.setFromCamera(this.ndc({ clientX, clientY }), this.camera);
+    const viewDir = new THREE.Vector3().subVectors(this.orbit.target, this.camera.position).normalize();
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir, this.orbit.target);
+    const p = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+    const next = THREE.MathUtils.clamp(this.orbit.distance * factor, 0.5, 200000);
+    if (p) this.orbit.target.lerp(p, 1 - next / this.orbit.distance);
+    this.orbit.distance = next;
+  }
+
+  private startPinch(e: PointerEvent) {
+    this.cancelLongPress();
+    // A first finger may already have begun a drag, a rubber band or a sketch stroke: drop it.
+    if (this.drag && this.sketchFrame) this.sketchEvent("leave", e);
+    this.drag = null;
+    this.box?.el?.remove();
+    this.box = null;
+    this.pinch = this.pinchState();
+  }
+
   private onPointerDown = (e: PointerEvent) => {
     this.renderer.domElement.setPointerCapture(e.pointerId);
     this.renderer.domElement.focus({ preventScroll: true });
+    if (e.pointerType === "touch") {
+      this.touches.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this.touches.size === 2) {
+        this.startPinch(e);
+        return;
+      }
+      if (this.touches.size > 2) return;
+    }
     const inSketch = !!this.sketchFrame;
-    const mode = navAction(this.nav, e.button, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }, inSketch);
+    let mode = navAction(this.nav, e.button, { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }, inSketch);
+    // A single finger has no modifier keys: in the model it orbits (a tap still selects).
+    if (e.pointerType === "touch" && !inSketch && e.button === 0) mode = "orbit";
     // Middle-button presses would otherwise start the browser's autoscroll.
     if (e.button === 1) e.preventDefault();
     this.drag = { x: e.clientX, y: e.clientY, button: e.button, moved: false, mode };
@@ -1522,17 +1600,38 @@ export class Viewport {
     }
     this.cb.onContext(null, [-1, -1]);
     this.anim = null;
+    if (e.pointerType === "touch" && !inSketch) this.startLongPress(e);
     if (inSketch && e.button === 0) this.sketchEvent("down", e);
     // Left-drag on empty space (where the navigation style leaves it free) rubber-bands a selection.
     if (!inSketch && e.button === 0 && mode === "none") this.box = { client: [e.clientX, e.clientY], screen: this.screen(e), el: null };
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType === "touch" && this.touches.has(e.pointerId)) {
+      this.touches.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this.pinch && this.touches.size >= 2) {
+        const now = this.pinchState();
+        const px = this.pixelSize;
+        const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+        this.orbit.target.addScaledVector(right, -(now.cx - this.pinch.cx) * px).addScaledVector(up, (now.cy - this.pinch.cy) * px);
+        this.zoomAt(this.pinch.dist / now.dist, now.cx, now.cy);
+        this.pinch = now;
+        this.anim = null;
+        this.applyOrbit();
+        this.cb.onCamera();
+        this.invalidate();
+        return;
+      }
+    }
     const d = this.drag;
     if (d) {
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
-      if (!d.moved && Math.hypot(dx, dy) > 4) d.moved = true;
+      if (!d.moved && Math.hypot(dx, dy) > 4) {
+        d.moved = true;
+        this.cancelLongPress();
+      }
       if (d.moved && d.mode !== "none") {
         d.x = e.clientX;
         d.y = e.clientY;
@@ -1583,9 +1682,30 @@ export class Viewport {
     }
   }
 
+  private onPointerCancel = (e: PointerEvent) => {
+    this.cancelLongPress();
+    this.endLongPress();
+    this.touches.delete(e.pointerId);
+    if (this.touches.size < 2) this.pinch = null;
+    this.drag = null;
+    this.box?.el?.remove();
+    this.box = null;
+  };
+
   private onPointerUp = (e: PointerEvent) => {
+    this.cancelLongPress();
+    this.endLongPress();
     const d = this.drag;
     this.drag = null;
+    if (e.pointerType === "touch") {
+      this.touches.delete(e.pointerId);
+      if (this.pinch) {
+        // The end of a pinch is never a click, and the finger left behind doesn't start an orbit.
+        if (this.touches.size < 2) this.pinch = null;
+        if (this.renderer.domElement.hasPointerCapture(e.pointerId)) this.renderer.domElement.releasePointerCapture(e.pointerId);
+        return;
+      }
+    }
     if (this.renderer.domElement.hasPointerCapture(e.pointerId)) this.renderer.domElement.releasePointerCapture(e.pointerId);
     if (!d) return;
     if (d.button === 2 && !d.moved) {
@@ -1624,13 +1744,7 @@ export class Viewport {
     this.anim = null;
     const factor = Math.pow(1.0015, (this.invertZoom ? -1 : 1) * e.deltaY * (e.deltaMode === 1 ? 33 : 1));
     // Zoom toward the cursor: the point under the cursor stays put.
-    this.raycaster.setFromCamera(this.ndc(e), this.camera);
-    const viewDir = new THREE.Vector3().subVectors(this.orbit.target, this.camera.position).normalize();
-    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir, this.orbit.target);
-    const p = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
-    const next = THREE.MathUtils.clamp(this.orbit.distance * factor, 0.5, 200000);
-    if (p) this.orbit.target.lerp(p, 1 - next / this.orbit.distance);
-    this.orbit.distance = next;
+    this.zoomAt(factor, e.clientX, e.clientY);
     this.applyOrbit();
     this.cb.onCamera();
     this.invalidate();

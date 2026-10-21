@@ -1,7 +1,7 @@
 /** Right-hand panel: the active feature's editor, the selected sketch shape, or an inspector. */
 import { useState } from "react";
 import type { Draft } from "immer";
-import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, formatQuantity, geomType, trim, documentEvaluator, maxPolylineCorner, maxRectCorner } from "@whittle/core";
+import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, combineBodies, type Inertia, formatQuantity, geomType, principalMoments, trim, documentEvaluator, maxPolylineCorner, maxRectCorner } from "@whittle/core";
 import { availableConstraints, canConstrain, constrainSelection, geoMutate, makeConstrainable, offsetSelection, patternSelection, mirrorSelection, setDimension } from "../state/constraintOps";
 import { commandById, isAvailable } from "../state/commands";
 import { nextSteps } from "../state/problems";
@@ -686,6 +686,16 @@ function Inspector() {
   const meta = bodyId ? doc.bodies[bodyId] : undefined;
   const bodies = regen?.bodies ?? [];
   const totalVolume = bodies.reduce((a, b) => a + b.volume, 0);
+  // Inertia of the selected body, or of everything together, about its center of mass (solids only).
+  const mass = combineBodies(
+    (body ? [body] : bodies)
+      .filter((b) => b.inertia)
+      .map((b) => {
+        const m = (b.volume / 1000) * densityOf(doc.bodies[b.id]?.material);
+        return { mass: m, com: b.centerOfMass, inertia: b.inertia!.map((v) => (v * densityOf(doc.bodies[b.id]?.material)) / 1000) as Inertia };
+      }),
+  );
+  const principal = mass ? principalMoments(mass.inertia) : null;
 
 
   return (
@@ -854,6 +864,14 @@ function Inspector() {
                 <dt>Center of mass</dt>
                 <dd className="mono" title="Weighted by volume (uniform density)">
                   {[0, 1, 2].map((i) => trim((body ? body.centerOfMass[i]! : bodies.reduce((a, b) => a + b.centerOfMass[i]! * b.volume, 0) / totalVolume) / LENGTH_TO_MM[unit], 2)).join(", ")} {unit}
+                </dd>
+              </>
+            )}
+            {principal && (
+              <>
+                <dt>Inertia</dt>
+                <dd className="mono" title="Principal moments of inertia about the center of mass, for the chosen material (g·cm²)">
+                  {principal.map((v) => trim(v / 100, 2)).join(", ")} g·cm²
                 </dd>
               </>
             )}

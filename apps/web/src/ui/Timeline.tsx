@@ -183,7 +183,7 @@ export function Timeline() {
                 className={`step step--${state} ${isSelected(f) || (picked.length > 1 && picked.includes(f.id)) ? "is-selected" : ""} ${folderOf.has(f.id) ? "is-in-folder" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? (reorderProblem(doc, dragStep.from, i) ? "is-drop-blocked" : "is-drop-before") : ""} ${parents.has(f.id) ? "is-parent" : ""} ${children.has(f.id) ? "is-child" : ""} ${hovered === f.id ? "is-hovered" : ""}`}
                 onPointerEnter={() => (setHot(f.id), glow(f))}
                 onPointerLeave={() => (setHot(null), useApp.setState({ hover: null }))}
-                title={`${f.name}${summary(f, doc.units) ? " · " + summary(f, doc.units) : ""}${st?.message ? "\n" + st.message : ""}\nDouble-click to edit · drag to reorder`}
+                title={`${f.name}${summary(f, doc.units) ? " · " + summary(f, doc.units) : ""}${st?.message ? "\n" + st.message : ""}\nDouble-click (or Enter) to edit · drag, or Alt + arrow keys, to reorder`}
                 onClick={(e) => {
                   if (e.shiftKey || e.ctrlKey || e.metaKey) return setPicked((p) => (p.includes(f.id) ? p.filter((x) => x !== f.id) : [...p, f.id]));
                   setPicked([f.id]);
@@ -192,6 +192,17 @@ export function Timeline() {
                   });
                 }}
                 onDoubleClick={() => editFeature(f.id)}
+                onKeyDown={(e) => {
+                  // Reordering without a mouse: Alt + arrow moves the step earlier or later, Enter edits it.
+                  if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+                    e.preventDefault();
+                    const to = i + (e.key === "ArrowLeft" ? -1 : 1);
+                    if (to >= 0 && to < doc.features.length) moveFeature(i, to);
+                  } else if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    editFeature(f.id);
+                  }
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setMenu({ f, index: i, x: e.clientX, y: e.clientY });

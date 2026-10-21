@@ -20,6 +20,8 @@ export function TitleBar() {
   const dirty = useApp((s) => s.dirty);
   const theme = useApp((s) => s.theme);
   const assistant = useApp((s) => s.assistant);
+  const browserOpen = useApp((s) => s.browserOpen);
+  const panelOpen = useApp((s) => s.panelOpen);
   const aiAllowed = useApp((s) => aiAvailable(s.platform));
   const dark = THEMES.find((t) => t.id === theme)?.dark ?? true;
   useApp((s) => s.historyTick);
@@ -31,6 +33,9 @@ export function TitleBar() {
 
   return (
     <header className="titlebar">
+      <button className={`iconbtn titlebar__side ${browserOpen ? "is-on" : ""}`} onClick={() => useApp.setState({ browserOpen: !browserOpen })} title="Browser panel" aria-label="Browser panel" aria-pressed={browserOpen}>
+        <Icon name="sidebarLeft" size={18} />
+      </button>
       <div className="brand" aria-label="Whittle">
         <svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true">
           <path d="M14 46 L30 14 L50 40 Z" fill="none" stroke="currentColor" strokeWidth="4.5" strokeLinejoin="round" />
@@ -41,19 +46,19 @@ export function TitleBar() {
       </div>
 
       <nav className="filemenu" aria-label="File">
-        <button className="iconbtn" onClick={() => run("new")} title="New design">
+        <button className="iconbtn titlebar__opt" onClick={() => run("new")} title="New design">
           <Icon name="file" size={18} />
         </button>
-        <button className="iconbtn" onClick={() => run("open")} title="Open (Ctrl+O)">
+        <button className="iconbtn titlebar__opt" onClick={() => run("open")} title="Open (Ctrl+O)">
           <Icon name="open" size={18} />
         </button>
         <button className="iconbtn" onClick={() => run("save")} title="Save (Ctrl+S)">
           <Icon name="save" size={18} />
         </button>
-        <button className="iconbtn" onClick={() => run("history")} title="Version history">
+        <button className="iconbtn titlebar__opt" onClick={() => run("history")} title="Version history">
           <Icon name="history" size={18} />
         </button>
-        <button className="iconbtn" onClick={() => run("export")} title="Export (STEP, 3MF, STL)">
+        <button className="iconbtn titlebar__opt" onClick={() => run("export")} title="Export (STEP, 3MF, STL)">
           <Icon name="export" size={18} />
         </button>
         <span className="sep" />
@@ -87,22 +92,25 @@ export function TitleBar() {
           <span>Find a command</span>
           <kbd>Ctrl K</kbd>
         </button>
-        <button className="iconbtn" onClick={() => useApp.setState({ panel: "params" })} title="Parameters">
+        <button className="iconbtn titlebar__opt" onClick={() => useApp.setState({ panel: "params" })} title="Parameters">
           <Icon name="params" size={18} />
         </button>
         {aiAllowed && (
-          <button className={`iconbtn ${assistant ? "is-on" : ""}`} onClick={() => useApp.setState({ assistant: !assistant })} title="AI assistant (Ctrl+I)" aria-pressed={assistant}>
+          <button className={`iconbtn titlebar__opt--phone ${assistant ? "is-on" : ""}`} onClick={() => useApp.setState({ assistant: !assistant })} title="AI assistant (Ctrl+I)" aria-pressed={assistant}>
             <Icon name="assistant" size={18} />
           </button>
         )}
-        <button className="iconbtn" onClick={() => setTheme(theme.startsWith("daylight") ? (dark ? "daylight" : "daylightdark") : dark ? "paper" : "graphite")} title={dark ? "Light theme" : "Dark theme"}>
+        <button className="iconbtn titlebar__opt" onClick={() => setTheme(theme.startsWith("daylight") ? (dark ? "daylight" : "daylightdark") : dark ? "paper" : "graphite")} title={dark ? "Light theme" : "Dark theme"}>
           <Icon name={dark ? "sun" : "moon"} size={18} />
         </button>
-        <button className="iconbtn" onClick={() => useApp.setState({ panel: "settings" })} title="Settings (Ctrl+,)">
+        <button className="iconbtn titlebar__opt" onClick={() => useApp.setState({ panel: "settings" })} title="Settings (Ctrl+,)">
           <Icon name="settings" size={18} />
         </button>
         <HelpMenu />
         <AccountButton />
+        <button className={`iconbtn titlebar__side ${panelOpen ? "is-on" : ""}`} onClick={() => useApp.setState({ panelOpen: !panelOpen })} title="Properties panel" aria-label="Properties panel" aria-pressed={panelOpen}>
+          <Icon name="sidebarRight" size={18} />
+        </button>
       </div>
     </header>
   );
@@ -114,7 +122,7 @@ function HelpMenu() {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   return (
     <>
-      <button ref={setAnchor} className={`iconbtn ${open ? "is-on" : ""}`} onClick={() => setOpen(!open)} title="Help, lessons and templates" aria-haspopup="menu" aria-expanded={open}>
+      <button ref={setAnchor} className={`iconbtn titlebar__opt--phone ${open ? "is-on" : ""}`} onClick={() => setOpen(!open)} title="Help, lessons and templates" aria-haspopup="menu" aria-expanded={open}>
         <Icon name="help" size={18} />
       </button>
       <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} className="groupmenu__pop" placement="bottom-end">
@@ -445,8 +453,8 @@ function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
             more={["#From the model", "tool-project", "sketch-intersect", "#Text and parts", "tool-text", "tool-gear", "#Pictures and drawings", "import-image", "calibrate-image", "flatten-image", "trace-image", "trace-area", "import-svg", "import-dxf", "#Save this sketch", "export-sketch-svg", "export-sketch-dxf"]}
           />
         </div>
-        <button className="btn btn--accent toolbar__finish" onClick={commandById("finish-sketch").run} data-tour="finish-sketch">
-          <Icon name="finish" size={18} /> Finish sketch
+        <button className="btn btn--accent toolbar__finish" onClick={commandById("finish-sketch").run} data-tour="finish-sketch" aria-label="Finish sketch" title="Finish sketch">
+          <Icon name="finish" size={18} /> <span className="toolbar__finish-label">Finish sketch</span>
         </button>
       </div>
     );

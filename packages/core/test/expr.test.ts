@@ -144,3 +144,44 @@ describe("timeline reorder", () => {
     expect(reorderProblem(doc, 0, 3)).toMatch(/uses Sketch 1/);
   });
 });
+
+describe("expressions: more units and functions", () => {
+  const val = (src: string, kind: "length" | "number" | "angle" = "number") => {
+    const r = ev().eval(src, kind);
+    return r.ok ? r.value : `ERR ${r.error}`;
+  };
+
+  it("reads inch, yard, micron and mil spellings and the foot and inch marks", () => {
+    expect(val("1 inch", "length")).toBe(25.4);
+    expect(val("1 yd", "length")).toBe(914.4);
+    expect(val("1 um", "length")).toBeCloseTo(0.001, 12);
+    expect(val("5 \u00b5m", "length")).toBeCloseTo(0.005, 12);
+    expect(val("10 mil", "length")).toBeCloseTo(0.254, 12);
+    expect(val("10 thou", "length")).toBeCloseTo(0.254, 12);
+    expect(val("2'", "length")).toBe(609.6);
+    expect(val('1"', "length")).toBe(25.4);
+  });
+
+  it("has the usual math functions", () => {
+    expect(val("pow(2, 10)")).toBe(1024);
+    expect(val("pow(3 mm, 2)")).toMatch(/needs a plain number/); // an area isn't a plain number
+    expect(val("exp(0)")).toBe(1);
+    expect(val("ln(1)")).toBe(0);
+    expect(val("log(1000)")).toBeCloseTo(3, 12);
+    expect(val("sign(-4 mm)")).toBe(-1);
+    expect(val("trunc(-2.7)")).toBe(-2);
+    expect(val("cbrt(27)")).toBe(3);
+    expect(val("hypot(3 mm, 4 mm)", "length")).toBe(5);
+    expect(val("mod(7, 3)")).toBe(1);
+    expect(val("mod(-1, 3)")).toBe(2);
+    expect(val("mod(7 mm, 3 mm)", "length")).toBe(1);
+  });
+
+  it("refuses what has no answer, with a plain message", () => {
+    expect(val("ln(0)")).toMatch(/above zero/);
+    expect(val("log(-1)")).toMatch(/above zero/);
+    expect(val("mod(1, 0)")).toMatch(/by zero/);
+    expect(val("tan(90)")).toMatch(/isn't defined/);
+    expect(val("sin(30)")).toBeCloseTo(0.5, 12);
+  });
+});

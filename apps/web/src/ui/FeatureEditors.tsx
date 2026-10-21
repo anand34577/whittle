@@ -277,7 +277,18 @@ function RevolveEditor({ f }: { f: RevolveFeature }) {
           options={lines.map((e, i) => ({ value: e.id, label: `${e.construction ? "Construction line" : "Path"} ${i + 1}`, icon: "sketch" as const }))}
         />
       )}
-      <ExprInput label="Angle" kind="angle" value={f.angle} autoFocus onChange={(v) => upd(f, "Angle", (d) => void (d.angle = v))} />
+      <Segmented
+        label="Direction"
+        value={f.extent ?? "one"}
+        options={[
+          { value: "one", label: "One side", title: "Turn one way from the profile" },
+          { value: "symmetric", label: "Symmetric", title: "Split the angle evenly either side of the profile" },
+          { value: "two", label: "Two sides", title: "A different angle each way" },
+        ]}
+        onChange={(v) => upd(f, "Direction", (d) => void ((d as RevolveFeature).extent = v === "one" ? undefined : (v as RevolveFeature["extent"])))}
+      />
+      <ExprInput label={f.extent === "two" ? "Angle 1" : f.extent === "symmetric" ? "Total angle" : "Angle"} kind="angle" value={f.angle} autoFocus onChange={(v) => upd(f, "Angle", (d) => void (d.angle = v))} />
+      {f.extent === "two" && <ExprInput label="Angle 2" kind="angle" value={f.angle2 ?? "90"} min={0} onChange={(v) => upd(f, "Angle 2", (d) => void ((d as RevolveFeature).angle2 = v))} />}
       <OpField f={f} />
     </>
   );
@@ -356,6 +367,16 @@ function ShellEditor({ f }: { f: ShellFeature }) {
           </button>
         )}
       </div>
+      <Segmented
+        label="Direction"
+        value={f.direction ?? "inside"}
+        options={[
+          { value: "inside", label: "Inside", title: "The wall grows into the body: its outside stays the same size" },
+          { value: "outside", label: "Outside", title: "The wall grows outward: the cavity keeps the body's size" },
+          { value: "both", label: "Both", title: "Half the wall each side of the original surface" },
+        ]}
+        onChange={(v) => upd(f, "Shell direction", (d) => void ((d as ShellFeature).direction = v === "inside" ? undefined : (v as ShellFeature["direction"])))}
+      />
       <ExprInput label="Wall" kind="length" value={f.thickness} autoFocus min={0} hint="Typical: moulded plastic 1.5–3 mm, 3D prints 1.2–2 mm, cast metal 3+ mm" onChange={(v) => upd(f, "Thickness", (d) => void (d.thickness = v))} />
       <Toggle label="See inside" hint={n === 0 ? "A closed shell is hollow inside: cut the view open through the middle to see the walls (the model is unchanged)" : "Cut the view open through the middle to see the walls (the model is unchanged)"} checked={section} onChange={seeInside} />
     </>

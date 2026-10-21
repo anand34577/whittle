@@ -136,7 +136,7 @@ describe("sketches with many shapes", () => {
     const r = new Builder().regen(plate(200, 12, 4), "final");
     expect(r.status.map((x) => x.state)).toEqual(["ok", "ok"]);
     expect(r.bodies[0]!.volume).toBeCloseTo((300 * 300 - 200 * Math.PI * 16) * 5, -1);
-    expect(Date.now() - t).toBeLessThan(10000);
+    expect(Date.now() - t).toBeLessThan(20000); // ~5 s alone; the rest is headroom for a busy test run
   });
 
   it("overlapping holes still merge into one", () => {

@@ -14,3 +14,9 @@ export const viewportRef: {
     sketchToScreen(p: [number, number]): [number, number] | null;
   } | null;
 } = { current: null };
+
+/**
+ * After a long press opens a menu under the finger, lifting the finger makes the browser click whatever is there (the
+ * menu's own centre). Clicks before `until` (a time from performance.now()) are to be ignored.
+ */
+export const touchGuard = { until: 0 };

@@ -106,7 +106,15 @@ export async function importParametersCsv() {
 }
 
 export function safeName(name: string) {
-  return name.replace(/[\\/:*?"<>|]+/g, "-").trim() || "design";
+  // No characters a file system refuses, no dots or spaces at the ends (Windows drops them), a sane length,
+  // and not one of the device names Windows reserves (CON, NUL, COM1...).
+  const cleaned = name
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-")
+    .replace(/^[\s.]+|[\s.]+$/g, "")
+    .slice(0, 120)
+    .trim();
+  if (!cleaned) return "design";
+  return /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(cleaned) ? `${cleaned} design` : cleaned;
 }
 
 async function desktopWrite(path: string, bytes: Uint8Array) {
@@ -242,6 +250,31 @@ export async function openServerDesign(id: string) {
   } catch (e) {
     toast("error", errText(e, "Couldn't open that design."));
   }
+}
+
+/**
+ * A design the system handed to the installed app (double-clicking a .whittle file, once the app has been
+ * installed and registered for that type). The file's handle also lets Save write back to it.
+ */
+export async function openLaunchedFile(handle: FileHandle) {
+  if (!(await confirmDiscard())) return;
+  try {
+    const file: File = await handle.getFile();
+    const doc = await withTask("Opening the file…", async () => deserializeDocument(new Uint8Array(await file.arrayBuffer())));
+    show(doc, file.name, { kind: "handle", handle });
+    toast("ok", `Opened ${file.name}`);
+  } catch (e) {
+    toast("error", errText(e, "Couldn't open that file."));
+  }
+}
+
+/** Start listening for files the operating system opens with this app. */
+export function startLaunchQueue() {
+  const queue = (window as unknown as { launchQueue?: { setConsumer(fn: (p: { files?: FileHandle[] }) => void): void } }).launchQueue;
+  queue?.setConsumer((p) => {
+    const handle = p.files?.[0];
+    if (handle) void openLaunchedFile(handle);
+  });
 }
 
 /** Open a file dropped onto the window. */

@@ -30,7 +30,12 @@ export const UNIT_LITERALS: Record<string, { factor: number; dim: Dim }> = {
   cm: { factor: 10, dim: { len: 1, ang: 0 } },
   m: { factor: 1000, dim: { len: 1, ang: 0 } },
   in: { factor: 25.4, dim: { len: 1, ang: 0 } },
+  inch: { factor: 25.4, dim: { len: 1, ang: 0 } },
   ft: { factor: 304.8, dim: { len: 1, ang: 0 } },
+  yd: { factor: 914.4, dim: { len: 1, ang: 0 } },
+  um: { factor: 0.001, dim: { len: 1, ang: 0 } },
+  mil: { factor: 0.0254, dim: { len: 1, ang: 0 } },
+  thou: { factor: 0.0254, dim: { len: 1, ang: 0 } },
   deg: { factor: Math.PI / 180, dim: { len: 0, ang: 1 } },
   rad: { factor: 1, dim: { len: 0, ang: 1 } },
 };
