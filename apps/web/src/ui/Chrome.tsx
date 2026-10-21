@@ -330,7 +330,7 @@ const SKETCH_CREATE: Record<string, string[]> = {
 const SKETCH_MODIFY: Record<string, string[]> = {
   Fillet: ["tool-sfillet", "tool-schamfer"],
   Trim: ["tool-trim", "tool-extend", "geo-break"],
-  Offset: ["geo-offset"],
+  Offset: ["tool-soffset", "geo-offset"],
   Mirror: ["geo-mirror-line", "geo-mirror-y", "geo-mirror-x"],
   Move: ["geo-move", "geo-copy", "geo-stretch", "geo-scale", "geo-grid", "geo-circular"],
 };

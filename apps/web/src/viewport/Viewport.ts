@@ -1420,6 +1420,11 @@ export class Viewport {
   }
 
   /** Intersect the pointer ray with the active sketch plane (2D sketch coordinates). */
+  /** The point of the open sketch's plane under a window position, or null. */
+  clientToSketch(e: { clientX: number; clientY: number }): Vec2 | null {
+    return this.sketchPoint(e);
+  }
+
   private sketchPoint(e: { clientX: number; clientY: number }): Vec2 | null {
     const f = this.sketchFrame;
     if (!f) return null;

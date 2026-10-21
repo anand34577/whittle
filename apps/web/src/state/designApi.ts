@@ -63,6 +63,8 @@ import {
   makeSweep,
   uid,
   validateParamName,
+  maxRectCorner,
+  trim,
 } from "@whittle/core";
 import type { BodyResult } from "@whittle/kernel";
 import { commitSession, history, mutate, undo, useApp } from "./store";
@@ -201,7 +203,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
       "coil {section: circle|triangle|square, radius, pitch, height, size, lefthand, position, op}",
       "fillet {body, edges: selector, radius}",
       "chamfer {body, edges: selector, distance, mode: equal|two|angle, distance2 (two), angle (angle, degrees), flip}",
-      "shell {body, face: selector, thickness}",
+      "shell {body, face: selector (\"none\": closed, hollow inside), thickness}",
       "hole {body, face: selector, points: [[x,y]...] in the face frame, diameter, through, depth, style: simple|counterbore|countersink, headDiameter, headDepth, sinkAngle (deg, default 90), tipAngle (deg drill point of a blind hole, default 118; \"\" for a flat bottom)}",
       "draft {body, faces: 'sides', angle, pull: x|y|z}",
       "mirror {body, plane: XY|XZ|YZ, offset (moves the plane along its normal), merge, features: [earlier feature names to mirror instead of the whole body]}",
@@ -369,8 +371,13 @@ function entityFrom(s: Record<string, unknown>): SketchEntity {
   const y = ex(s.y, "0");
   const r = s.diameter !== undefined ? `(${ex(s.diameter)}) / 2` : ex(s.radius, "5");
   switch (s.type) {
-    case "rect":
+    case "rect": {
+      // Refuse a corner radius that can't fit, rather than quietly rounding the rectangle into a pill.
+      const [w, h, c] = [Number(s.width), Number(s.height), Number(s.corner_radius ?? 0)];
+      if (c < 0) throw new ApiInputError("corner_radius can't be negative.");
+      if (w > 0 && h > 0 && c > maxRectCorner(w, h) + 1e-9) throw new ApiInputError(`corner_radius ${c} is too big for a ${w} x ${h} rectangle: the largest that fits is ${trim(maxRectCorner(w, h), 2)}.`);
       return { ...base, type: "rect", x, y, w: ex(s.width), h: ex(s.height), anchor: "center", ...(s.corner_radius ? { corner: ex(s.corner_radius) } : {}), ...(s.angle ? { angle: ex(s.angle) } : {}) };
+    }
     case "circle":
       return { ...base, type: "circle", cx: x, cy: y, r };
     case "polygon":
@@ -428,7 +435,7 @@ function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
       if (f.type === "fillet" || f.type === "chamfer") rec.edges = edgesBySelector(id, s.edges ?? "all");
       else if (f.type === "shell") {
         rec.bodyId = id;
-        rec.faces = [faceBySelector(id, s.face ?? "top")];
+        rec.faces = s.face === "none" ? [] : [faceBySelector(id, s.face ?? "top")];
       } else if (f.type === "hole") rec.face = faceBySelector(id, s.face ?? "top");
       else if (f.type === "draft") {
         const b = bodyMesh(id);

@@ -41,7 +41,7 @@ import type {
   DraftFeature,
   OffsetFaceFeature,
 } from "@whittle/core";
-import { setBodyOp, setPrefs, updateFeature, useApp } from "../state/store";
+import { setBodyOp, setPrefs, setView, updateFeature, useApp } from "../state/store";
 import { ExprInput, Segmented, Toggle } from "./ExprInput";
 import { Checkbox, Disclosure, Select } from "./controls";
 import { HoleStandard } from "./HoleStandards";
@@ -338,11 +338,18 @@ function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
 
 function ShellEditor({ f }: { f: ShellFeature }) {
   const n = f.faces.length;
+  const section = useApp((s) => !!s.view.section);
+  // Cut the view through the middle of the body, so the walls show while the thickness is set.
+  const seeInside = (on: boolean) => {
+    const r = useApp.getState().regen;
+    const b = r?.bodies.find((x) => x.id === f.bodyId) ?? r?.bodies[r.bodies.length - 1];
+    setView({ section: on ? { axis: "y", offset: b ? (b.bbox[0][1] + b.bbox[1][1]) / 2 : 0, flip: false } : null });
+  };
   return (
     <>
       <div className="picker">
         <Icon name="shell" size={16} />
-        <span>{n === 0 ? "Click the face(s) to open" : `${n} open face${n > 1 ? "s" : ""}`}</span>
+        <span>{n === 0 ? "Closed all round (hollow inside). Click the faces to open" : `${n} open face${n > 1 ? "s" : ""}`}</span>
         {n > 0 && (
           <button className="link" onClick={() => upd(f, "Clear faces", (d) => void (d.faces = []))}>
             Clear
@@ -350,6 +357,7 @@ function ShellEditor({ f }: { f: ShellFeature }) {
         )}
       </div>
       <ExprInput label="Wall" kind="length" value={f.thickness} autoFocus min={0} hint="Typical: moulded plastic 1.5–3 mm, 3D prints 1.2–2 mm, cast metal 3+ mm" onChange={(v) => upd(f, "Thickness", (d) => void (d.thickness = v))} />
+      <Toggle label="See inside" hint={n === 0 ? "A closed shell is hollow inside: cut the view open through the middle to see the walls (the model is unchanged)" : "Cut the view open through the middle to see the walls (the model is unchanged)"} checked={section} onChange={seeInside} />
     </>
   );
 }

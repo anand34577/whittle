@@ -72,7 +72,16 @@ export interface InlinePromptRequest {
   validate?: (v: string) => string | null;
   /** Called with the text as it is typed (and once at the start), e.g. to preview the result. */
   onInput?: (v: string) => void;
+  /** Hands over a way to drive the box from the canvas (a drag sets the value, a click applies it). */
+  bind?: (ctl: InlineControl) => void;
   resolve: (v: string | null) => void;
+}
+/** Drives an open inline value box from outside it. `set` stops working once the user types: typed values win. */
+export interface InlineControl {
+  /** A new value, and optionally where the box should now sit (canvas px: it follows the pointer, never under it). */
+  set(v: string, at?: [number, number]): void;
+  submit(): void;
+  cancel(): void;
 }
 export const inlinePromptHost: { show: ((r: InlinePromptRequest) => void) | null } = { show: null };
 
@@ -89,11 +98,12 @@ export function promptDialog(opts: {
   unit?: string;
   validate?: (v: string) => string | null;
   onInput?: (v: string) => void;
+  bind?: (ctl: InlineControl) => void;
   choices?: { label: string; value: string }[];
 }): Promise<string | null> {
   if (opts.at && inlinePromptHost.show) {
     const show = inlinePromptHost.show;
-    return new Promise((resolve) => show({ at: opts.at!, title: opts.title, label: opts.label, initial: opts.initial ?? "", unit: opts.unit, validate: opts.validate, onInput: opts.onInput, resolve }));
+    return new Promise((resolve) => show({ at: opts.at!, title: opts.title, label: opts.label, initial: opts.initial ?? "", unit: opts.unit, validate: opts.validate, onInput: opts.onInput, bind: opts.bind, resolve }));
   }
   return new Promise((resolve) =>
     open({

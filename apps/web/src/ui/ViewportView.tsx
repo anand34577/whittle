@@ -26,7 +26,7 @@ import {
 } from "@whittle/core";
 import { handlePick, matchEdge, matchFace, samePick } from "../state/actions";
 import { regionAt } from "../state/regions";
-import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addMidpointLine, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
+import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addMidpointLine, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, dimPlaceCancel, dimPlaceClick, dimPlaceMove, placingConstraint, useDimPlacing, offsetAt, offsetCancel, offsetDrag, offsetPlace, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure, measurePicks, quickInfo } from "../state/measure";
@@ -39,6 +39,7 @@ import { type PickFilter, type SketchDrawable, Viewport } from "../viewport/View
 import { Icon, type IconName } from "./icons";
 import { OrientationCube } from "./OrientationCube";
 import { DragHandles } from "./DragHandle";
+import { type DimGraphic, dimGraphic, labelFor } from "../viewport/dimGraphics";
 import { Slider } from "./controls";
 import { RebuildChip } from "./Activity";
 import { InlinePrompt } from "./InlinePrompt";
@@ -73,11 +74,18 @@ interface ConstraintMark {
   text: string;
   dim: boolean;
   driven?: boolean;
+  /** A relation glyph set just beside a line (centred there, not hung below its anchor). */
+  beside?: boolean;
+  /** A length, radius or diameter drawn with extension lines, leader and arrows (sketch mm). */
+  graphic?: DimGraphic;
 }
 
 /** Where to label each constraint on the canvas: dimensions show their value, relations a glyph on each thing they relate. */
-function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, units: keyof typeof LENGTH_TO_MM): ConstraintMark[] {
+function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, units: keyof typeof LENGTH_TO_MM, px: number): ConstraintMark[] {
   const geo = new Map(resolveGeometry(sk, sol).map((g) => [g.id, g]));
+  // The middle of the sketch: a length's value stands on the side away from it.
+  const all = [...geo.values()].flatMap((g) => (g.type === "point" ? [g.p] : []));
+  const centre: Vec2 = all.length ? [all.reduce((s, q) => s + q[0], 0) / all.length, all.reduce((s, q) => s + q[1], 0) / all.length] : [0, 0];
   const mid = (a: Vec2, b: Vec2): Vec2 => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   // ponytail: the axes get no label of their own; a dimension to one sits at the other end.
   const anchor = (id: Id, dim = false): Vec2 | null => {
@@ -91,6 +99,16 @@ function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, uni
     const t = g.type === "arc" ? g.a0 + g.sweep / 2 : Math.PI / 4;
     return [g.c[0] + g.r * Math.cos(t), g.c[1] + g.r * Math.sin(t)];
   };
+  // A relation on a line sits just inside it, clear of the line and of the dimensions (which stand outside).
+  const glyphAt = (id: Id): Vec2 | null => {
+    const g = geo.get(id);
+    if (g?.type !== "line") return anchor(id);
+    const m = mid(g.a, g.b);
+    const l = Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1]) || 1;
+    const n: Vec2 = [-(g.b[1] - g.a[1]) / l, (g.b[0] - g.a[0]) / l];
+    const s = (centre[0] - m[0]) * n[0] + (centre[1] - m[1]) * n[1] >= 0 ? 1 : -1;
+    return [m[0] + n[0] * s * 16 * px, m[1] + n[1] * s * 16 * px];
+  };
   const out: ConstraintMark[] = [];
   for (const c of sk.constraints ?? []) {
     if (c.value !== undefined) {
@@ -99,7 +117,8 @@ function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, uni
       const prefix = c.type === "radius" ? "R" : c.type === "diameter" ? "⌀" : c.type === "angle" ? "∠" : "";
       // A reference dimension reads out what the sketch measures, in brackets.
       const measured = c.driven ? trim(c.type === "angle" ? (measureDimension(sk, c.type, c.refs, sol) * 180) / Math.PI : measureDimension(sk, c.type, c.refs, sol) / LENGTH_TO_MM[units], 3) : null;
-      out.push({ key: c.id, id: c.id, at: pts.length > 1 ? mid(pts[0]!, pts[1]!) : pts[0]!, text: measured !== null ? `(${prefix}${measured})` : prefix + c.value, dim: true, driven: !!c.driven });
+      const graphic = dimGraphic(c, geo, px, centre) ?? undefined;
+      out.push({ key: c.id, id: c.id, at: graphic?.label ?? (pts.length > 1 ? mid(pts[0]!, pts[1]!) : pts[0]!), text: measured !== null ? `(${prefix}${measured})` : prefix + c.value, dim: true, driven: !!c.driven, graphic });
       continue;
     }
     const glyph = GLYPHS[c.type];
@@ -111,8 +130,9 @@ function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, uni
       const [a, b] = c.refs.filter((r) => r !== mirror).map((r) => anchor(r));
       at = [a && b ? mid(a, b) : null];
     } else if (c.type === "midpoint") at = c.refs.filter((r) => geomType(sk, r) === "point").map((r) => anchor(r));
-    else at = c.refs.map((r) => anchor(r));
-    at.forEach((p, i) => p && out.push({ key: `${c.id}.${i}`, id: c.id, at: p, text: glyph, dim: false }));
+    else at = c.refs.map((r) => glyphAt(r));
+    const beside = c.type !== "symmetric" && c.type !== "midpoint";
+    at.forEach((p, i) => p && out.push({ key: `${c.id}.${i}`, id: c.id, at: p, text: glyph, dim: false, beside: beside && geo.get(c.refs[i]!)?.type === "line" }));
   }
   return out;
 }
@@ -144,7 +164,7 @@ function moveEntity(e: SketchEntity, dx: number, dy: number): SketchEntity | nul
 /** Commands offered by the radial menu for what was right-clicked. */
 function radialFor(p: Pick | null): string[] {
   const s = useApp.getState();
-  if (s.mode.kind === "sketch") return ["tool-line", "tool-rect", "tool-circle", "tool-ellipse", "tool-polygon", "tool-slot", "tool-text", "import-svg", "tool-select"];
+  if (s.mode.kind === "sketch") return ["tool-line", "tool-rect", "tool-circle", "tool-arc", "tool-sfillet", "finish-sketch", "tool-trim", "tool-soffset", "tool-dimension", "tool-select"];
   if (s.session) return ["ok", "cancel", "view-fit", "measure"];
   if (!p) return ["sketch", "box", "cylinder", "parts", "extrude", "import", "view-fit", "measure"];
   switch (p.kind) {
@@ -170,25 +190,35 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
     window.addEventListener("keydown", k, true);
     return () => window.removeEventListener("keydown", k, true);
   }, []);
-  const R = 128;
-  // Keep the whole ring inside the view and clear of the display dock along its bottom (items are 140 x 36).
+  const R = 120;
+  // The hub cancels the tool in use as well as the menu, so a right-click and the center leaves nothing armed.
+  const sketchTool = state.mode.kind === "sketch" && state.mode.tool !== "select";
+  const cancel = () => {
+    close();
+    if (sketchTool) setSketchTool("select");
+  };
+  // Keep the whole ring inside the view and clear of the display dock along its bottom. Items to the
+  // sides hang outward from the ring (up to about 200 px wide), the top and bottom ones are centered.
   const host = document.querySelector(".viewport");
   const dock = host?.querySelector<HTMLElement>(".dock")?.offsetHeight ?? 0;
-  const cx = host ? Math.min(Math.max(x, R + 78), host.clientWidth - R - 78) : x;
+  const cx = host ? Math.min(Math.max(x, R + 210), host.clientWidth - R - 210) : x;
   const cy = host ? Math.min(Math.max(y, R + 26), host.clientHeight - R - 26 - (dock ? dock + 18 : 0)) : y;
   return (
     <div className="radial" style={{ left: cx, top: cy }} role="menu" aria-label="Quick actions" onPointerDown={(e) => e.stopPropagation()}>
-      <button className="radial__hub" onClick={close} aria-label="Close">
+      <button className="radial__hub" onClick={cancel} aria-label={sketchTool ? "Cancel the tool" : "Close"} title={sketchTool ? "Cancel the tool" : "Close"}>
         <Icon name="close" size={14} />
       </button>
       {items.map((c, i) => {
         const a = -Math.PI / 2 + (i / items.length) * Math.PI * 2;
+        const cos = Math.cos(a);
+        // Hang each item away from the center: the right ones start at the ring, the left ones end there.
+        const hang = Math.abs(cos) < 0.2 ? -50 : cos > 0 ? 0 : -100;
         return (
           <button
             key={c.id}
             role="menuitem"
             className={`radial__item ${c.on?.(state) ? "is-on" : ""}`}
-            style={{ transform: `translate(${Math.cos(a) * R}px, ${Math.sin(a) * R}px)`, animationDelay: `${i * 14}ms` }}
+            style={{ transform: `translate(calc(${cos * R}px + ${hang}%), ${Math.sin(a) * R}px)`, animationDelay: `${i * 14}ms` }}
             onClick={() => {
               close();
               c.run();
@@ -460,6 +490,8 @@ export function ViewportView() {
   const regenBusy = useApp((s) => s.regenBusy);
   const kernelReady = useApp((s) => s.kernelReady);
   const radialPick = useRef<Pick | null>(null);
+  /** A dimension label being dragged to a new place (it only counts as a drag once it moves a few pixels). */
+  const dimDrag = useRef<{ id: Id; x: number; y: number; moved: boolean } | null>(null);
 
   const sketchId = mode.kind === "sketch" ? mode.sketchId : null;
   const frame = sketchId ? regen?.sketches.find((s) => s.id === sketchId) ?? null : null;
@@ -530,7 +562,15 @@ export function ViewportView() {
         addSpline: addSplineGeometry,
         addPoint: addFreePoint,
         corner: cornerAt,
-        dimension: dimensionPick,
+        offset: (id, at) => void offsetAt(id, at),
+        offsetDrag,
+        offsetPlace,
+        offsetCancel,
+        dimension: (id, additive, at, place) => void dimensionPick(id, additive, at, place),
+        dimPlacing: () => !!useDimPlacing.getState().placing,
+        dimPlaceMove,
+        dimPlaceClick,
+        dimPlaceCancel,
         project: (client) => {
           // While sketching nothing in the model is pickable; open it up for this one click.
           const v = vpRef.current;
@@ -818,6 +858,8 @@ export function ViewportView() {
 
   const imagePick = useImagePick();
   const cornerPreview = useCornerPreview((s) => s.shapes);
+  // Re-render while a dimension follows the pointer.
+  useDimPlacing((s) => s.placing);
   useEffect(() => {
     if (mode.kind !== "sketch" && imagePick.kind) cancelImagePick();
   }, [mode.kind, imagePick.kind]);
@@ -1075,12 +1117,41 @@ export function ViewportView() {
         vp &&
         mode.kind === "sketch" &&
         (() => {
-          const sk = findFeature(doc, mode.sketchId, "sketch");
+          const own = findFeature(doc, mode.sketchId, "sketch");
+          // A dimension being placed is drawn with the others while it follows the pointer.
+          const placing = placingConstraint();
+          const sk = own && (placing ? { ...own, constraints: [...(own.constraints ?? []), placing] } : own);
           if (!sk?.constraints?.length) return null;
           const bad = new Set(frame.solution?.bad);
           // Glyphs that land on the same spot line up side by side.
           const taken = new Map<string, number>();
-          return constraintMarks(sk, frame.solution, doc.units).map((m) => {
+          const px = vp.pixelSize;
+          const marks = constraintMarks(sk, frame.solution, doc.units, px);
+          const screen = (q: Vec2) => vp.sketchToScreen(q, frame);
+          // Extension lines, dimension lines and arrowheads, drawn under the values.
+          const art = sketchView.dims
+            ? marks.flatMap((m) => {
+                const g = m.graphic;
+                if (!g) return [];
+                const tone = m.id === "placing" ? "is-selected" : bad.has(m.id) ? "is-bad" : sketchSel.includes(m.id) ? "is-selected" : m.driven ? "is-driven" : "";
+                const segs = g.lines.map(([a, b], i) => {
+                  const A = screen(a);
+                  const B = screen(b);
+                  return A && B ? <line key={`${m.key}l${i}`} className={tone} x1={A[0]} y1={A[1]} x2={B[0]} y2={B[1]} /> : null;
+                });
+                const heads = g.arrows.map((h, i) => {
+                  const T = screen(h.tip);
+                  const Q = screen([h.tip[0] + h.dir[0] * px * 10, h.tip[1] + h.dir[1] * px * 10]);
+                  if (!T || !Q) return null;
+                  const l = Math.hypot(Q[0] - T[0], Q[1] - T[1]) || 1;
+                  const d: Vec2 = [(Q[0] - T[0]) / l, (Q[1] - T[1]) / l];
+                  const pts = [T, [T[0] - d[0] * 9 + d[1] * 3.2, T[1] - d[1] * 9 - d[0] * 3.2], [T[0] - d[0] * 9 - d[1] * 3.2, T[1] - d[1] * 9 + d[0] * 3.2]];
+                  return <polygon key={`${m.key}a${i}`} className={tone} points={pts.map((q) => q.join(",")).join(" ")} />;
+                });
+                return [...segs, ...heads];
+              })
+            : [];
+          const labels = marks.map((m) => {
             if (!(m.dim ? sketchView.dims : sketchView.constraints)) return null;
             const pos = vp.sketchToScreen(m.at, frame);
             if (!pos) return null;
@@ -1088,17 +1159,56 @@ export function ViewportView() {
             const n = taken.get(spot) ?? 0;
             taken.set(spot, n + 1);
             const c = sk.constraints!.find((x) => x.id === m.id)!;
+            if (m.id === "placing")
+              return (
+                <span key={m.key} className="cmark cmark--dim cmark--placed cmark--placing mono" style={{ left: pos[0], top: pos[1] }} aria-hidden="true">
+                  {m.text}
+                  <small>{c.type === "angle" ? "°" : doc.units}</small>
+                </span>
+              );
             const unit = c.type === "angle" ? "°" : m.dim ? doc.units : "";
             return (
               <button
                 key={m.key}
-                className={`cmark ${m.dim ? "cmark--dim mono" : "cmark--glyph"} ${m.driven ? "cmark--driven" : ""} ${sketchSel.includes(m.id) ? "is-selected" : ""} ${bad.has(m.id) ? "is-bad" : ""}`}
+                className={`cmark ${m.dim ? "cmark--dim mono" : "cmark--glyph"} ${m.graphic ? "cmark--placed" : m.beside ? "cmark--beside" : ""} ${m.driven ? "cmark--driven" : ""} ${sketchSel.includes(m.id) ? "is-selected" : ""} ${bad.has(m.id) ? "is-bad" : ""}`}
                 style={{ left: pos[0] + n * (m.dim ? 0 : 20), top: pos[1] + n * (m.dim ? 22 : 0) }}
                 data-constraint={m.id}
                 aria-label={`${CONSTRAINT_LABELS[c.type]}${c.value !== undefined ? ` ${c.value}` : ""}`}
-                title={m.dim ? `${CONSTRAINT_LABELS[c.type]} · double-click to edit` : CONSTRAINT_LABELS[c.type]}
-                onPointerDown={(e) => e.stopPropagation()}
+                title={m.dim ? `${CONSTRAINT_LABELS[c.type]} · double-click to edit${m.graphic ? ", drag to move" : ""}` : CONSTRAINT_LABELS[c.type]}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  if (!m.graphic || e.button !== 0) return;
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  dimDrag.current = { id: m.id, x: e.clientX, y: e.clientY, moved: false };
+                }}
+                onPointerMove={(e) => {
+                  const d = dimDrag.current;
+                  if (!d || d.id !== m.id || (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 4)) return;
+                  d.moved = true;
+                  const at = vp.clientToSketch(e);
+                  const o = openSketch();
+                  if (!at || !o) return;
+                  const k = o.sk.constraints?.find((x) => x.id === m.id);
+                  const place = k && labelFor(k, new Map(resolveGeometry(o.sk, o.sol).map((g) => [g.id, g])), at);
+                  if (!place) return;
+                  sketchMutate(
+                    "Move dimension",
+                    (s) => {
+                      const c = s.constraints?.find((x) => x.id === m.id);
+                      if (c) c.label = place;
+                    },
+                    "label" + m.id,
+                  );
+                }}
+                onPointerUp={() => {
+                  // A drag ends here; the click that follows is told it was a drag.
+                  if (dimDrag.current && !dimDrag.current.moved) dimDrag.current = null;
+                }}
                 onClick={(e) => {
+                  if (dimDrag.current?.moved) {
+                    dimDrag.current = null;
+                    return;
+                  }
                   const cur = useApp.getState().sketchSel;
                   useApp.setState({ sketchSel: e.shiftKey ? (cur.includes(m.id) ? cur.filter((x) => x !== m.id) : [...cur, m.id]) : [m.id], selectedEntity: null });
                 }}
@@ -1109,6 +1219,16 @@ export function ViewportView() {
               </button>
             );
           });
+          return (
+            <>
+              {art.length > 0 && (
+                <svg className="dimlines" aria-hidden="true">
+                  {art}
+                </svg>
+              )}
+              {labels}
+            </>
+          );
         })()}
 
       {frame &&

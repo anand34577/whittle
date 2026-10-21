@@ -235,14 +235,38 @@ function chains(_sk: Geo, segs: (Line | Arc)[]): { steps: Step[]; closed: boolea
   return out;
 }
 
+/**
+ * The curve and every line or arc joined to it end to end (through shared points), so one click
+ * picks a whole outline for Offset. A circle stands alone; construction geometry is left out.
+ */
+export function connectedCurves(sk: Geo, id: Id): Id[] {
+  const start = geomById(sk, id);
+  if (!start || start.construction || (start.type !== "line" && start.type !== "arc" && start.type !== "circle")) return [];
+  if (start.type === "circle") return [id];
+  const segs = (sk.geometry ?? []).filter((g): g is Line | Arc => (g.type === "line" || g.type === "arc") && !g.construction);
+  const out = new Set<Id>([id]);
+  const todo: (Line | Arc)[] = [start];
+  while (todo.length) {
+    const s = todo.pop()!;
+    for (const t of segs) {
+      if (out.has(t.id) || !(t.a === s.a || t.a === s.b || t.b === s.a || t.b === s.b)) continue;
+      out.add(t.id);
+      todo.push(t);
+    }
+  }
+  return [...out];
+}
+
 type Curve = { type: "line"; a: Vec2; b: Vec2 } | { type: "circle"; c: Vec2; r: number };
 
 /**
  * Offset lines, arcs and circles by `d` mm: positive grows closed shapes outward
  * and moves open chains to their left; negative the reverse. Lines stay parallel
- * to their originals and arcs concentric with theirs.
+ * to their originals and arcs concentric with theirs. With `value` (the distance as typed, a
+ * positive length or formula) each new line also keeps that distance from its original, so the
+ * copy follows when the original changes and the offset can be edited like any dimension.
  */
-export function offsetGeometry(sk: Geo, ids: Id[], d: number): string | undefined {
+export function offsetGeometry(sk: Geo, ids: Id[], d: number, value?: string): string | undefined {
   if (Math.abs(d) < 1e-9) return "The offset distance must not be zero.";
   const sel = ids.map((i) => geomById(sk, i)).filter((g): g is SketchGeom => !!g && !g.construction);
   const circles = sel.filter((g): g is Extract<SketchGeom, { type: "circle" }> => g.type === "circle");
@@ -336,6 +360,7 @@ export function offsetGeometry(sk: Geo, ids: Id[], d: number): string | undefine
       if (s.g.type === "line") {
         const id = addLine(sk, p0, p1);
         addConstraint(sk, "parallel", [s.g.id, id]);
+        if (value) addConstraint(sk, "distance", [s.g.id, id], value);
       } else {
         const ccw = s.from === s.g.a;
         sk.geometry!.push({ id: uid("a"), type: "arc", c: s.g.c, a: ccw ? p0 : p1, b: ccw ? p1 : p0 });

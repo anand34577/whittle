@@ -342,6 +342,7 @@ export const COMMANDS: Command[] = [
   { id: "geo-grid", label: "Rectangular pattern", short: "Grid pattern", group: "Sketch", icon: "duplicate", keywords: "array rows columns repeat grid", hint: "Select geometry, then give columns, rows and gaps", when: hasGeometry, run: () => void gridPatternSelection() },
   { id: "geo-circular", label: "Circular pattern", short: "Circular pattern", group: "Sketch", icon: "pattern", keywords: "array radial polar repeat round center copies", hint: "Select geometry, then give the number of copies, the sweep and the center", when: hasGeometry, run: () => void circularPatternSelection() },
   { id: "geo-break", label: "Break line at crossing", short: "Break", group: "Sketch", icon: "breakLine", keywords: "split cut divide intersect segment", hint: "Select the line to split, then the line that crosses it", when: hasGeometry, run: () => breakSelection() },
+  { id: "tool-soffset", label: "Offset", group: "Sketch", icon: "offset", keywords: "inset outset parallel concentric grow shrink wall outline copy distance drag", hint: "Click a line, arc or circle: its whole outline is copied at a distance you drag or type", when: inSketch, run: () => (hasGeometry(get()) ? (setSketchTool("soffset"), void offsetSelection()) : setSketchTool("soffset")) },
   { id: "geo-offset", label: "Offset lines and arcs", short: "Offset", group: "Sketch", icon: "offset", keywords: "inset outset parallel concentric grow shrink wall", hint: "Select lines, arcs or circles, then give a distance", when: hasGeometry, run: () => void offsetSelection() },
   { id: "geo-mirror-y", label: "Mirror geometry across the Y axis", short: "Mirror ↔", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy left right", hint: "A mirrored copy held symmetric to the original", when: hasGeometry, run: () => mirrorSelection("y") },
   { id: "geo-mirror-x", label: "Mirror geometry across the X axis", short: "Mirror ↕", group: "Sketch", icon: "mirror", keywords: "flip symmetric copy up down", hint: "A mirrored copy held symmetric to the original", when: hasGeometry, run: () => mirrorSelection("x") },
@@ -551,7 +552,7 @@ const CLASSIC_KEYS: Record<string, string> = {
   combine: "",
   "view-home": "Home",
   "tool-trim": "T",
-  "geo-offset": "O",
+  "tool-soffset": "O",
   "tool-project": "P",
   "tool-text": "",
   "tool-slot": "",
@@ -614,7 +615,7 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
     if (classic && !e.shiftKey) {
       if (k === "t") return "tool-trim";
       if (k === "p") return "tool-project";
-      if (k === "o") return s.selectedEntity ? "offset-shape" : "geo-offset";
+      if (k === "o") return s.selectedEntity ? "offset-shape" : "tool-soffset";
     }
     if (e.shiftKey && k === "r") return "rotate-shape";
     if (e.shiftKey && k === "o") return "offset-shape";

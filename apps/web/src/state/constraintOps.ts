@@ -48,11 +48,13 @@ import {
   trimGeometry,
 } from "@whittle/core";
 import { create } from "zustand";
-import { promptDialog } from "./dialogs";
-import { type GeometryClip, breakLine, clipGeometry, moveGeometry, pasteGeometry, rectPattern, scaleGeometry } from "@whittle/core";
+import { type InlineControl, promptDialog } from "./dialogs";
+import { viewportRef } from "../viewport/current";
+import { type GeometryClip, type GeomResolved, breakLine, clipGeometry, connectedCurves, moveGeometry, pasteGeometry, rectPattern, scaleGeometry } from "@whittle/core";
 import { movedCopy } from "./sketchOps";
 import { smartSketchOn } from "./prefs";
 import { nearestOnCurve } from "../viewport/inference";
+import { labelFor } from "../viewport/dimGraphics";
 import type { DrawnRelation } from "../viewport/sketchTools";
 import { type Pick, deleteEntity, findFeature, setSketchTool, sketchMutate, toast, useApp } from "./store";
 
@@ -372,7 +374,7 @@ function checkValue(type: ConstraintType, text: string): string | null {
 }
 
 /** Add a constraint to the selection (asking for the value of a dimension). Returns an error message, if any. */
-export async function constrainSelection(type: ConstraintType, value?: string, at?: [number, number], title?: string): Promise<string | undefined> {
+export async function constrainSelection(type: ConstraintType, value?: string, at?: [number, number], title?: string, label?: [number, number]): Promise<string | undefined> {
   const refs = sketchSelection();
   if (DIMENSIONS.includes(type) && value === undefined) {
     const v = await promptDialog({
@@ -404,8 +406,14 @@ export async function constrainSelection(type: ConstraintType, value?: string, a
   geoMutate(CONSTRAINT_LABELS[type], (sk) => {
     if (scale !== 1) scaleGeometry(sk, (sk.geometry ?? []).map((g) => g.id), scale, [0, 0]);
     const r = addConstraint(sk, type, refs, value);
+    // A gap between two lines holds only while they stay parallel, so keep them so unless something already does.
+    if (!("error" in r) && type === "distance" && refs.length === 2 && refs.every((x) => geomType(sk, x) === "line") && !keptParallel(sk, refs[0]!, refs[1]!)) addConstraint(sk, "parallel", refs);
     if ("error" in r) error = r.error;
-    else added = r.id;
+    else {
+      added = r.id;
+      const k = label && sk.constraints?.find((x) => x.id === r.id);
+      if (k) k.label = label;
+    }
   });
   if (error) toast("info", error);
   else {
@@ -416,14 +424,28 @@ export async function constrainSelection(type: ConstraintType, value?: string, a
   return error;
 }
 
-/** A dimension that over-constrains the sketch becomes a reference (driven) one, shown in brackets, instead of a conflict. */
-async function keepOrReference(id: Id) {
-  const ok = await new Promise<boolean>((resolve) => {
+/** Whether the sketch already holds two lines parallel: a parallel or collinear relation, or both horizontal or both vertical. */
+function keptParallel(sk: { constraints?: SketchConstraint[] }, a: Id, b: Id): boolean {
+  const cs = (sk.constraints ?? []).filter((c) => !c.driven);
+  const both = (c: SketchConstraint) => c.refs.length === 2 && c.refs.includes(a) && c.refs.includes(b);
+  if (cs.some((c) => (c.type === "parallel" || c.type === "collinear") && both(c))) return true;
+  const on = (t: ConstraintType, id: Id) => cs.some((c) => c.type === t && c.refs.length === 1 && c.refs[0] === id);
+  return (["horizontal", "vertical"] as const).some((t) => on(t, a) && on(t, b));
+}
+
+/** Resolves once the current document is built (false when that takes too long). */
+function built(): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
     const done = () => (unsub(), clearTimeout(timer), resolve(useApp.getState().builtDoc === useApp.getState().doc));
     const unsub = useApp.subscribe((st) => st.builtDoc === st.doc && done());
     const timer = setTimeout(done, 5000);
     if (useApp.getState().builtDoc === useApp.getState().doc) done();
   });
+}
+
+/** A dimension that over-constrains the sketch becomes a reference (driven) one, shown in brackets, instead of a conflict. */
+async function keepOrReference(id: Id) {
+  const ok = await built();
   const sol = openSketch()?.sol;
   if (!ok || !sol || sol.state !== "over" || !sol.bad.includes(id)) return;
   geoMutate("Reference dimension", (sk) => {
@@ -443,17 +465,122 @@ export async function editDimension(id: Id, at?: [number, number]) {
     label: c.type === "angle" ? "Angle (degrees)" : "Value",
     initial: c.driven ? measuredText(c.type, c.refs) : c.value,
     unit: c.type === "angle" ? "°" : useApp.getState().doc.units,
-    validate: (t) => checkValue(c.type, t),
+    validate: (t) => checkValue(c.type, t) ?? dimensionProblem(id, t),
   });
   if (v !== null) setDimension(id, v);
 }
 
-export function setDimension(id: Id, value: string) {
-  geoMutate("Edit dimension", (sk) => {
-    const c = sk.constraints?.find((x) => x.id === id);
-    // Typing a value into a reference dimension makes it drive the sketch.
-    if (c) (c.value = value), delete c.driven;
+/** Dimensions being typed into (live edits): what each was before, to go back to if the result can't be solved. */
+const editing = new Map<Id, { value?: string; driven?: boolean; failed: boolean }>();
+
+/**
+ * Change a dimension's value. Live edits (each keystroke in a field) merge into one undo step; the final one is
+ * checked: a value the sketch can't meet (a fillet bigger than its corner, a side longer than the rest allows) is
+ * refused with the reason and the dimension keeps its old value, as other CAD tools do, instead of leaving the
+ * sketch broken.
+ */
+export function setDimension(id: Id, value: string, live = false) {
+  const o = openSketch();
+  const c = o?.sk.constraints?.find((x) => x.id === id);
+  if (!o || !c) return;
+  if (!editing.has(id)) editing.set(id, { value: c.value, driven: c.driven, failed: o.sol?.state === "error" });
+  const why = dimensionProblem(id, value);
+  if (why) {
+    // While typing, the sketch keeps the last value that fitted; at the end it goes back to where it started.
+    if (live) return;
+    const was = editing.get(id)!;
+    editing.delete(id);
+    if (was.value !== c.value) restoreDimension(id, was);
+    toast("error", why);
+    return;
+  }
+  geoMutate(
+    "Edit dimension",
+    (sk) => {
+      const k = sk.constraints?.find((x) => x.id === id);
+      // Typing a value into a reference dimension makes it drive the sketch.
+      if (k) (k.value = value), delete k.driven;
+    },
+    `dim:${id}`,
+  );
+  if (live) return;
+  const was = editing.get(id)!;
+  editing.delete(id);
+  if (was.value === value || was.failed) return;
+  const doc = useApp.getState().doc;
+  void built().then((ok) => {
+    const now = openSketch();
+    if (!ok || useApp.getState().doc !== doc || now?.sol?.state !== "error") return;
+    const k = now.sk.constraints?.find((x) => x.id === id);
+    const name = k ? constraintLabel(now.sk, k) : "That dimension";
+    const fits = k?.type === "radius" ? largestFillet(now.sk, now.sol, k.refs[0]!) : null;
+    restoreDimension(id, was);
+    const unit = useApp.getState().doc.units;
+    toast(
+      "error",
+      `${name} can't be ${value}${k?.type === "angle" ? "°" : ` ${unit}`}: the sketch can't meet it with its other dimensions.` +
+        (fits ? ` The largest radius that fits this corner is about ${trim(fits / LENGTH_TO_MM[unit], 2)} ${unit}.` : " It was kept at " + (was.value ?? "its old value") + "."),
+    );
   });
+}
+
+/** Put a dimension back as it was, in the same undo step as the edit (no solution baked: a failed one has nothing to keep). */
+function restoreDimension(id: Id, was: { value?: string; driven?: boolean }) {
+  sketchMutate(
+    "Edit dimension",
+    (sk) => {
+      const x = sk.constraints?.find((q) => q.id === id);
+      if (!x) return;
+      x.value = was.value;
+      if (was.driven) x.driven = true;
+    },
+    `dim:${id}`,
+  );
+}
+
+/**
+ * Why a dimension can't take a value, checked before it is applied. A fillet's radius has to fit its corner:
+ * left to the solver, a radius too big stretches the lines out to make room (or flips them), which is never
+ * what was meant, so it is refused with the largest that fits, as when the fillet was made.
+ */
+export function dimensionProblem(id: Id, value: string): string | null {
+  const o = openSketch();
+  const c = o?.sk.constraints?.find((x) => x.id === id);
+  if (!o || c?.type !== "radius") return null;
+  const fits = largestFillet(o.sk, o.sol, c.refs[0]!);
+  const v = documentEvaluator(useApp.getState().doc).eval(value, "length");
+  if (fits === null || !v.ok || v.value <= fits * (1 + 1e-6)) return null;
+  const unit = useApp.getState().doc.units;
+  const k = LENGTH_TO_MM[unit];
+  return `A ${trim(v.value / k, 2)} ${unit} radius doesn't fit this corner: the largest that fits is ${trim(Math.floor((fits / k) * 100) / 100, 2)} ${unit}.`;
+}
+
+/** For an arc rounding the corner between two lines (a sketch fillet): the biggest radius the lines leave room for. */
+function largestFillet(sk: SketchFeature, sol: SketchSolution | undefined, arcId: Id): number | null {
+  const geo = new Map(resolveGeometry(sk, sol).map((g) => [g.id, g]));
+  const arc = geo.get(arcId);
+  if (arc?.type !== "arc") return null;
+  const lines = (sk.constraints ?? [])
+    .filter((c) => c.type === "tangent" && c.refs.includes(arcId))
+    .map((c) => geo.get(c.refs.find((r) => r !== arcId)!))
+    .filter((g): g is Extract<GeomResolved, { type: "line" }> => g?.type === "line");
+  if (lines.length !== 2) return null;
+  const [A, B] = lines as [Extract<GeomResolved, { type: "line" }>, Extract<GeomResolved, { type: "line" }>];
+  // The corner the arc replaced: where the two lines would meet.
+  const d1: Vec2 = [A.b[0] - A.a[0], A.b[1] - A.a[1]];
+  const d2: Vec2 = [B.b[0] - B.a[0], B.b[1] - B.a[1]];
+  const den = d1[0] * d2[1] - d1[1] * d2[0];
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((B.a[0] - A.a[0]) * d2[1] - (B.a[1] - A.a[1]) * d2[0]) / den;
+  const P: Vec2 = [A.a[0] + d1[0] * t, A.a[1] + d1[1] * t];
+  const far = (l: { a: Vec2; b: Vec2 }) => (Math.hypot(l.a[0] - P[0], l.a[1] - P[1]) > Math.hypot(l.b[0] - P[0], l.b[1] - P[1]) ? l.a : l.b);
+  const [Q1, Q2] = [far(A), far(B)];
+  const r1 = Math.hypot(Q1[0] - P[0], Q1[1] - P[1]);
+  const r2 = Math.hypot(Q2[0] - P[0], Q2[1] - P[1]);
+  if (r1 < 1e-9 || r2 < 1e-9) return null;
+  const cos = ((Q1[0] - P[0]) * (Q2[0] - P[0]) + (Q1[1] - P[1]) * (Q2[1] - P[1])) / (r1 * r2);
+  const theta = Math.acos(Math.max(-1, Math.min(1, cos)));
+  return Math.min(r1, r2) * Math.tan(theta / 2);
 }
 
 /** Delete the selected geometry and constraints. */
@@ -602,27 +729,97 @@ export function makeConstrainable(id: Id | null = useApp.getState().selectedEnti
  * length. Click a point (or Shift+click a line) to start a pair, then the second
  * item: two points or a point and a line give a distance, two lines an angle.
  */
-export async function dimensionPick(id: Id, additive: boolean, at?: [number, number]) {
+/** A dimension the Dimension tool picked, following the pointer until a click places it (its value is asked there). */
+export interface DimPlacing {
+  type: ConstraintType;
+  refs: Id[];
+  label?: [number, number];
+}
+export const useDimPlacing = create<{ placing: DimPlacing | null }>(() => ({ placing: null }));
+
+/** The dimension being placed, as a constraint showing what it measures now (for the preview), or null. */
+export function placingConstraint(): SketchConstraint | null {
+  const pl = useDimPlacing.getState().placing;
+  return pl && { id: "placing", type: pl.type, refs: pl.refs, value: measuredText(pl.type, pl.refs), label: pl.label };
+}
+
+/** The pointer moved while a dimension is being placed: it follows. */
+export function dimPlaceMove(p: Vec2) {
+  const pl = useDimPlacing.getState().placing;
+  const o = openSketch();
+  if (!pl || !o) return;
+  const label = labelFor({ id: "placing", type: pl.type, refs: pl.refs }, new Map(resolveGeometry(o.sk, o.sol).map((g) => [g.id, g])), p);
+  if (label) useDimPlacing.setState({ placing: { ...pl, label } });
+}
+
+/**
+ * A click while a dimension is being placed: on other geometry it pairs with what was picked (false: the
+ * click then picks as usual); anywhere else it puts the dimension there and asks its value.
+ */
+export function dimPlaceClick(hit: Id | null, p: Vec2, at: [number, number]): boolean {
+  const pl = useDimPlacing.getState().placing;
+  const o = openSketch();
+  if (!pl || !o) return false;
+  const own = new Set(pl.refs.flatMap((r) => {
+    const g = geomById(o.sk, r);
+    return g?.type === "line" ? [r, g.a, g.b] : g?.type === "arc" ? [r, g.a, g.b, g.c] : g?.type === "circle" ? [r, g.c] : [r];
+  }));
+  if (hit && !own.has(hit)) {
+    useDimPlacing.setState({ placing: null });
+    return false;
+  }
+  dimPlaceMove(p);
+  const label = useDimPlacing.getState().placing?.label ?? pl.label;
+  useDimPlacing.setState({ placing: null });
+  useApp.setState({ sketchSel: pl.refs });
+  void constrainSelection(pl.type, undefined, at, undefined, label);
+  return true;
+}
+
+export function dimPlaceCancel() {
+  if (!useDimPlacing.getState().placing) return;
+  useDimPlacing.setState({ placing: null });
+  useApp.setState({ sketchSel: [] });
+}
+
+/** Pick for a dimension: placed by the pointer when `place` (where the pick was) is given, else its value is asked right away. */
+function dimensionOf(type: ConstraintType, refs: Id[], at?: [number, number], place?: Vec2) {
+  if (!place) return constrainSelection(type, undefined, at);
+  useApp.setState({ sketchSel: refs });
+  useDimPlacing.setState({ placing: { type, refs } });
+  dimPlaceMove(place);
+}
+
+export async function dimensionPick(id: Id, additive: boolean, at?: [number, number], place?: Vec2) {
   const o = openSketch();
   if (!o) return;
   const kind = geomType(o.sk, id);
   const pending = sketchSelection().filter((x) => x !== id);
   if (pending.length === 1) {
-    const first = geomType(o.sk, pending[0]!);
-    const type: ConstraintType = first === "line" && kind === "line" ? "angle" : "distance";
-    useApp.setState({ sketchSel: [pending[0]!, id] });
+    // A circle, arc or ellipse paired with something else is measured from its center.
+    const center = (x: Id) => {
+      const g = geomById(o.sk, x);
+      return g && (g.type === "circle" || g.type === "arc" || g.type === "ellipse") ? g.c : x;
+    };
+    const refs = [center(pending[0]!), center(id)];
+    if (refs[0] === refs[1]) return;
+    const lines = refs.every((r) => geomType(o.sk, r) === "line");
+    // Two lines: the gap between them when they run parallel, otherwise the angle.
+    const parallel = lines && Math.abs(Math.sin(measureDimension(o.sk, "angle", refs, o.sol))) < Math.sin((2 * Math.PI) / 180);
+    const type: ConstraintType = lines && !parallel ? "angle" : "distance";
+    useApp.setState({ sketchSel: refs });
     if (!availableConstraints().includes(type)) {
       toast("info", "Those two items can't be dimensioned together.");
       useApp.setState({ sketchSel: [] });
       return;
     }
-    await constrainSelection(type, undefined, at);
+    await dimensionOf(type, refs, at, place);
     return;
   }
   useApp.setState({ sketchSel: [id], selectedEntity: null });
   // Circles are sized by diameter (as holes and shafts are specified), arcs by radius.
-  if (kind === "circle") await constrainSelection("diameter", undefined, at);
-  else if (kind === "arc") await constrainSelection("radius", undefined, at);
+  if (kind === "circle") await dimensionOf("diameter", [id], at, place);
+  else if (kind === "arc") await dimensionOf("radius", [id], at, place);
   else if (kind === "ellipse") {
     // The major radius first (center to the major end), then the minor one.
     const g = geomById(o.sk, id);
@@ -636,7 +833,7 @@ export async function dimensionPick(id: Id, additive: boolean, at?: [number, num
     } else if (!dims.some((c) => c.type === "radius")) await constrainSelection("radius", undefined, at, "Minor radius");
     else toast("info", "Both radii of this ellipse are set. Double-click a dimension to change it.");
   }
-  else if (kind === "line" && !additive && id !== "xaxis" && id !== "yaxis") await constrainSelection("distance", undefined, at);
+  else if (kind === "line" && !additive && id !== "xaxis" && id !== "yaxis") await dimensionOf("distance", [id], at, place);
 }
 
 /**
@@ -768,24 +965,133 @@ export function mirrorSelection(across: "x" | "y" | "line") {
   copyEdit("Mirror", (sk) => mirrorGeometry(sk, sel, line));
 }
 
-/** Offset the selected lines, arcs and circles; asks how far (negative goes the other way). */
-export async function offsetSelection() {
-  const v = await promptDialog({
+let lastOffset = "2";
+
+/** Try an offset on a copy: the message when it can't be done, else the new curves for the preview. */
+function trialOffset(ids: Id[], d: number): { why?: string; shapes: { pts: Vec2[]; closed: boolean }[]; curves: GeomResolved[] } {
+  const o = openSketch();
+  if (!o) return { shapes: [], curves: [] };
+  const trial = structuredClone(o.sk);
+  bakeSolution(trial, o.sol);
+  const before = new Set((trial.geometry ?? []).map((g) => g.id));
+  const why = offsetGeometry(trial, ids, d);
+  if (why) return { why, shapes: [], curves: [] };
+  const curves = resolveGeometry(trial).filter((g) => !before.has(g.id) && g.type !== "point");
+  return { shapes: curves.map((g) => ({ pts: geomOutline(g), closed: false })), curves };
+}
+
+const offsetValue = (t: string) => documentEvaluator(useApp.getState().doc).eval(t, "length");
+
+/** The offset being placed: its curves and the value box on the canvas, which the pointer drives. */
+const offsetLive: { ids: Id[]; box: InlineControl | null; session: number } = { ids: [], box: null, session: 0 };
+
+/** Offset these curves: the copy shows as you type (or move the pointer, with the box on the canvas). */
+async function runOffset(ids: Id[], at?: [number, number]) {
+  const session = ++offsetLive.session;
+  offsetLive.ids = ids;
+  offsetLive.box = null;
+  useApp.setState({ sketchSel: ids });
+  const text = await promptDialog({
+    at,
     title: "Offset",
     label: "Distance",
     message: "Positive grows a closed shape outward, negative shrinks it inward.",
-    initial: "2",
+    initial: lastOffset,
     unit: useApp.getState().doc.units,
     validate: (t) => {
-      const r = documentEvaluator(useApp.getState().doc).eval(t, "length");
-      return !r.ok ? r.error : r.value === 0 ? "The distance can't be zero" : null;
+      const r = offsetValue(t);
+      return !r.ok ? r.error : r.value === 0 ? "The distance can't be zero" : (trialOffset(ids, r.value).why ?? null);
     },
+    onInput: (t) => {
+      const r = offsetValue(t);
+      useCornerPreview.setState({ shapes: r.ok && r.value !== 0 ? trialOffset(ids, r.value).shapes : [] });
+    },
+    bind: (ctl) => {
+      if (offsetLive.session === session) offsetLive.box = ctl;
+    },
+  }).finally(() => {
+    // A newer offset may have started meanwhile: leave its state alone.
+    if (offsetLive.session !== session) return;
+    useCornerPreview.setState({ shapes: [] });
+    offsetLive.ids = [];
+    offsetLive.box = null;
   });
-  if (v === null) return;
-  const r = documentEvaluator(useApp.getState().doc).eval(v, "length");
+  if (text === null) return;
+  const r = offsetValue(text);
   if (!r.ok) return;
+  // The copy keeps its distance as a dimension (always positive: the side is where it was placed).
+  const t = text.trim();
+  const back = t.startsWith("-") ? offsetValue(t.slice(1)) : null;
+  const gap = r.value > 0 ? t : back?.ok && Math.abs(back.value + r.value) < 1e-9 ? t.slice(1).trim() : trim(-r.value / unitMm(), 6);
+  if (copyEdit("Offset", (sk) => offsetGeometry(sk, ids, r.value, gap))) {
+    lastOffset = text;
+    useApp.setState({ sketchSel: [] });
+  }
+}
+
+/** Offset the selected lines, arcs and circles; asks how far (negative goes the other way), beside the selection when it can. */
+export async function offsetSelection() {
+  const o = openSketch();
   const sel = sketchSelection();
-  copyEdit("Offset", (sk) => offsetGeometry(sk, sel, r.value));
+  if (!o || !sel.length) return;
+  const first = resolveGeometry(o.sk, o.sol).find((g) => sel.includes(g.id) && g.type !== "point");
+  const p: Vec2 | undefined = !first ? undefined : first.type === "line" ? [(first.a[0] + first.b[0]) / 2, (first.a[1] + first.b[1]) / 2] : first.type === "arc" ? first.a : first.type === "circle" ? [first.c[0] + first.r, first.c[1]] : undefined;
+  const at = p ? (viewportRef.current?.sketchToScreen(p) ?? undefined) : undefined;
+  await runOffset(sel, at);
+}
+
+/** The Offset tool picked this curve: offset it and everything joined to it end to end. */
+export async function offsetAt(id: Id, at?: [number, number]) {
+  const o = openSketch();
+  if (!o) return;
+  const ids = connectedCurves(o.sk, id);
+  if (!ids.length) return toast("info", "Offset works on lines, arcs and circles that aren't construction geometry.");
+  await runOffset(ids, at);
+}
+
+/** A round step about `px` long: 1, 2 or 5 times a power of ten. */
+function niceStep(px: number): number {
+  const k = Math.pow(10, Math.floor(Math.log10(Math.max(px, 1e-6))));
+  return [1, 2, 5, 10].map((m) => m * k).find((s) => s >= px) ?? 10 * k;
+}
+
+/**
+ * The pointer moved while an offset is being placed: the distance follows it, on whichever side
+ * it is (rounded to a step that suits the zoom; `fine` rounds to 0.01). False when no offset is live.
+ */
+export function offsetDrag(p: Vec2, px: number, fine: boolean, screen?: [number, number]): boolean {
+  const { box, ids } = offsetLive;
+  if (!box) return false;
+  const o = openSketch();
+  if (!o) return true;
+  const own = resolveGeometry(o.sk, o.sol).filter((g) => ids.includes(g.id));
+  const near = nearestOnCurve(own, p, Infinity);
+  if (!near) return true;
+  const unit = unitMm();
+  const step = fine ? 0.01 : niceStep((6 * px) / unit);
+  const v = Math.max(step, Math.round(Math.hypot(p[0] - near.p[0], p[1] - near.p[1]) / unit / step) * step);
+  // Grow or shrink: whichever copy lands nearer the pointer.
+  let best: { s: number; d: number } | null = null;
+  for (const s of [1, -1]) {
+    const t = trialOffset(ids, s * v * unit);
+    const hit = t.why ? null : nearestOnCurve(t.curves, p, Infinity);
+    const d = hit ? Math.hypot(p[0] - hit.p[0], p[1] - hit.p[1]) : Infinity;
+    if (!best || d < best.d) best = { s, d };
+  }
+  box.set(trim(best!.s * v, 3), screen);
+  return true;
+}
+
+/** Place the offset being dragged (a click on the canvas). False when no offset is live. */
+export function offsetPlace(): boolean {
+  if (!offsetLive.box) return false;
+  offsetLive.box.submit();
+  return true;
+}
+
+/** Drop the offset being placed (the tool changed, or the sketch closed). */
+export function offsetCancel() {
+  offsetLive.box?.cancel();
 }
 
 /** Copies of the selection in a row (`axis`) or evenly round the sketch origin. Gap is in the document's units. */

@@ -5,7 +5,7 @@
  */
 import { type KeyboardEvent, type PointerEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type QuantityKind, documentEvaluator, formatQuantity, trim } from "@whittle/core";
-import { cancelSession, commitSession, useApp } from "../state/store";
+import { cancelSession, commitSession, toast, useApp } from "../state/store";
 import { Switch } from "./controls";
 
 interface Props {
@@ -15,8 +15,9 @@ interface Props {
   onChange: (expr: string, live: boolean) => void;
   hint?: string;
   autoFocus?: boolean;
+  /** Smallest allowed value (in the units shown): anything less is refused with a message, not applied. */
   min?: number;
-  /** Upper limit for nudging and scrubbing (typed values are checked by the model). */
+  /** Largest allowed value, such as the biggest corner radius that fits: anything more is refused, not applied. */
   max?: number;
 }
 
@@ -27,6 +28,8 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrub = useRef<{ x: number; base: number; moved: boolean } | null>(null);
+  // The value when editing started: what an out-of-range entry goes back to.
+  const before = useRef(value);
 
   useEffect(() => {
     if (!focused) setText(value);
@@ -45,10 +48,23 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
   const factor = kind === "length" ? (unit === "in" ? 25.4 : unit === "cm" ? 10 : unit === "m" ? 1000 : unit === "ft" ? 304.8 : 1) : kind === "angle" ? Math.PI / 180 : 1;
   const unitLabel = kind === "length" ? unit : kind === "angle" ? "\u00b0" : "";
   const isPlainNumber = /^\s*-?\d*\.?\d+\s*$/.test(text);
-  const showResult = result.ok && !isPlainNumber;
+  /** Why a typed value can't be used: it doesn't evaluate, or it is outside the field's range. */
+  const problem = (t: string): string | null => {
+    const r = ev.eval(t, kind);
+    if (!r.ok) return r.error;
+    const v = r.value / factor;
+    const u = kind === "length" ? ` ${unitLabel}` : unitLabel;
+    if (min !== undefined && v < min - 1e-9) return `${label} can't be less than ${trim(min, 2)}${u}.`;
+    if (max !== undefined && v > max + 1e-6) return `${label}: ${trim(v, 2)}${u} is too big. The largest that fits is ${trim(max, 2)}${u}.`;
+    return null;
+  };
+  const error = problem(text);
+  const showResult = result.ok && !error && !isPlainNumber;
 
   const commit = (t: string, live = false) => {
-    if (ev.eval(t, kind).ok) onChange(t, live);
+    if (!problem(t)) onChange(t, live);
+    // While the entry is out of range the model keeps the value it had, not the last keystroke that fitted.
+    else if (ev.eval(t, kind).ok && before.current !== value) onChange(before.current, live);
   };
 
   const nudge = (dir: number, e: KeyboardEvent) => {
@@ -88,7 +104,7 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
   };
 
   return (
-    <div className={`field ${result.ok ? "" : "field--error"}`}>
+    <div className={`field ${error ? "field--error" : ""}`}>
       <label htmlFor={id} className="field__label scrub" title="Drag to change" onPointerDown={onLabelDown} onPointerMove={onLabelMove} onPointerUp={onLabelUp}>
         {label}
       </label>
@@ -101,13 +117,19 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
           value={text}
           spellCheck={false}
           onFocus={(e) => {
+            before.current = value;
             setFocused(true);
             e.target.select();
           }}
           onBlur={() => {
             setFocused(false);
-            if (ev.eval(text, kind).ok) onChange(text, false);
-            else setText(value);
+            if (!error) onChange(text, false);
+            else {
+              // Refused, as a dialog would: say why and keep the value it had.
+              if (result.ok) toast("info", error);
+              setText(before.current);
+              if (before.current !== value) onChange(before.current, false);
+            }
           }}
           onChange={(e) => {
             setText(e.target.value);
@@ -121,6 +143,12 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
               e.preventDefault();
               nudge(-1, e);
             } else if (e.key === "Enter") {
+              // A refused value stays in the box with its message, to fix or Esc.
+              if (error) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
               (e.target as HTMLInputElement).blur();
               // In a feature panel, Enter also means OK (like every dialog).
               const s = useApp.getState();
@@ -139,9 +167,8 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
         {unitLabel && <span className="field__unit">{unitLabel}</span>}
       </div>
       {showResult && <div className="field__result mono">= {formatQuantity(result.value, kind, unit)}</div>}
-      {!result.ok && <div className="field__error">{result.error}</div>}
-      {max !== undefined && result.ok && result.value / factor > max + 1e-6 && <div className="field__hint">Too big: held at {trim(max, 2)} {unitLabel}</div>}
-      {hint && result.ok && !showResult && <div className="field__hint">{hint}</div>}
+      {error && <div className="field__error" role="alert">{error}</div>}
+      {hint && !error && !showResult && <div className="field__hint">{hint}</div>}
     </div>
   );
 }

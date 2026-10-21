@@ -47,7 +47,7 @@ export type Pick =
  * "path" draws an open polyline (for sweeps and guides). "segment", "arc" and
  * "pcircle" draw constraint-driven geometry; "trim" and "extend" edit it.
  */
-export type SketchTool = EntityType | "select" | "path" | "crect" | "rect3" | "circle2" | "circle3" | "dimension" | "project" | "spline" | "sfillet" | "schamfer" | "gpoint" | "segment" | "arc" | "tarc" | "carc" | "conic" | "polygonC" | "polygonE" | "pcircle" | "slotW" | "slotO" | "slotC" | "slotA" | "slotP" | "lineM" | "trim" | "extend" | "cspline" | "earc" | "tan2c" | "tan3c";
+export type SketchTool = EntityType | "select" | "path" | "crect" | "rect3" | "circle2" | "circle3" | "dimension" | "project" | "spline" | "sfillet" | "schamfer" | "soffset" | "gpoint" | "segment" | "arc" | "tarc" | "carc" | "conic" | "polygonC" | "polygonE" | "pcircle" | "slotW" | "slotO" | "slotC" | "slotA" | "slotP" | "lineM" | "trim" | "extend" | "cspline" | "earc" | "tan2c" | "tan3c";
 
 export type Mode =
   | { kind: "model" }
@@ -551,7 +551,8 @@ let toastId = 0;
 export function toast(kind: Toast["kind"], text: string, action?: Toast["action"], nextStep?: boolean) {
   const id = ++toastId;
   set({ toasts: [...get().toasts.slice(-3), { id, kind, text, action, nextStep }] });
-  setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), action ? 7000 : 3200);
+  // A longer message (a refusal and its reason) stays up long enough to read.
+  setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), action ? 7000 : text.length > 90 ? 6500 : 3200);
 }
 
 /** Use preferences loaded from the person's saved settings (they are not saved again). */

@@ -106,6 +106,17 @@ describe("offset", () => {
     expect(arcs.slice(4).every((a) => a.type === "arc" && Math.abs(a.r - 7) < 1e-6)).toBe(true);
   });
 
+  it("keeps the offset as a dimension, so the copy adds no freedom and still solves", () => {
+    const sk = sketch();
+    rect(sk, [0, 0], [40, 20]);
+    const dof0 = solveSketch(sk, ev)!.dof;
+    expect(offsetGeometry(sk, ids(sk), -4, "4")).toBeUndefined();
+    expect(sk.constraints!.filter((c) => c.type === "distance" && c.value === "4")).toHaveLength(4);
+    const sol = solveSketch(sk, ev)!;
+    expect(["under", "full"]).toContain(sol.state);
+    expect(sol.dof).toBe(dof0);
+  });
+
   it("offsets circles and refuses to collapse them", () => {
     const sk = sketch();
     addEntityGeometry(sk, resolveEntity(makeEntity("circle", [0, 0], [10, 0]), ev));

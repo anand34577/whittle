@@ -152,6 +152,43 @@ await step("05-dimension-tool", async () => {
   expect(await dialog.count() === 0, "dialog closed", {});
 });
 
+await step("06-offset-tool-drag", async () => {
+  // The Offset tool on the canvas: click an edge, move out, click to place.
+  await setTool("rect");
+  await click(200, -200);
+  await click(300, -120);
+  await waitBuilt();
+  await setTool("soffset");
+  await click(250, -200);
+  await page.waitForTimeout(200);
+  const before = await sketchInfo();
+  await page.mouse.move(...at(250, -235), { steps: 6 });
+  await page.waitForTimeout(200);
+  const shown = await page.locator(".inline-prompt input").inputValue();
+  expect(Number(shown) > 0, "dragging out gives a positive distance", shown);
+  await click(250, -235);
+  await waitBuilt();
+  const sk = await sketchInfo();
+  expect(count(sk, "line") === count(before, "line") + 4, "offset made four lines", count(sk, "line"));
+  expect(sk.constraints.filter((c) => c.type === "distance" && c.value === shown).length === 4, "each copy keeps its distance as a dimension", sk.constraints);
+});
+
+await step("07-dimension-placed-by-click", async () => {
+  // The Dimension tool: pick the edge, move to where the dimension goes, click, then the value box opens there.
+  await setTool("dimension");
+  await click(250, -120);
+  await page.mouse.move(...at(270, -70), { steps: 5 });
+  expect((await page.locator(".cmark--placing").count()) === 1, "the dimension follows the pointer", {});
+  expect((await page.locator(".inline-prompt").count()) === 0, "no value box until it is placed", {});
+  await click(270, -70);
+  await page.locator(".inline-prompt input").press("Enter");
+  await waitBuilt();
+  const sk = await sketchInfo();
+  const d = sk.constraints.at(-1);
+  expect(d.type === "distance" && Array.isArray(d.label), "placed where clicked", d);
+  expect((await page.locator(".dimlines polygon").count()) >= 2, "drawn with arrowheads", {});
+});
+
 if (errors.length) {
   console.error("console errors:\n" + errors.join("\n"));
   process.exit(1);

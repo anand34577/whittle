@@ -492,6 +492,10 @@
 [data-theme^="daylight"] .panel__section > * {
   margin-inline: 14px;
 }
+/* Full-width rows would overflow by their margins (switches clipped their text at the panel edge). */
+[data-theme^="daylight"] .panel__section > .switch {
+  width: auto;
+}
 [data-theme^="daylight"] .panel__section > * + * {
   margin-top: 8px;
 }
@@ -524,6 +528,10 @@
 /* Fields: a quiet label on the left, a flat white value box on the right. */
 [data-theme^="daylight"] .field {
   grid-template-columns: 104px 1fr;
+}
+/* Paired fields (width and height, X and Y) stack their label over the box: side by side there is no room for both. */
+[data-theme^="daylight"] .field-row .field {
+  grid-template-columns: 1fr;
 }
 [data-theme^="daylight"] .field__label {
   color: var(--text-2);
