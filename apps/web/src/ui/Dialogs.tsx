@@ -5,7 +5,7 @@ import {
   type QuantityKind,
   documentEvaluator,
   formatQuantity,
-  referencedNames,
+  parameterUses,
   renameParameter,
   uid,
   validateParamName,
@@ -80,9 +80,7 @@ export function ParamsDialog() {
   const [draft, setDraft] = useState<{ name: string; expr: string; kind: QuantityKind }>({ name: "", expr: "", kind: "length" });
   const nameError = draft.name ? validateParamName(draft.name, doc.parameters) : null;
 
-  const usedBy = (name: string) =>
-    doc.features.filter((f) => new RegExp(`\\b${name}\\b`).test(JSON.stringify(f))).length +
-    doc.parameters.filter((p) => referencedNames(p.expr).includes(name)).length;
+  const usedBy = (name: string) => parameterUses(doc, name);
 
   const update = (id: string, patch: Partial<Parameter>) =>
     mutate(
@@ -122,13 +120,23 @@ export function ParamsDialog() {
           const n = usedBy(p.name);
           return (
             <div className="ptable__row" role="row" key={p.id}>
-              <ParamName p={p} params={doc.parameters} />
-              <input className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onChange={(e) => update(p.id, { expr: e.target.value })} aria-label="Formula" title={v?.error} />
+              <label className="ptable__cell">
+                <small className="ptable__label">Name</small>
+                <ParamName p={p} params={doc.parameters} />
+              </label>
+              <label className="ptable__cell">
+                <small className="ptable__label">Value or formula</small>
+                <input className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onChange={(e) => update(p.id, { expr: e.target.value })} aria-label="Formula" title={v?.error} />
+              </label>
               <Select<QuantityKind> size="sm" ariaLabel="Kind" value={p.kind} onChange={(v) => update(p.id, { kind: v })} options={KIND_OPTIONS} />
               <span className={`mono ptable__result ${v?.ok ? "" : "is-error"}`} title={v?.error}>
                 {v?.ok ? formatQuantity(v.value, p.kind, doc.units) : v?.error ?? ""}
+                {v?.ok && n === 0 && <small className="ptable__unused" title="Nothing uses it yet: type its name in any field, or delete it">unused</small>}
               </span>
-              <input className="input" placeholder={n ? `Used ${n}\u00d7` : "Unused"} value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
+              <label className="ptable__cell">
+                <small className="ptable__label">Note</small>
+                <input className="input" placeholder={n ? `Used ${n}\u00d7` : "Unused"} value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
+              </label>
               <span className="ptable__acts">
               <button
                 className={`iconbtn ${p.favorite ? "is-on" : ""}`}
@@ -232,7 +240,7 @@ export function ParamsDialog() {
         </div>
       )}
       {
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+        <div className="modal__foot">
           <button className="btn btn--small" onClick={() => void importParametersCsv()} title="Update and add parameters from a CSV file (Name, Formula or Value, Kind, Note)">
             <Icon name="import" size={16} /> Import CSV
           </button>
@@ -347,7 +355,7 @@ export function ExportDialog() {
     { f: "ply", title: "PLY", sub: "Scanning & mesh analysis", body: "For point-cloud and mesh-analysis tools and scan-comparison workflows." },
   ];
   return (
-    <Modal title="Export">
+    <Modal title="Export" wide>
       {bodies === 0 ? (
         <p className="modal__lede">There's nothing to export yet. Create a body first.</p>
       ) : (
@@ -370,6 +378,10 @@ export function ExportDialog() {
               ))}
             </div>
           </div>
+          {/* Above the formats, so it's seen before a format is picked. */}
+          {selected && (
+            <Checkbox className="checkrow" checked={onlySelected} onChange={setOnlySelected} label={`Only the selected body (${selectedName ?? "Body"})`} />
+          )}
           <DrawingOptions />
           <SlicerCard />
           {items.map((it) => (
@@ -388,9 +400,6 @@ export function ExportDialog() {
               <span className="export-card__body">{it.body}</span>
             </button>
           ))}
-          {selected && (
-            <Checkbox className="checkrow" checked={onlySelected} onChange={setOnlySelected} label={`Only the selected body (${selectedName ?? "Body"})`} />
-          )}
         </div>
       )}
     </Modal>
@@ -400,12 +409,21 @@ export function ExportDialog() {
 /* ───────────────────────────── Shortcuts ───────────────────────────── */
 
 export function ShortcutsDialog() {
+  // Type a word ("fillet", or a synonym like "round") or a key ("F") to find a shortcut in the long list.
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+  const hit = (label: string, keys: string, keywords = "") =>
+    !query ||
+    label.toLowerCase().includes(query) ||
+    keys.toLowerCase() === query ||
+    keys.toLowerCase().includes(query + "+") ||
+    (query.length > 1 && keywords.toLowerCase().includes(query));
   const groups = new Map<string, typeof COMMANDS>();
   for (const c of COMMANDS) {
-    if (!c.keys) continue;
+    if (!c.keys || !hit(c.label, c.keys, c.keywords)) continue;
     groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
   }
-  const mouse = [
+  const allMouse = [
     ["Left-drag", "Orbit"],
     ["Right-drag / middle-drag", "Pan"],
     ["Wheel", "Zoom to cursor"],
@@ -416,10 +434,28 @@ export function ShortcutsDialog() {
     ["Drop a file", "Open .whittle, import STEP / STL"],
     ["Ctrl+K", "Find any command"],
   ];
+  const mouse = allMouse.filter(([k, v]) => hit(v!, k!));
   return (
     <Modal title="Keyboard & mouse" wide>
+      <div className="shortcuts__bar">
+        <label className="parts__search">
+          <Icon name="search" size={16} />
+          <input
+            autoFocus
+            placeholder="Find a shortcut: type a tool or a key"
+            aria-label="Find a shortcut"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Escape") void (q ? setQ("") : useApp.setState({ panel: null }));
+            }}
+          />
+        </label>
+      </div>
       <div className="shortcuts">
-        <section>
+        {!mouse.length && !groups.size && <p className="muted">No shortcut matches "{q}".</p>}
+        {mouse.length > 0 && <section>
           <h3 className="eyebrow">Mouse</h3>
           <dl>
             {mouse.map(([k, v]) => (
@@ -431,7 +467,7 @@ export function ShortcutsDialog() {
               </div>
             ))}
           </dl>
-        </section>
+        </section>}
         {[...groups].map(([g, cs]) => (
           <section key={g}>
             <h3 className="eyebrow">{g}</h3>

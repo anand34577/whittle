@@ -12,6 +12,30 @@ import { copySteps, folderSteps, timelinePick } from "../state/steps";
 import { promptDialog } from "../state/dialogs";
 import { FEATURE_ICONS } from "./PropertiesPanel";
 
+/** A menu opened at `x` stays inside the window, even for the last steps at the right end. */
+const menuLeft = (x: number) => Math.max(8, Math.min(x, window.innerWidth - 248));
+
+/** An open menu closes on a click elsewhere, on Escape (before Escape means anything else) and when the window resizes. */
+function useMenuDismiss(open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close();
+    };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", key, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", key, true);
+      window.removeEventListener("resize", close);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+}
+
 interface Menu {
   f: Feature;
   index: number;
@@ -64,12 +88,7 @@ export function Timeline() {
   const [picked, setPicked] = useState<string[]>([]);
   useEffect(() => void (timelinePick.ids = picked), [picked]);
   const [folderMenu, setFolderMenu] = useState<{ id: string; x: number; y: number } | null>(null);
-  useEffect(() => {
-    if (!folderMenu) return;
-    const close = () => setFolderMenu(null);
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, [folderMenu]);
+  useMenuDismiss(!!folderMenu, () => setFolderMenu(null));
   const folders = (doc.folders ?? []).filter((x) => x.features.some((id) => doc.features.some((f) => f.id === id)));
   const folderOf = new Map(folders.flatMap((x) => x.features.map((id) => [id, x] as const)));
   const firstOf = new Set(folders.map((x) => doc.features.find((f) => x.features.includes(f.id))!.id));
@@ -81,12 +100,7 @@ export function Timeline() {
   const track = useRef<HTMLDivElement>(null);
   const end = activeEnd(doc);
 
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, [menu]);
+  useMenuDismiss(!!menu, () => setMenu(null));
 
   const setRollback = (i: number | null) =>
     mutate("Move timeline marker", (d) => {
@@ -218,7 +232,7 @@ export function Timeline() {
       </div>
 
       {folderMenu && (
-        <div className="menu" style={{ left: folderMenu.x, top: folderMenu.y - 8 }} role="menu" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="menu" style={{ left: menuLeft(folderMenu.x), top: folderMenu.y - 8 }} role="menu" onPointerDown={(e) => e.stopPropagation()}>
           <button
             role="menuitem"
             onClick={async () => {
@@ -244,7 +258,7 @@ export function Timeline() {
       )}
 
       {menu && (
-        <div className="menu" style={{ left: menu.x, top: menu.y - 8 }} role="menu" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="menu" style={{ left: menuLeft(menu.x), top: menu.y - 8 }} role="menu" onPointerDown={(e) => e.stopPropagation()}>
           <div className="menu__title">{menu.f.name}</div>
           <button role="menuitem" onClick={() => (setMenu(null), editFeature(menu.f.id))}>
             <Icon name="edit" size={16} /> Edit

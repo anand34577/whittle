@@ -132,11 +132,8 @@ function renameIn(expr: string, from: string, to: string): string {
   return expr.replace(new RegExp(`(?<![A-Za-z0-9_.])${from}(?![A-Za-z0-9_])`, "g"), to);
 }
 
-/**
- * Rename a parameter and every reference to it (other parameters and all
- * feature fields), so renaming never breaks the design. Mutates `doc`.
- */
-export function renameParameter(doc: Pick<WhittleDocument, "parameters" | "features">, from: string, to: string): void {
+/** Visits every formula field of the features (the same fields a rename touches); `set` replaces its text. */
+function eachExpr(features: unknown, fn: (expr: string, set: (v: string) => void) => void): void {
   const walk = (o: unknown): void => {
     if (!o || typeof o !== "object") return;
     const rec = o as Record<string, unknown>;
@@ -146,15 +143,34 @@ export function renameParameter(doc: Pick<WhittleDocument, "parameters" | "featu
       if (Array.isArray(rec) && k === "2" && (rec[2] === "arc" || rec[2] === "spline")) continue;
       const v = rec[k];
       if (typeof v === "string") {
-        if (k !== "plane") rec[k] = renameIn(v, from, to);
+        if (k !== "plane") fn(v, (x) => (rec[k] = x));
       } else walk(v);
     }
   };
+  walk(features);
+}
+
+/**
+ * Rename a parameter and every reference to it (other parameters and all
+ * feature fields), so renaming never breaks the design. Mutates `doc`.
+ */
+export function renameParameter(doc: Pick<WhittleDocument, "parameters" | "features">, from: string, to: string): void {
   for (const p of doc.parameters) {
     if (p.name === from) p.name = to;
     p.expr = renameIn(p.expr, from, to);
   }
-  walk(doc.features);
+  eachExpr(doc.features, (v, set) => set(renameIn(v, from, to)));
+}
+
+/** How many features and other parameters use parameter `name` in a formula (field names and words don't count). */
+export function parameterUses(doc: Pick<WhittleDocument, "parameters" | "features">, name: string): number {
+  let n = 0;
+  for (const f of doc.features) {
+    let hit = false;
+    eachExpr(f, (v) => (hit ||= referencedNames(v).includes(name)));
+    if (hit) n++;
+  }
+  return n + doc.parameters.filter((p) => p.name !== name && referencedNames(p.expr).includes(name)).length;
 }
 
 export { evaluateRaw };

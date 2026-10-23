@@ -223,6 +223,36 @@ async fn add_version(s: &Shared, user_id: &str, id: &str, head: i64, expected: O
     // A name of its own: two saves racing for the same version must not share one file.
     let tmp = path.with_extension(format!("pending-{}", random_token(6)));
     tokio::fs::write(&tmp, bytes).await?;
+    let committed = commit_version(s, user_id, id, head, next, bytes, parsed, &tmp, &path).await;
+    if committed.is_err() {
+        // A failed save leaves nothing behind on disk.
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+    committed?;
+    let thumb = dir(s, id).join("thumb.png");
+    match &parsed.thumbnail {
+        Some(t) => write_atomic(&thumb, t).await?,
+        None => {
+            let _ = tokio::fs::remove_file(&thumb).await;
+        }
+    }
+    prune(s, id).await?;
+    Ok(next)
+}
+
+/// Move the head to `next` and record the version, then put the uploaded file in place (all or nothing in the database).
+#[allow(clippy::too_many_arguments)]
+async fn commit_version(
+    s: &Shared,
+    user_id: &str,
+    id: &str,
+    head: i64,
+    next: i64,
+    bytes: &[u8],
+    parsed: &Parsed,
+    tmp: &std::path::Path,
+    path: &std::path::Path,
+) -> ApiResult<()> {
     let now = now_ms();
     let mut tx = s.db.begin().await?;
     let moved = sqlx::query(
@@ -239,8 +269,6 @@ async fn add_version(s: &Shared, user_id: &str, id: &str, head: i64, expected: O
     .await?
     .rows_affected();
     if moved != 1 {
-        drop(tx);
-        let _ = tokio::fs::remove_file(&tmp).await;
         return Err(ApiError::new(StatusCode::CONFLICT, "Another save happened at the same time. Try again."));
     }
     sqlx::query("INSERT INTO design_versions (design_id, version, size, created_at, author_id) VALUES ($1, $2, $3, $4, $5)")
@@ -251,17 +279,9 @@ async fn add_version(s: &Shared, user_id: &str, id: &str, head: i64, expected: O
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    tokio::fs::rename(&tmp, &path).await?;
+    tokio::fs::rename(tmp, path).await?;
     tx.commit().await?;
-    let thumb = dir(s, id).join("thumb.png");
-    match &parsed.thumbnail {
-        Some(t) => write_atomic(&thumb, t).await?,
-        None => {
-            let _ = tokio::fs::remove_file(&thumb).await;
-        }
-    }
-    prune(s, id).await?;
-    Ok(next)
+    Ok(())
 }
 
 async fn prune(s: &Shared, id: &str) -> ApiResult<()> {

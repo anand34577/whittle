@@ -346,6 +346,8 @@ export async function importFile(file: File) {
       }
     }
     data = btoa(bin);
+  } catch (e) {
+    return toast("error", `Couldn't read ${file.name}: ${e instanceof Error && e.message ? e.message : "the file may be in use or unreadable"}.`);
   } finally {
     task.done();
   }

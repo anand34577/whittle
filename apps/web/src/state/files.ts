@@ -293,6 +293,7 @@ export async function openDroppedFile(file: File) {
   if (!(await confirmDiscard())) return;
   try {
     show(deserializeDocument(new Uint8Array(await file.arrayBuffer())), file.name, { kind: "none" });
+    toast("ok", `Opened ${file.name}`);
   } catch (e) {
     toast("error", errText(e, "Couldn't open that file."));
   }
@@ -325,10 +326,20 @@ export async function saveDesign(saveAs = false): Promise<boolean> {
     } else {
       if (w.showSaveFilePicker) {
         let h = location.kind === "handle" && !saveAs ? location.handle : null;
-        h ??= await w.showSaveFilePicker({ suggestedName: suggested, types: PICKER_TYPES });
-        const writable = await h.createWritable();
-        await writable.write(bytes);
-        await writable.close();
+        const write = async (handle: FileHandle) => {
+          const writable = await handle.createWritable();
+          await writable.write(bytes);
+          await writable.close();
+        };
+        try {
+          h ??= await w.showSaveFilePicker({ suggestedName: suggested, types: PICKER_TYPES });
+          await write(h);
+        } catch (e) {
+          // The file was moved or deleted, or permission to it was taken back: ask where to save instead of failing every time.
+          if (isAbort(e) || location.kind !== "handle" || saveAs) throw e;
+          h = await w.showSaveFilePicker({ suggestedName: suggested, types: PICKER_TYPES });
+          await write(h);
+        }
         location = { kind: "handle", handle: h };
         label = h.name;
       } else {
@@ -458,9 +469,9 @@ export async function exportText(text: string, name: string, ext: "svg" | "dxf")
 /** Save a high-resolution PNG of the current view. */
 export async function saveScreenshot() {
   if (!thumbnailHook.image) return;
-  const bytes = dataUrlToBytes(thumbnailHook.image(2));
-  if (!bytes) return;
   try {
+    const bytes = dataUrlToBytes(thumbnailHook.image(2));
+    if (!bytes) throw new Error("Couldn't capture the view.");
     if (await saveBytes(bytes, `${safeName(useApp.getState().doc.name)}.png`, "image/png", EXPORT_FILTERS.png!)) toast("ok", "Image saved");
   } catch (e) {
     toast("error", errText(e, "Couldn't save the image."));
@@ -589,6 +600,9 @@ export function startAutosave() {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let last = useApp.getState().doc;
   let warned = false;
+  // Designs whose recovery copy was already removed (so emptying a design deletes once, not on every change).
+  // Not "written this session": a recovered design that is emptied must lose its old copy too.
+  const cleared = new Set<string>();
   useApp.subscribe((s) => {
     if (s.doc === last) return;
     last = s.doc;
@@ -596,7 +610,13 @@ export function startAutosave() {
     timer = setTimeout(() => {
       const { doc, fileName, session } = useApp.getState();
       const toSave = session ? session.base : doc;
-      if (toSave.features.length === 0) return;
+      // An empty design needs no recovery copy, and an older one of it must not come back.
+      if (toSave.features.length === 0) {
+        if (!cleared.has(draftKey(toSave.id))) void deleteStored(draftKey(toSave.id)).catch(() => {});
+        cleared.add(draftKey(toSave.id));
+        return;
+      }
+      cleared.delete(draftKey(toSave.id));
       writeStored(draftKey(toSave.id), { doc: toSave, fileName, at: new Date().toISOString() })
         .then(async () => {
           // Copies of other designs go after a week, so they don't pile up.

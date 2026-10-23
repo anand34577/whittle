@@ -2,7 +2,7 @@
  * Guided lessons for the coach card: each step ticks itself off from the design's state,
  * so people learn by doing it in the real app, not by reading.
  */
-import type { Feature } from "@whittle/core";
+import { type Feature, parameterUses } from "@whittle/core";
 import type { AppState } from "./store";
 
 export interface LessonStep {
@@ -80,7 +80,7 @@ export const LESSONS: Lesson[] = [
       {
         title: "Use it in a sketch",
         body: "Sketch on XY, draw a rectangle, then type width in its Width box. Formulas work too: width / 2.",
-        done: (s) => s.doc.parameters.some((p) => s.doc.features.some((f) => f.type === "sketch" && new RegExp(`\\b${p.name}\\b`).test(JSON.stringify(f.entities) + JSON.stringify(f.constraints ?? [])))),
+        done: (s) => s.doc.parameters.some((p) => parameterUses({ parameters: [], features: s.doc.features.filter((f) => f.type === "sketch") }, p.name) > 0),
       },
       { title: "Extrude it", body: "Finish the sketch, press E, press Enter.", done: (s) => made(s, "extrude") },
       {

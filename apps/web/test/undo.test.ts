@@ -1,7 +1,7 @@
 /** Undo and redo of design edits (the store and the design API), from the October 2026 audit. */
 import { describe, expect, it } from "vitest";
 import { makeExtrude, makePrimitive, makeSketch, newDocument } from "@whittle/core";
-import { beginNewFeature, cancelSession, commitSession, deleteFeature, history, moveFeature, mutate, redo, replaceDocument, undo, updateFeature, useApp } from "../src/state/store";
+import { beginNewFeature, cancelSession, commitSession, deleteFeature, editFeature, history, moveFeature, mutate, redo, replaceDocument, undo, updateFeature, useApp } from "../src/state/store";
 import { runDesignTool } from "../src/state/designApi";
 
 const doc = () => useApp.getState().doc;
@@ -73,6 +73,39 @@ describe("undo and redo", () => {
     undo();
     expect(order()).toEqual(o0);
     expect(Object.keys(doc().bodies).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("deleting a step while another step's editor is open can't be brought back by Cancel", () => {
+    replaceDocument(newDocument("T"), null);
+    const a = makePrimitive(doc(), "box");
+    const b = makePrimitive(doc(), "cylinder");
+    beginNewFeature(a, "a");
+    commitSession();
+    beginNewFeature(b, "b");
+    commitSession();
+    editFeature(a.id);
+    deleteFeature(b.id);
+    cancelSession();
+    expect(doc().features.map((f) => f.id)).toEqual([a.id]);
+  });
+
+  it("moving a step while an unfinished new step is open moves the step that was picked", () => {
+    replaceDocument(newDocument("T"), null);
+    const a = makePrimitive(doc(), "box");
+    const b = makePrimitive(doc(), "cylinder");
+    beginNewFeature(a, "a");
+    commitSession();
+    beginNewFeature(b, "b");
+    commitSession();
+    const c = makePrimitive(doc(), "sphere");
+    mutate("roll back", (d) => void (d.rollback = 0));
+    beginNewFeature(c, "c"); // inserted first, at the marker
+    mutate("roll forward", (d) => void (d.rollback = null));
+    // The kernel reports it as still waiting for picks, so committing drops it.
+    useApp.setState({ builtDoc: doc(), regen: { status: [{ id: c.id, state: "incomplete" }] } as never });
+    expect(doc().features.map((f) => f.id)).toEqual([c.id, a.id, b.id]);
+    moveFeature(2, 1); // b before a, as seen with c in the timeline
+    expect(doc().features.map((f) => f.id)).toEqual([b.id, a.id]);
   });
 
   it("an edit that changes nothing is not an undo step", async () => {

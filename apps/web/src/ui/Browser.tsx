@@ -35,6 +35,13 @@ export function Browser() {
 
   return (
     <nav className="browser" aria-label="Design browser">
+      {/* Narrow windows show the browser as a drawer over the model: give it a visible way out. */}
+      <header className="browser__drawerhead">
+        <span className="eyebrow">Browser</span>
+        <button className="iconbtn iconbtn--small" title="Close" aria-label="Close the design browser" onClick={() => useApp.setState({ browserOpen: false })}>
+          <Icon name="close" size={15} />
+        </button>
+      </header>
       <div className="tree">
         <Section title="Parameters" count={doc.parameters.length} defaultOpen={doc.parameters.length > 0}>
           {[...doc.parameters].sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite)).map((p) => {

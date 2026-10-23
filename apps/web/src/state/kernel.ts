@@ -15,6 +15,16 @@ export function stopRebuild() {
   kernel?.cancel();
 }
 
+/**
+ * After an engine error: rebuild again (a crashed engine restarts by itself on the next request), or reload the
+ * page when the engine never started at all (autosave brings the design back).
+ */
+export function retryKernel() {
+  if (!useApp.getState().kernelReady) return window.location.reload();
+  useApp.setState({ kernelError: null });
+  schedule();
+}
+
 export function getKernel(): WorkerKernel {
   if (!kernel) throw new Error("Kernel not started");
   return kernel;

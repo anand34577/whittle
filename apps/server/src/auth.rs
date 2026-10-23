@@ -29,6 +29,8 @@ use crate::{
 
 pub const COOKIE: &str = "whittle_session";
 const MAX_FAILURES: u32 = 10;
+/// Failed sign-ins from one address across all usernames (trying one password on many accounts).
+const MAX_ADDR_FAILURES: u32 = 50;
 const FAILURE_WINDOW: Duration = Duration::from_secs(15 * 60);
 /// Password reset links last one hour.
 const RESET_TTL_MS: i64 = 60 * 60 * 1000;
@@ -263,11 +265,14 @@ pub async fn login(State(s): State<Shared>, ClientAddr(addr): ClientAddr, Json(b
     if !s.config.auth_local {
         return Err(ApiError::bad_request("Password sign-in is turned off on this server"));
     }
-    let key = format!("{addr}|{}", b.username.to_ascii_lowercase());
+    // Keyed on the name as it is looked up (trimmed), so padding it with spaces doesn't buy fresh attempts.
+    let key = format!("{addr}|{}", b.username.trim().to_lowercase());
+    // The whole address, with no "|" so it can't collide with a username key.
+    let addr_key = addr.to_string();
     {
         let mut f = s.login_failures.lock().await;
         f.retain(|_, (_, at)| at.elapsed() < FAILURE_WINDOW);
-        if f.get(&key).is_some_and(|(n, _)| *n >= MAX_FAILURES) {
+        if f.get(&key).is_some_and(|(n, _)| *n >= MAX_FAILURES) || f.get(&addr_key).is_some_and(|(n, _)| *n >= MAX_ADDR_FAILURES) {
             return Err(ApiError::new(StatusCode::TOO_MANY_REQUESTS, "Too many failed attempts. Try again in 15 minutes."));
         }
     }
@@ -294,8 +299,18 @@ pub async fn login(State(s): State<Shared>, ClientAddr(addr): ClientAddr, Json(b
         let e = f.entry(key).or_insert((0, Instant::now()));
         e.0 += 1;
         e.1 = Instant::now();
-        if e.0 == MAX_FAILURES {
-            db::audit(&s.db, None, "login.locked", Some(login), &format!("10 failed sign-ins from {addr}")).await;
+        let locked = e.0 == MAX_FAILURES;
+        // Not cleared by a successful sign-in, so one valid account doesn't reset it.
+        let a = f.entry(addr_key).or_insert((0, Instant::now()));
+        a.0 += 1;
+        a.1 = Instant::now();
+        let addr_locked = a.0 == MAX_ADDR_FAILURES;
+        drop(f);
+        if locked {
+            db::audit(&s.db, None, "login.locked", Some(login), &format!("{MAX_FAILURES} failed sign-ins from {addr}")).await;
+        }
+        if addr_locked {
+            db::audit(&s.db, None, "login.locked", None, &format!("{MAX_ADDR_FAILURES} failed sign-ins across usernames from {addr}")).await;
         }
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "Wrong username or password"));
     };
@@ -494,7 +509,7 @@ pub async fn forgot(State(s): State<Shared>, headers: HeaderMap, ClientAddr(addr
         return Err(ApiError::bad_request("Password reset by email isn't available. Ask an administrator."));
     }
     // Share the sign-in rate limit, so this can't be used to flood someone's inbox.
-    let key = format!("{addr}|reset");
+    let key = format!("reset|{addr}"); // Not "{addr}|…", which a user named "reset" would share.
     {
         let mut f = s.login_failures.lock().await;
         f.retain(|_, (_, at)| at.elapsed() < FAILURE_WINDOW);

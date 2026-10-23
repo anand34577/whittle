@@ -144,6 +144,24 @@ async fn brute_force_is_throttled() {
     }
     let r = post_json(&app, "/api/auth/login", None, json!({ "username": "ada", "email": "ada@example.com", "password": "correct horse" })).await;
     assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    // Padding or recasing the name is the same account, not ten fresh attempts.
+    for name in [" ada", "ada  ", "ADA"] {
+        let r = post_json(&app, "/api/auth/login", None, json!({ "username": name, "password": "nope nope" })).await;
+        assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{name:?}");
+    }
+}
+
+#[tokio::test]
+async fn password_spraying_is_throttled() {
+    let app = app(|_| {}).await;
+    post_json(&app, "/api/auth/register", None, json!({ "username": "ada", "email": "ada@example.com", "password": "correct horse" })).await;
+    // One guess each on many names: no single name is locked, but the address is.
+    for i in 0..50 {
+        let r = post_json(&app, "/api/auth/login", None, json!({ "username": format!("user{i}"), "password": "Summer2026!" })).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    let r = post_json(&app, "/api/auth/login", None, json!({ "username": "ada", "password": "correct horse" })).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]

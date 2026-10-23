@@ -50,7 +50,7 @@ Real-time collaboration (Yjs/yrs), plugin & scripting API, optional AI assistant
 | Layer | Choice | Why |
 |---|---|---|
 | Geometry kernel | **OpenCascade (OCCT)** in **WebAssembly** via `replicad` + `replicad-opencascadejs` | The only mature open-source B-rep kernel; prebuilt WASM let Phase 0 skip a multi-hour custom OCCT build. A custom slimmer build is planned. |
-| Sketch solver | **PlaneGCS** (from the FreeCAD project) → WASM | Proven; LGPL (SolveSpace is GPL) |
+| Sketch solver | **PlaneGCS** → WASM | Proven in production CAD; LGPL, so it can ship as a separate, replaceable file |
 | App language | TypeScript (strict) | One codebase for web + desktop |
 | UI | React 19 + Vite 8; custom design system (CSS tokens, own icon set) | No template look |
 | Viewport | Three.js (imperative engine, WebGL2; WebGPU later) | Mature, fast, on-demand rendering |
@@ -80,7 +80,8 @@ Layout: title bar → intent-grouped toolbar → browser | **viewport** | proper
 - **Contextual action bar:** select a face → Sketch here / Shell; edges → Fillet / Chamfer; sketch → Extrude / Revolve.
 - **Typed dimensions while drawing**: start typing; Tab switches W/H; Enter places.
 - **Scrubbable labels:** drag any field label to change the value; arrows nudge it (Shift ×10, Alt ×0.1).
-- **Guided first part** checklist, starter templates, start screen with session recovery.
+- **Lessons** (first part, revolved cup, plate with holes, parameters) whose steps tick themselves off from the design's state; starter templates; start screen with session recovery.
+- **IDE-style assistance:** a Problems list in the status bar (failed steps, conflicting or loose sketches, unused sketches, turned-off steps, a rolled-back timeline), each with a one-click fix and also given to the AI assistant; "Next steps" in the properties panel; a start card in the empty view; hover info on faces and edges; a key tip the second time a tool is clicked; recent commands first in Ctrl+K.
 - **Orientation cube**, home/fit views, turntable navigation that never rolls the horizon.
 - Accessibility: keyboard-reachable controls, focus rings, reduced motion respected, no colour-only states.
 

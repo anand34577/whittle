@@ -427,10 +427,9 @@ export function updateFeature(id: Id, label: string, recipe: (f: Draft<Feature>)
 
 export function deleteFeature(id: Id) {
   const { session } = get();
-  if (session?.featureId === id) {
-    if (session.isNew) return cancelSession();
-    commitSession();
-  }
+  if (session?.featureId === id && session.isNew) return cancelSession();
+  // Any open editor is finished first, so Cancel there can't bring the deleted step back.
+  if (session) commitSession();
   const f = findFeature(get().doc, id);
   if (!f) return;
   mutate(`Delete ${f.name}`, (d) => {
@@ -445,8 +444,19 @@ export function deleteFeature(id: Id) {
 
 /** Move a timeline step to a new position (refused, with the reason, if it would break the design). */
 export function moveFeature(from: number, to: number) {
-  const { doc, session } = get();
-  if (session) commitSession();
+  if (get().session) {
+    // Committing may drop an unfinished new step and shift the positions: follow the steps themselves.
+    const before = get().doc.features;
+    const moving = before[from]?.id;
+    const onto = before[to]?.id;
+    commitSession();
+    const after = get().doc.features;
+    from = after.findIndex((x) => x.id === moving);
+    const at = after.findIndex((x) => x.id === onto);
+    to = at >= 0 ? at : Math.min(to, after.length - 1);
+    if (from < 0) return;
+  }
+  const { doc } = get();
   const problem = reorderProblem(doc, from, to);
   if (problem) return toast("warn", problem);
   const f = doc.features[from];
@@ -562,7 +572,8 @@ export function toast(kind: Toast["kind"], text: string, action?: Toast["action"
   const id = ++toastId;
   set({ toasts: [...get().toasts.slice(-3), { id, kind, text, action, nextStep }] });
   // A longer message (a refusal and its reason) stays up long enough to read.
-  setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), action ? 7000 : text.length > 90 ? 6500 : 3200);
+  // Errors and warnings stay up long enough to read what went wrong.
+  setTimeout(() => set({ toasts: get().toasts.filter((t) => t.id !== id) }), action ? 7000 : text.length > 90 || kind === "error" ? 6500 : kind === "warn" ? 5000 : 3200);
 }
 
 /** Use preferences loaded from the person's saved settings (they are not saved again). */

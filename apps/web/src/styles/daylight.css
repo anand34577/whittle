@@ -530,7 +530,9 @@
   grid-template-columns: 104px 1fr;
 }
 /* Paired fields (width and height, X and Y) stack their label over the box: side by side there is no room for both. */
-[data-theme^="daylight"] .field-row .field {
+[data-theme^="daylight"] .field-row .field,
+[data-theme^="daylight"] .field--stack,
+[data-theme^="daylight"] .settings__grid .field {
   grid-template-columns: 1fr;
 }
 [data-theme^="daylight"] .field__label {
