@@ -1,13 +1,13 @@
 /**
  * End-to-end test of the features added in the third audit: symmetric and two-sided revolve, shell direction,
  * moments of inertia, the new library parts and the wider formula language.
- *   node tests/e2e/fusion.mjs [url] [screenshotDir]
+ *   node tests/e2e/solids.mjs [url] [screenshotDir]
  */
 import { chromium } from "playwright-core";
 import { mkdirSync } from "node:fs";
 
 const url = process.argv[2] ?? "http://localhost:5173/";
-const out = process.argv[3] ?? "test-results/fusion";
+const out = process.argv[3] ?? "test-results/solids";
 mkdirSync(out, { recursive: true });
 
 const channel = process.env.BROWSER_CHANNEL ?? "msedge";

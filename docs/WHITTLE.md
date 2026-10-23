@@ -891,7 +891,7 @@ Newer rebuild requests replace older pending ones.
 | Drawing guidance | `node tests/e2e/guidance.mjs [url]` | Perpendicular and midpoint snaps, starting on an end, a curve or a crossing; the relations are kept, redundant ones tidied in the same undo step |
 | Curves | `node tests/e2e/curves.mjs [url]` | Ellipse drawn to typed sizes is fully defined and extrudes exactly; Dimension tool sets its major then minor radius; the assistant draws one |
 | Responsive and touch | `node tests/e2e/responsive.mjs [url]` | Panels collapse on a wide window and become drawers on a phone (the editor opens by itself), one finger orbits, two pinch and pan |
-| Third audit | `node tests/e2e/fusion.mjs [url]` | Symmetric and two-sided revolve, outside shell, moments of inertia, the new library parts, the wider formula language |
+| Third audit | `node tests/e2e/solids.mjs [url]` | Symmetric and two-sided revolve, outside shell, moments of inertia, the new library parts, the wider formula language |
 | Previews | `node tests/e2e/previews.mjs [url]` | Resting on an edge in Fillet previews it (simulated and with a real mouse) without picking it; moving off restores |
 
 `npm run test:e2e` runs them all against the dev server (`npm run dev`); they pass with no console errors. The offline web app
