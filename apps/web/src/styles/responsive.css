@@ -202,3 +202,31 @@
     display: none;
   }
 }
+
+/* Parameters on a phone: each parameter becomes a small card (name and formula, then kind and result, then the
+   note with its star and delete), instead of a wide table whose last columns hide off to the side. */
+@media (max-width: 640px) {
+  .ptable__row {
+    grid-template-columns: 1fr 1fr;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .ptable__row--head {
+    display: none;
+  }
+  .ptable__row > :nth-child(5) {
+    grid-column: 1;
+  }
+  .ptable__acts {
+    justify-self: end;
+  }
+  .ptable__row--new {
+    border-bottom: 0;
+  }
+  .ptable__row--new > span:empty {
+    display: none;
+  }
+  .ptable__row--new > button {
+    grid-column: 1 / -1;
+  }
+}

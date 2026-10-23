@@ -83,6 +83,9 @@ function onKey(e: KeyboardEvent) {
     return;
   }
 
+  // Text picked out on screen (a volume, a mass, an error message) copies like anywhere else, not as timeline steps.
+  if (mod && /^[cx]$/i.test(e.key) && s.mode.kind !== "sketch" && window.getSelection()?.toString()) return;
+
   const id = commandForKey(e, s);
   if (!id) return;
   const c = commandById(id);
@@ -146,6 +149,22 @@ export function App() {
         window.history.replaceState(null, "", window.location.pathname);
       }
     });
+    // Last line of defence: a failure no code path caught is still told to the person, never swallowed silently.
+    let lastFailure = { text: "", at: 0 };
+    const report = (reason: unknown) => {
+      if ((reason as Error)?.name === "AbortError") return; // a dialog the person cancelled
+      const raw = reason instanceof Error ? reason.message : typeof reason === "string" ? reason : "";
+      if (/ResizeObserver loop/.test(raw)) return; // harmless browser notice
+      console.error("Unhandled:", reason);
+      const text = `Something went wrong${raw ? `: ${raw}` : ""}. Your design is safe; try that again.`;
+      if (text === lastFailure.text && Date.now() - lastFailure.at < 4000) return;
+      lastFailure = { text, at: Date.now() };
+      toast("error", text);
+    };
+    const onRejection = (e: PromiseRejectionEvent) => report(e.reason);
+    const onError = (e: ErrorEvent) => report(e.error ?? e.message);
+    window.addEventListener("unhandledrejection", onRejection);
+    window.addEventListener("error", onError);
     window.addEventListener("keydown", onKey);
     // The browser's own context menu never appears inside the app (text fields keep theirs).
     const noMenu = (e: MouseEvent) => {
@@ -162,6 +181,8 @@ export function App() {
     window.addEventListener("dragover", prevent);
     window.addEventListener("drop", drop);
     return () => {
+      window.removeEventListener("unhandledrejection", onRejection);
+      window.removeEventListener("error", onError);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("contextmenu", noMenu);
       window.removeEventListener("dragover", prevent);

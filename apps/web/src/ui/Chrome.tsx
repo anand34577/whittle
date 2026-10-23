@@ -4,6 +4,7 @@ import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable, 
 import { aiAvailable } from "../state/platform";
 import { hintFor } from "../state/hints";
 import { problemsOf } from "../state/problems";
+import { retryKernel } from "../state/kernel";
 import { noteClick, noteRun, recentCommands } from "../state/learn";
 import { Activity, ActivityStrip } from "./Activity";
 import { Spinner } from "./feedback";
@@ -18,6 +19,7 @@ import { Icon } from "./icons";
 export function TitleBar() {
   const doc = useApp((s) => s.doc);
   const dirty = useApp((s) => s.dirty);
+  const fileName = useApp((s) => s.fileName);
   const theme = useApp((s) => s.theme);
   const assistant = useApp((s) => s.assistant);
   const browserOpen = useApp((s) => s.browserOpen);
@@ -83,7 +85,15 @@ export function TitleBar() {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           }}
         />
-        <span className={`docname__state ${dirty ? "is-dirty" : ""}`}>{dirty ? "Unsaved" : "Saved"}</span>
+        {/* Only a design that really is in a file says Saved; a new or template design isn't stored anywhere yet. Clicking saves. */}
+        <button
+          type="button"
+          className={`docname__state ${dirty ? "is-dirty" : fileName ? "" : "is-new"}`}
+          onClick={() => run("save")}
+          title={dirty || !fileName ? "Save (Ctrl+S)" : `Saved as ${fileName}`}
+        >
+          {dirty ? "Unsaved" : fileName ? "Saved" : doc.features.length ? "Not saved yet" : "New"}
+        </button>
       </div>
 
       <div className="titlebar__right">
@@ -516,7 +526,18 @@ export function StatusBar() {
       <Activity />
       <span className="statusbar__meta">
         {state.kernelError ? (
-          <span className="status-dot status-dot--error">Engine error</span>
+          <button
+            type="button"
+            className="status-dot status-dot--error statusbar__retry"
+            title={`${state.kernelError}
+Click to try again.`}
+            onClick={() => {
+              toast("error", state.kernelError ?? "The geometry engine stopped.");
+              retryKernel();
+            }}
+          >
+            Engine error · Retry
+          </button>
         ) : !state.kernelReady ? (
           <span className="busyline">
             <Spinner label="Loading engine" />
@@ -620,16 +641,30 @@ export function Toasts() {
   const toasts = useApp((s) => s.toasts);
   return (
     <div className="toasts" aria-live="polite">
-      {toasts.map((t) => (
-        <div key={t.id} className={`toast toast--${t.kind}`}>
-          <span>{t.text}</span>
-          {t.action && (
-            <button className="link" onClick={t.action.run}>
-              {t.action.label}
+      {toasts.map((t) => {
+        const dismiss = () => useApp.setState({ toasts: useApp.getState().toasts.filter((x) => x.id !== t.id) });
+        return (
+          // Errors are announced at once; the rest wait for a pause.
+          <div key={t.id} className={`toast toast--${t.kind}`} role={t.kind === "error" ? "alert" : undefined}>
+            <span>{t.text}</span>
+            {t.action && (
+              <button
+                className="link"
+                onClick={() => {
+                  // Done once: the toast goes, so a second click can't run it again.
+                  dismiss();
+                  t.action!.run();
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
+            <button className="toast__close" onClick={dismiss} aria-label="Dismiss" title="Dismiss">
+              <Icon name="close" size={12} />
             </button>
-          )}
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

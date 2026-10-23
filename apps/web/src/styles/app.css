@@ -292,6 +292,20 @@ kbd {
 .docname__state.is-dirty::before {
   background: var(--accent);
 }
+.docname__state.is-new::before {
+  background: var(--text-3);
+}
+button.docname__state {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+button.docname__state:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
 
 .titlebar__right {
   display: flex;
@@ -1475,6 +1489,18 @@ kbd {
 .status-dot--error::before {
   background: var(--danger);
 }
+.statusbar__retry {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--r-1, 4px);
+  background: none;
+  color: var(--danger);
+  font: inherit;
+  cursor: pointer;
+}
+.statusbar__retry:hover {
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+}
 @keyframes pulse {
   to {
     opacity: 0.3;
@@ -1507,6 +1533,23 @@ kbd {
   font-size: var(--fs-sm);
   pointer-events: auto;
   animation: rise var(--dur) var(--ease);
+}
+.toast__close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: -6px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.toast__close:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
 }
 .toast--ok {
   box-shadow: var(--shadow-pop), inset 0 0 0 1px color-mix(in oklch, var(--ok) 50%, transparent);
@@ -1643,10 +1686,20 @@ kbd {
   color: var(--text-2);
   max-width: 68ch;
 }
-/* Parameters table */
+/* Buttons along the bottom of a dialog, clear of its edges. */
+.modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 20px 16px;
+}
+/* Parameters table: scrolls on its own so variants and the CSV buttons stay in view with many parameters. */
 .ptable {
-  padding: 0 20px 20px;
+  padding: 0 20px 16px;
   overflow: auto;
+  min-height: 0;
+  flex: 0 1 auto;
 }
 .ptable__row {
   display: grid;
@@ -1676,6 +1729,15 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.ptable__unused {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-3);
+}
 .ptable__result.is-error {
   color: var(--danger);
   font-family: var(--font-ui);
@@ -1685,11 +1747,21 @@ kbd {
 /* Export */
 .export-grid {
   display: grid;
+  /* Two columns of formats on a wide window, so every choice is visible without scrolling. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
   gap: 8px;
   padding: 0 20px 20px;
+  /* Scrolls inside the dialog instead of spilling past its bottom edge. */
+  overflow: auto;
+  min-height: 0;
+}
+.export-grid > :not(.export-card),
+.export-card--slicer {
+  grid-column: 1 / -1;
 }
 .export-card {
   display: grid;
+  align-content: start;
   grid-template-columns: 64px 1fr;
   grid-template-rows: auto auto;
   column-gap: 14px;
@@ -1729,6 +1801,9 @@ kbd {
 }
 
 /* Shortcuts */
+.shortcuts__bar {
+  padding: 0 20px 12px;
+}
 .shortcuts {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -2012,4 +2087,9 @@ kbd {
 .cmark.is-bad {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+/* Measured values (volume, mass, lengths) can be selected and copied with Ctrl+C. */
+.panel dd {
+  user-select: text;
 }

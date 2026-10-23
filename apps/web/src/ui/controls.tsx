@@ -106,6 +106,8 @@ export function Popover({
 export interface Option<T extends string> {
   value: T;
   label: string;
+  /** What the closed control shows when this is chosen, if the label is too long for it. */
+  short?: string;
   hint?: string;
   group?: string;
   icon?: IconName;
@@ -212,12 +214,13 @@ export function Select<T extends string>({
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         aria-label={ariaLabel ?? label}
+        title={current && (current.short || current.label.length > 18) ? current.label : undefined}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={onKey}
       >
         {current?.swatch && <span className="select-btn__swatch" style={{ background: current.swatch }} />}
         {current?.icon && <Icon name={current.icon} size={15} />}
-        <span className={`select-btn__text ${current ? "" : "is-placeholder"}`}>{current?.label ?? placeholder}</span>
+        <span className={`select-btn__text ${current ? "" : "is-placeholder"}`}>{current ? (current.short ?? current.label) : placeholder}</span>
         <Icon name="chevronDown" size={12} />
       </button>
       <Popover anchor={btn.current} open={open} onClose={() => setOpen(false)} matchWidth className="listbox">

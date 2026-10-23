@@ -263,7 +263,8 @@ pub async fn login(State(s): State<Shared>, ClientAddr(addr): ClientAddr, Json(b
     if !s.config.auth_local {
         return Err(ApiError::bad_request("Password sign-in is turned off on this server"));
     }
-    let key = format!("{addr}|{}", b.username.to_ascii_lowercase());
+    // Keyed on the name as it is looked up (trimmed), so padding it with spaces doesn't buy fresh attempts.
+    let key = format!("{addr}|{}", b.username.trim().to_lowercase());
     {
         let mut f = s.login_failures.lock().await;
         f.retain(|_, (_, at)| at.elapsed() < FAILURE_WINDOW);

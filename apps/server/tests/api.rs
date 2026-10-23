@@ -144,6 +144,11 @@ async fn brute_force_is_throttled() {
     }
     let r = post_json(&app, "/api/auth/login", None, json!({ "username": "ada", "email": "ada@example.com", "password": "correct horse" })).await;
     assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    // Padding or recasing the name is the same account, not ten fresh attempts.
+    for name in [" ada", "ada  ", "ADA"] {
+        let r = post_json(&app, "/api/auth/login", None, json!({ "username": name, "password": "nope nope" })).await;
+        assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{name:?}");
+    }
 }
 
 #[tokio::test]

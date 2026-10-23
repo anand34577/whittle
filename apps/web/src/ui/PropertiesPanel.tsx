@@ -854,7 +854,7 @@ function Inspector() {
                           })
                         : setPrefs({ material: v })
                     }
-                    options={[...(body ? [{ value: "", label: `Design default (${MATERIALS.find((m) => m.id === mat)!.label})`, group: "" }] : []), ...MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))]}
+                    options={[...(body ? [{ value: "", label: `Design default (${MATERIALS.find((m) => m.id === mat)!.label})`, short: `${MATERIALS.find((m) => m.id === mat)!.label} (default)`, group: "" }] : []), ...MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))]}
                   />
                 </dd>
               </>
