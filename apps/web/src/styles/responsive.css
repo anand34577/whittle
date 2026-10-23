@@ -4,7 +4,8 @@
  * (a feature or sketch editor opens the properties drawer by itself).
  */
 
-.app__drawer-scrim {
+.app__drawer-scrim,
+.browser__drawerhead {
   display: none;
 }
 .titlebar__side {
@@ -66,6 +67,25 @@
   .app.browser-open .browser,
   .app.panel-open .panel {
     visibility: visible;
+  }
+  .browser__drawerhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    margin: calc(-1 * var(--sp-2)) 0 var(--sp-2);
+    padding: 6px 8px 6px 12px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--line);
+  }
+  /* Daylight's own "Browser" caption gives way to the drawer header, which carries the same caption plus Close. */
+  [data-theme^="daylight"] .browser::before {
+    display: none;
+  }
+  [data-theme^="daylight"] .browser__drawerhead {
+    background: var(--bg-0);
   }
   .app__drawer-scrim {
     display: block;
@@ -203,6 +223,14 @@
   }
 }
 
+/* Field captions only show on the phone cards; on wider windows the header row names the columns. */
+.ptable__cell {
+  display: contents;
+}
+.ptable__label {
+  display: none;
+}
+
 /* Parameters on a phone: each parameter becomes a small card (name and formula, then kind and result, then the
    note with its star and delete), instead of a wide table whose last columns hide off to the side. */
 @media (max-width: 640px) {
@@ -213,6 +241,17 @@
   }
   .ptable__row--head {
     display: none;
+  }
+  .ptable__cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .ptable__label {
+    display: block;
+    color: var(--text-3);
+    font-size: 11px;
   }
   .ptable__row > :nth-child(5) {
     grid-column: 1;

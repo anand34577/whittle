@@ -152,6 +152,19 @@ async fn brute_force_is_throttled() {
 }
 
 #[tokio::test]
+async fn password_spraying_is_throttled() {
+    let app = app(|_| {}).await;
+    post_json(&app, "/api/auth/register", None, json!({ "username": "ada", "email": "ada@example.com", "password": "correct horse" })).await;
+    // One guess each on many names: no single name is locked, but the address is.
+    for i in 0..50 {
+        let r = post_json(&app, "/api/auth/login", None, json!({ "username": format!("user{i}"), "password": "Summer2026!" })).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    let r = post_json(&app, "/api/auth/login", None, json!({ "username": "ada", "password": "correct horse" })).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn designs_versions_conflicts_and_isolation() {
     let app = app(|c| c.max_versions = 3).await;
     let ada = session(&post_json(&app, "/api/auth/register", None, json!({ "username": "ada", "email": "ada@example.com", "password": "correct horse" })).await);

@@ -120,14 +120,23 @@ export function ParamsDialog() {
           const n = usedBy(p.name);
           return (
             <div className="ptable__row" role="row" key={p.id}>
-              <ParamName p={p} params={doc.parameters} />
-              <input className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onChange={(e) => update(p.id, { expr: e.target.value })} aria-label="Formula" title={v?.error} />
+              <label className="ptable__cell">
+                <small className="ptable__label">Name</small>
+                <ParamName p={p} params={doc.parameters} />
+              </label>
+              <label className="ptable__cell">
+                <small className="ptable__label">Value or formula</small>
+                <input className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onChange={(e) => update(p.id, { expr: e.target.value })} aria-label="Formula" title={v?.error} />
+              </label>
               <Select<QuantityKind> size="sm" ariaLabel="Kind" value={p.kind} onChange={(v) => update(p.id, { kind: v })} options={KIND_OPTIONS} />
               <span className={`mono ptable__result ${v?.ok ? "" : "is-error"}`} title={v?.error}>
                 {v?.ok ? formatQuantity(v.value, p.kind, doc.units) : v?.error ?? ""}
                 {v?.ok && n === 0 && <small className="ptable__unused" title="Nothing uses it yet: type its name in any field, or delete it">unused</small>}
               </span>
-              <input className="input" placeholder={n ? `Used ${n}\u00d7` : "Unused"} value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
+              <label className="ptable__cell">
+                <small className="ptable__label">Note</small>
+                <input className="input" placeholder={n ? `Used ${n}\u00d7` : "Unused"} value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
+              </label>
               <span className="ptable__acts">
               <button
                 className={`iconbtn ${p.favorite ? "is-on" : ""}`}
@@ -400,13 +409,18 @@ export function ExportDialog() {
 /* ───────────────────────────── Shortcuts ───────────────────────────── */
 
 export function ShortcutsDialog() {
-  // Type a word ("fillet") or a key ("F") to find a shortcut in the long list.
+  // Type a word ("fillet", or a synonym like "round") or a key ("F") to find a shortcut in the long list.
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
-  const hit = (label: string, keys: string) => !query || label.toLowerCase().includes(query) || keys.toLowerCase() === query || keys.toLowerCase().includes(query + "+");
+  const hit = (label: string, keys: string, keywords = "") =>
+    !query ||
+    label.toLowerCase().includes(query) ||
+    keys.toLowerCase() === query ||
+    keys.toLowerCase().includes(query + "+") ||
+    (query.length > 1 && keywords.toLowerCase().includes(query));
   const groups = new Map<string, typeof COMMANDS>();
   for (const c of COMMANDS) {
-    if (!c.keys || !hit(c.label, c.keys)) continue;
+    if (!c.keys || !hit(c.label, c.keys, c.keywords)) continue;
     groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
   }
   const allMouse = [

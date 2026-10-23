@@ -600,8 +600,9 @@ export function startAutosave() {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let last = useApp.getState().doc;
   let warned = false;
-  // Recovery copies written in this session (so emptying a design removes its copy once, not on every change).
-  const drafted = new Set<string>();
+  // Designs whose recovery copy was already removed (so emptying a design deletes once, not on every change).
+  // Not "written this session": a recovered design that is emptied must lose its old copy too.
+  const cleared = new Set<string>();
   useApp.subscribe((s) => {
     if (s.doc === last) return;
     last = s.doc;
@@ -611,10 +612,11 @@ export function startAutosave() {
       const toSave = session ? session.base : doc;
       // An empty design needs no recovery copy, and an older one of it must not come back.
       if (toSave.features.length === 0) {
-        if (drafted.delete(draftKey(toSave.id))) void deleteStored(draftKey(toSave.id)).catch(() => {});
+        if (!cleared.has(draftKey(toSave.id))) void deleteStored(draftKey(toSave.id)).catch(() => {});
+        cleared.add(draftKey(toSave.id));
         return;
       }
-      drafted.add(draftKey(toSave.id));
+      cleared.delete(draftKey(toSave.id));
       writeStored(draftKey(toSave.id), { doc: toSave, fileName, at: new Date().toISOString() })
         .then(async () => {
           // Copies of other designs go after a week, so they don't pile up.

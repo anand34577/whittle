@@ -36,12 +36,15 @@ Verified with:
 - `npm run test:e2e`: 20 suites passed (before the last two small fixes: the toast close button and inspector copy, both checked by hand in the browser)
 - `cargo test` in `apps/server`: 17 passed
 
+## Follow-up round (same day)
+
+- **Autosave:** emptying a design now removes its recovery copy even when that copy came from an earlier session (a recovered design).
+- **Narrow windows:** the design browser drawer has its own close button.
+- **Shortcuts search** also matches command keywords ("round" finds Fillet).
+- **Server:** besides the per-name limit, one address gets at most 50 failed sign-ins across all usernames in 15 minutes, which slows password spraying (with a test). A successful sign-in doesn't reset it. The reset-email limit got its own key, so it can't share a count with a user named "reset".
+- **Parameters on phones:** each card labels its Name, Value or formula, and Note fields.
+- The extra end-to-end suite was renamed `tests/e2e/solids.mjs`.
+
 ## Left to do (next pickup)
 
-1. Re-run `npm run test:e2e` once to cover the final toast and copy changes.
-2. The autosave stale-copy cleanup covers only drafts written in the current session. A recovered design that is emptied keeps its old copy.
-3. The narrow-window browser drawer has no close button of its own. Only a tap outside or Escape closes it.
-4. Shortcuts search matches only labels and keys. Command `keywords` could be added.
-5. Sign-in throttling is per address and username. A per-address cap across usernames would slow password spraying.
-6. Parameters on phones: existing rows have no visible name label once the header row is hidden (the inputs keep their aria-labels).
-7. Not yet audited deeply: `ViewportView.tsx`, `sketchTools.ts`, `FeatureEditors.tsx`, `Account.tsx`/admin UI, and the desktop (Tauri) shell.
+Not yet audited deeply: `ViewportView.tsx`, `sketchTools.ts`, `FeatureEditors.tsx`, `Account.tsx`/admin UI, and the desktop (Tauri) shell.
