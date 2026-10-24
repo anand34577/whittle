@@ -339,6 +339,7 @@ function DrawingOptions() {
 }
 
 export function ExportDialog() {
+  const maker = useApp((s) => s.prefs.profile === "maker");
   const bodies = useApp((s) => s.regen?.bodies.length ?? 0);
   useApp((s) => s.selection);
   const selected = bodies > 1 ? selectedBodyId() : undefined;
@@ -368,7 +369,7 @@ export function ExportDialog() {
               {(
                 [
                   ["draft", "Draft", "About 10x coarser: small files for previews and sharing"],
-                  ["standard", "Standard", "0.01 mm on ordinary parts: right for most prints"],
+                  ["standard", "Standard", "0.01 mm on ordinary parts: right for most uses"],
                   ["fine", "Fine", "About 4x finer: the smoothest curves, bigger files"],
                 ] as const
               ).map(([v, label, title]) => (
@@ -383,7 +384,8 @@ export function ExportDialog() {
             <Checkbox className="checkrow" checked={onlySelected} onChange={setOnlySelected} label={`Only the selected body (${selectedName ?? "Body"})`} />
           )}
           <DrawingOptions />
-          <SlicerCard />
+          {/* Makers print most of what they make: the slicer comes first for them, after the general formats for everyone else. */}
+          {maker && <SlicerCard />}
           {items.map((it) => (
             <button
               key={it.f}
@@ -400,6 +402,7 @@ export function ExportDialog() {
               <span className="export-card__body">{it.body}</span>
             </button>
           ))}
+          {!maker && <SlicerCard />}
         </div>
       )}
     </Modal>

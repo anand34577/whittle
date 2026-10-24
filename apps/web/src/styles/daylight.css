@@ -444,17 +444,6 @@
   border-bottom: 1px solid var(--line);
   position: relative;
 }
-[data-theme^="daylight"] .panel__head::before {
-  content: "Inspector";
-  position: absolute;
-  top: 3px;
-  right: 12px;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-3);
-}
 [data-theme^="daylight"] .panel__head > svg {
   box-sizing: content-box;
   margin: 0;
@@ -594,7 +583,7 @@
   color: var(--text-2);
 }
 [data-theme^="daylight"] .stats {
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
 }
 [data-theme^="daylight"] .stats dd {
   min-width: 0;

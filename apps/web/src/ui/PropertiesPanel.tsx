@@ -1,7 +1,7 @@
 /** Right-hand panel: the active feature's editor, the selected sketch shape, or an inspector. */
 import { useState } from "react";
 import type { Draft } from "immer";
-import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, combineBodies, type Inertia, formatQuantity, geomType, principalMoments, trim, documentEvaluator, maxPolylineCorner, maxRectCorner } from "@whittle/core";
+import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, combineBodies, type Inertia, display, formatQuantity, geomType, principalMoments, trim, documentEvaluator, maxPolylineCorner, maxRectCorner } from "@whittle/core";
 import { availableConstraints, canConstrain, constrainSelection, geoMutate, makeConstrainable, offsetSelection, patternSelection, mirrorSelection, setDimension } from "../state/constraintOps";
 import { commandById, isAvailable } from "../state/commands";
 import { nextSteps } from "../state/problems";
@@ -610,12 +610,15 @@ const massText = (g: number) => (g >= 1000 ? `${trim(g / 1000, 2)} kg` : `${trim
 const UNIT_NAMES: Record<LengthUnit, string> = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches", ft: "feet" };
 
 /** Densities in g/cm³ (typical values). */
+/** General engineering materials first; printing filaments have a group of their own. */
+const GROUP_ORDER = ["Metals", "Plastics", "Wood & other", "3D printing"];
+
 export const MATERIALS = [
-  { id: "pla", label: "PLA", density: 1.24, group: "Plastics" },
-  { id: "petg", label: "PETG", density: 1.27, group: "Plastics" },
+  { id: "pla", label: "PLA", density: 1.24, group: "3D printing" },
+  { id: "petg", label: "PETG", density: 1.27, group: "3D printing" },
   { id: "abs", label: "ABS", density: 1.04, group: "Plastics" },
-  { id: "nylon", label: "Nylon (PA12)", density: 1.01, group: "Plastics" },
-  { id: "resin", label: "Resin (SLA)", density: 1.18, group: "Plastics" },
+  { id: "nylon", label: "Nylon (PA)", density: 1.01, group: "Plastics" },
+  { id: "resin", label: "Resin (SLA)", density: 1.18, group: "3D printing" },
   { id: "acrylic", label: "Acrylic", density: 1.18, group: "Plastics" },
   { id: "al", label: "Aluminium 6061", density: 2.7, group: "Metals" },
   { id: "steel", label: "Steel", density: 7.85, group: "Metals" },
@@ -633,7 +636,7 @@ export const MATERIALS = [
   { id: "concrete", label: "Concrete", density: 2.4, group: "Wood & other" },
   { id: "ceramic", label: "Ceramic (porcelain)", density: 2.4, group: "Wood & other" },
   { id: "silicone", label: "Silicone rubber", density: 1.1, group: "Plastics" },
-  { id: "tpu", label: "TPU (flexible)", density: 1.21, group: "Plastics" },
+  { id: "tpu", label: "TPU (flexible)", density: 1.21, group: "3D printing" },
   { id: "pc", label: "Polycarbonate", density: 1.2, group: "Plastics" },
   { id: "pom", label: "Acetal (POM)", density: 1.41, group: "Plastics" },
   { id: "al7075", label: "Aluminium 7075", density: 2.81, group: "Metals" },
@@ -641,7 +644,7 @@ export const MATERIALS = [
   { id: "zinc", label: "Zinc (die cast)", density: 6.6, group: "Metals" },
   { id: "silver", label: "Sterling silver", density: 10.4, group: "Metals" },
   { id: "gold", label: "Gold (18k)", density: 15.6, group: "Metals" },
-].sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
+].sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.label.localeCompare(b.label));
 
 /** The finish and color a physical material suggests when it is given to a body (as in other CAD, the material carries its look). */
 const MATERIAL_LOOKS: Record<string, { color: string; look: string }> = {
@@ -674,7 +677,7 @@ function Inspector() {
   const doc = useApp((s) => s.doc);
   const regen = useApp((s) => s.regen);
   const selection = useApp((s) => s.selection);
-  const mat = useApp((s) => (MATERIALS.some((m) => m.id === s.prefs.material) ? s.prefs.material : "pla"));
+  const mat = useApp((s) => (MATERIALS.some((m) => m.id === s.prefs.material) ? s.prefs.material : "steel"));
   const unit = doc.units;
   const L = (v: number) => formatQuantity(v, "length", unit);
   const densityOf = (id?: string) => (MATERIALS.find((m) => m.id === (id ?? mat)) ?? MATERIALS.find((m) => m.id === mat)!).density;
@@ -833,9 +836,8 @@ function Inspector() {
               <>
                 <dt>Volume</dt>
                 <dd className="mono">{volumeText(body ? body.volume : totalVolume, unit, 2)}</dd>
-                <dt>Mass</dt>
-                <dd className="mono">
-                  <span style={{ whiteSpace: "nowrap", marginRight: 8 }}>{massText((body ? (body.volume / 1000) * densityOf(meta?.material) : bodies.reduce((a, b) => a + (b.volume / 1000) * densityOf(doc.bodies[b.id]?.material), 0)))}</span>
+                <dt>Material</dt>
+                <dd>
                   <Select
                     size="sm"
                     ariaLabel="Material"
@@ -852,18 +854,20 @@ function Inspector() {
                               m.opacity = undefined;
                             }
                           })
-                        : setPrefs({ material: v })
+                        : setPrefs({ material: v, materialSet: true })
                     }
                     options={[...(body ? [{ value: "", label: `Design default (${MATERIALS.find((m) => m.id === mat)!.label})`, short: `${MATERIALS.find((m) => m.id === mat)!.label} (default)`, group: "" }] : []), ...MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))]}
                   />
                 </dd>
+                <dt>Mass</dt>
+                <dd className="mono">{massText((body ? (body.volume / 1000) * densityOf(meta?.material) : bodies.reduce((a, b) => a + (b.volume / 1000) * densityOf(doc.bodies[b.id]?.material), 0)))}</dd>
               </>
             )}
             {(body ? [body] : bodies).length > 0 && totalVolume > 0 && (
               <>
                 <dt>Center of mass</dt>
                 <dd className="mono" title="Weighted by volume (uniform density)">
-                  {[0, 1, 2].map((i) => trim((body ? body.centerOfMass[i]! : bodies.reduce((a, b) => a + b.centerOfMass[i]! * b.volume, 0) / totalVolume) / LENGTH_TO_MM[unit], 2)).join(", ")} {unit}
+                  {[0, 1, 2].map((i) => trim((body ? body.centerOfMass[i]! : bodies.reduce((a, b) => a + b.centerOfMass[i]! * b.volume, 0) / totalVolume) / LENGTH_TO_MM[unit], display.digits)).join(", ")} {unit}
                 </dd>
               </>
             )}
@@ -871,7 +875,7 @@ function Inspector() {
               <>
                 <dt>Inertia</dt>
                 <dd className="mono" title="Principal moments of inertia about the center of mass, for the chosen material (g·cm²)">
-                  {principal.map((v) => trim(v / 100, 2)).join(", ")} g·cm²
+                  {principal.map((v) => trim(v / 100, display.digits)).join(", ")} g·cm²
                 </dd>
               </>
             )}
@@ -879,7 +883,7 @@ function Inspector() {
               <>
                 <dt>Size</dt>
                 <dd className="mono">
-                  {[0, 1, 2].map((i) => trim((body.bbox[1][i]! - body.bbox[0][i]!) / LENGTH_TO_MM[unit], 2)).join(" \u00d7 ")} {unit}
+                  {[0, 1, 2].map((i) => trim((body.bbox[1][i]! - body.bbox[0][i]!) / LENGTH_TO_MM[unit], display.digits)).join(" \u00d7 ")} {unit}
                 </dd>
                 <dt>Area</dt>
                 <dd className="mono">{areaText(body.area, unit)}</dd>
@@ -971,7 +975,8 @@ function NextSteps() {
   const steps = nextSteps(state)
     .map((x) => ({ ...x, c: commandById(x.id) }))
     .filter((x) => x.c && isAvailable(x.c, state));
-  if (!steps.length) return null;
+  // An empty design shows the same ways in as a card in the middle of the view.
+  if (!steps.length || (state.mode.kind === "model" && state.doc.features.length === 0)) return null;
   return (
     <div className="panel__section">
       <h3 className="eyebrow">Next steps</h3>

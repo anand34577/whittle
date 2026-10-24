@@ -202,6 +202,8 @@
 
 /* The selection's actions never run under the orientation cube: narrow views show icons only (names in tooltips). */
 .context-bar {
+  /* left: 50% only leaves half the view to lay out in: size to the buttons instead, so they stay on one row. */
+  width: max-content;
   max-width: calc(100% - 240px);
   flex-wrap: wrap;
   justify-content: center;
@@ -228,6 +230,10 @@
   padding: 5px;
   border-radius: 14px;
   z-index: 5;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .dock__group {
   display: flex;
@@ -262,8 +268,15 @@
 .dock__btn:disabled {
   opacity: 0.4;
 }
-@media (max-width: 1280px) {
-  .dock__btn span {
+/* By the view's own width (panels open on a laptop leave it narrow), not the window's. */
+@container viewport (max-width: 1000px) {
+  .dock:not(.sketch-palette) .dock__btn span {
+    display: none;
+  }
+}
+/* The sketch palette is shorter: it keeps its words a while longer. */
+@container viewport (max-width: 720px) {
+  .sketch-palette .dock__btn span {
     display: none;
   }
 }
@@ -1272,4 +1285,35 @@ details.points summary {
 }
 .cmark--glyph.cmark--beside {
   transform: translate(-50%, -50%);
+}
+
+/* The sketch ribbon has the most tools: on laptop widths they sit closer so Constrain and Insert stay in view. */
+@media (max-width: 1560px) {
+  .toolbar--sketch .toolgroup {
+    padding-inline: 4px;
+  }
+  .toolbar--sketch .split > .tool,
+  .toolbar--sketch .tool {
+    min-width: 40px;
+    padding-inline: 4px;
+  }
+  .toolbar--sketch .split__more {
+    width: 11px;
+  }
+}
+
+/* View cube: readable labels, and the faces shaded as if lit from above so the orientation reads at a glance. */
+.orientcube__face {
+  font-size: 10px;
+  color: var(--text-1);
+}
+.orientcube__face[data-face="top"] {
+  background-image: linear-gradient(color-mix(in oklch, white 14%, transparent), color-mix(in oklch, white 14%, transparent));
+}
+.orientcube__face[data-face="left"],
+.orientcube__face[data-face="right"] {
+  background-image: linear-gradient(color-mix(in oklch, black 7%, transparent), color-mix(in oklch, black 7%, transparent));
+}
+.orientcube__face[data-face="bottom"] {
+  background-image: linear-gradient(color-mix(in oklch, black 14%, transparent), color-mix(in oklch, black 14%, transparent));
 }

@@ -103,7 +103,7 @@ export function hintFor(s: AppState): string {
       case "split":
         return "Choose the plane and offset · keep both halves or one side · Enter to finish";
       case "offset":
-        return "Positive grows the body, negative shrinks it (clearances for fits and printing) · Enter to finish";
+        return "Positive grows the body, negative shrinks it (clearances for fits) · Enter to finish";
       case "boundingSolid":
         return "Click bodies to enclose (none: all of them) · choose box or cylinder and padding · Enter to finish";
       case "scale":
