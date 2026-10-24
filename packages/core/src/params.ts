@@ -1,6 +1,6 @@
 import { type EvalContext, type EvalResult, type Quantity, evaluate, evaluateRaw, referencedNames } from "./expr";
 import type { Expr, Parameter, WhittleDocument } from "./model";
-import { KIND_DIM, type LengthUnit, type QuantityKind } from "./units";
+import { KIND_DIM, type LengthUnit, type QuantityKind, UNIT_LITERALS } from "./units";
 
 export interface ParamValue {
   ok: boolean;
@@ -17,7 +17,8 @@ export interface Evaluator {
 }
 
 export const PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const RESERVED = new Set(["pi", "PI", "tau", "mm", "cm", "m", "in", "ft", "deg", "rad"]);
+// Every unit word too: a parameter called "mil" or "yd" would be read as the unit, so its uses would go untracked.
+const RESERVED = new Set(["pi", "PI", "tau", ...Object.keys(UNIT_LITERALS)]);
 
 export function validateParamName(name: string, params: Parameter[], selfId?: string): string | null {
   if (!PARAM_NAME.test(name)) return "Use letters, digits and _ (start with a letter)";
@@ -129,7 +130,8 @@ const NOT_EXPR = new Set([
 
 function renameIn(expr: string, from: string, to: string): string {
   if (!referencedNames(expr).includes(from)) return expr;
-  return expr.replace(new RegExp(`(?<![A-Za-z0-9_.])${from}(?![A-Za-z0-9_])`, "g"), to);
+  // Not a function of the same name: renaming a parameter "max" leaves max(a, b) alone.
+  return expr.replace(new RegExp(`(?<![A-Za-z0-9_.])${from}(?![A-Za-z0-9_]|\\s*\\()`, "g"), to);
 }
 
 /** Visits every formula field of the features (the same fields a rename touches); `set` replaces its text. */

@@ -141,8 +141,15 @@ export function migrate(input: unknown): WhittleDocument {
   d.parameters ??= [];
   d.features ??= [];
   d.bodies ??= {};
-  d.rollback ??= null;
-  d.units ??= "mm";
+  // A hand-edited or damaged file: an unknown unit would turn every length into NaN, a bad marker would hide every step.
+  if (!(typeof d.rollback === "number" && Number.isInteger(d.rollback) && d.rollback >= 0)) d.rollback = null;
+  if (!["mm", "cm", "m", "in", "ft"].includes(d.units)) d.units = "mm";
+  const kinds = ["length", "angle", "number", "count"];
+  for (const p of d.parameters) {
+    if (typeof p.id !== "string" || !p.id) p.id = uid("p");
+    if (!kinds.includes(p.kind)) p.kind = "length";
+    if (typeof p.expr === "number") p.expr = String(p.expr);
+  }
   d.id ??= uid("d");
   if (typeof d.name !== "string" || !d.name.trim()) d.name = "Untitled";
   return d;

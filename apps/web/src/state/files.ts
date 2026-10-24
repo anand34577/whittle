@@ -83,7 +83,8 @@ function download(bytes: Uint8Array, name: string, mime: string) {
 
 /** Save the design's parameters as a CSV file (name, formula, kind, value, note). */
 export function exportParametersCsv(rows: string[][], designName: string) {
-  const cell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  // Semicolons too: the importer also reads them as separators (sheets saved in many locales use them).
+  const cell = (v: string) => (/[",;\r\n]/.test(v) ?`"${v.replace(/"/g, '""')}"` : v);
   const csv = [["Name", "Formula", "Kind", "Value", "Note"], ...rows].map((r) => r.map(cell).join(",")).join("\r\n");
   download(new TextEncoder().encode(csv), `${safeName(designName)}-parameters.csv`, "text/csv");
 }
@@ -449,7 +450,7 @@ export async function sendToSlicer() {
       toast("ok", `Opened in ${prefs.slicer || "your slicer"}`);
     } else {
       download(file.data, `${safeName(doc.name)}.3mf`, file.mime);
-      toast("info", "Downloaded as 3MF: open it in your slicer (PrusaSlicer, Bambu Studio, OrcaSlicer, Cura). The desktop app opens it there for you.");
+      toast("info", "Downloaded as 3MF: open it in your slicer. The desktop app opens it there for you.");
     }
   } catch (e) {
     toast("error", errText(e, "Couldn't send it to the slicer."));

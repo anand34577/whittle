@@ -194,7 +194,7 @@ export const PARTS: PartDef[] = [
         cy: `${sy < 0 ? "-" : ""}(${d} / 2 - ${inset})`,
         r: `${hole} / 2`,
       }));
-      const s = b.sketch("XY", [{ type: "rect", x: "0", y: "0", w, h: d, anchor: "center", corner: "4" }, ...holes]);
+      const s = b.sketch("XY", [{ type: "rect", x: "0", y: "0", w, h: d, anchor: "center", corner: "4 mm" }, ...holes]);
       b.extrude(s, t, {}, "Plate");
     },
   },
@@ -232,7 +232,7 @@ export const PARTS: PartDef[] = [
       const W = b.p("width", "50 mm");
       const wall = b.p("wall", "2 mm");
       const gap = b.p("fit_gap", "0.2 mm", "length", "Clearance so the lid slides in");
-      const plate = b.sketch("XY", [{ type: "rect", x: "0", y: "0", w: L, h: W, anchor: "center", corner: "1" }]);
+      const plate = b.sketch("XY", [{ type: "rect", x: "0", y: "0", w: L, h: W, anchor: "center", corner: "1 mm" }]);
       const lid = b.extrude(plate, wall, {}, "Lid");
       const lipOuter = `${L} - 2 * ${wall} - 2 * ${gap}`;
       const lipInnerW = `${W} - 2 * ${wall} - 2 * ${gap}`;
@@ -275,7 +275,7 @@ export const PARTS: PartDef[] = [
       const h = b.p("height", "24 mm");
       const t = b.p("thickness", "3 mm");
       const plate = b.sketch("XY", [
-        { type: "rect", x: "0", y: "0", w, h, anchor: "center", corner: "5" },
+        { type: "rect", x: "0", y: "0", w, h, anchor: "center", corner: "5 mm" },
         { type: "circle", cx: `-${w} / 2 + 6 mm`, cy: "0", r: "2.5 mm" },
       ]);
       const body = b.extrude(plate, t, {}, "Name tag");
@@ -397,7 +397,7 @@ export const PARTS: PartDef[] = [
         width: slot,
         angle: "90",
       }));
-      const s = b.sketch("XY", [{ type: "rect", x: "0", y: "0", w, h: d, anchor: "center", corner: "2" }, ...slots]);
+      const s = b.sketch("XY", [{ type: "rect", x: "0", y: "0", w, h: d, anchor: "center", corner: "2 mm" }, ...slots]);
       b.extrude(s, t, {}, "Grille");
     },
   },
@@ -456,7 +456,7 @@ export function insertPart(def: PartDef) {
       const mv = makeMove({ ...b.doc, features: [...b.doc.features, ...b.features] }, id);
       if (mv.type !== "move") continue;
       mv.name = `Place ${name}`;
-      mv.translate = [String(dx), "0", "0"];
+      mv.translate = [`${dx} mm`, "0", "0"];
       b.add(mv);
     }
   }

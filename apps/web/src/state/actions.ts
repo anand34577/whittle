@@ -53,6 +53,7 @@ import {
   makeRevolve,
   makeShell,
   makeSketch,
+  nextName,
   trim,
   LENGTH_TO_MM,
   type NamedView,
@@ -529,7 +530,7 @@ export function startWeb() {
     f.thinSide = "center";
     f.distance = "10";
   }
-  f.name = f.name.replace("Extrude", "Web");
+  f.name = nextName(get().doc, "Web");
   beginNewFeature(f, `New ${f.name}`);
 }
 
@@ -545,7 +546,7 @@ export function startEmboss(engrave: boolean) {
     f.flip = false;
     if (engrave) f.flip = true;
   }
-  f.name = f.name.replace("Extrude", engrave ? "Engrave" : "Emboss");
+  f.name = nextName(get().doc, engrave ? "Engrave" : "Emboss");
   beginNewFeature(f, `New ${f.name}`);
 }
 
@@ -597,7 +598,7 @@ export function startSplitFaces() {
   if (!body) return toast("info", "Create a body first, then split its faces.");
   const f = makeSplit(get().doc, body);
   if (f.type === "split") f.facesOnly = true;
-  f.name = f.name.replace("Split", "Split Faces");
+  f.name = nextName(get().doc, "Split Faces");
   beginNewFeature(f, `New ${f.name}`);
 }
 

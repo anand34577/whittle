@@ -68,6 +68,9 @@ export function writeStored(key: string, value: unknown, delayMs = 0): Promise<v
 export async function deleteStored(key: string): Promise<void> {
   clearTimeout(timers.get(key));
   timers.delete(key);
+  // A write still waiting to be sent is dropped: let whoever awaits it carry on.
+  superseded.get(key)?.();
+  superseded.delete(key);
   if (mode === "remote") {
     await api(`/me/data/${encodeURIComponent(key)}`, { method: "DELETE" }).catch(() => {});
     return;

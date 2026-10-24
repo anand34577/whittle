@@ -9,7 +9,12 @@ export interface DxfResult {
   circles: { c: Vec2; r: number }[];
   /** Entity kinds that were present but not read (text, hatches, 3D solids...). */
   skipped: string[];
+  /** Millimetres per drawing unit, when the file's header says which unit it was drawn in. */
+  mmPerUnit?: number;
 }
+
+/** $INSUNITS codes to millimetres (inches, feet, miles... as the drawing format numbers them). */
+const INSUNITS: Record<number, number> = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 8: 0.0000254, 9: 0.0254, 10: 914.4, 13: 0.001, 14: 100 };
 
 type Pair = [number, string];
 
@@ -75,9 +80,11 @@ export function parseDxf(text: string): DxfResult {
   };
   // Cut into entities at every group code 0 inside the ENTITIES section.
   let inEntities = false;
+  let mmPerUnit: number | undefined;
   const ents: { type: string; data: Pair[] }[] = [];
   for (let i = 0; i < p.length; i++) {
     const [code, value] = p[i]!;
+    if (code === 9 && value === "$INSUNITS" && p[i + 1]?.[0] === 70) mmPerUnit = INSUNITS[Number.parseInt(p[i + 1]![1], 10)];
     if (code === 0 && value === "SECTION" && p[i + 1]?.[1] === "ENTITIES") {
       inEntities = true;
       continue;
@@ -89,6 +96,9 @@ export function parseDxf(text: string): DxfResult {
   }
   for (let i = 0; i < ents.length; i++) {
     const { type, data: d } = ents[i]!;
+    // Circles, arcs and 2D polylines are drawn in their own plane; one whose normal points down (-Z) is seen mirrored.
+    const flip = num(d, 230, 1) < 0 ? -1 : 1;
+    const X = (v: Vec2): Vec2 => [v[0] * flip, v[1]];
     // Numbers that can't be read (or a circle with no size) would reach the sketch as NaN: leave such entities out and say so.
     const bad = () => skipped.add(`${type} (unreadable numbers)`);
     switch (type) {
@@ -100,7 +110,7 @@ export function parseDxf(text: string): DxfResult {
         break;
       }
       case "CIRCLE": {
-        const c: Vec2 = [num(d, 10), num(d, 20)];
+        const c: Vec2 = X([num(d, 10), num(d, 20)]);
         const r = num(d, 40);
         if (fin(...c, r) && r > 0) circles.push({ c, r });
         else bad();
@@ -111,7 +121,7 @@ export function parseDxf(text: string): DxfResult {
         const r = num(d, 40);
         const a0 = num(d, 50);
         const a1 = num(d, 51);
-        if (fin(...c, r, a0, a1) && r > 0) addPath(arcPts(c, r, (a0 * Math.PI) / 180, (a1 * Math.PI) / 180), false);
+        if (fin(...c, r, a0, a1) && r > 0) addPath(arcPts(c, r, (a0 * Math.PI) / 180, (a1 * Math.PI) / 180).map(X), false);
         else bad();
         break;
       }
@@ -151,8 +161,7 @@ export function parseDxf(text: string): DxfResult {
           bad();
           break;
         }
-        const pts = bulgePoly(verts, closed);
-        addPath(pts, closed);
+        addPath(bulgePoly(verts, closed).map(X), closed);
         break;
       }
       case "POLYLINE": {
@@ -168,7 +177,7 @@ export function parseDxf(text: string): DxfResult {
           bad();
           break;
         }
-        addPath(bulgePoly(verts, closed), closed);
+        addPath(bulgePoly(verts, closed).map(X), closed);
         break;
       }
       case "SPLINE": {
@@ -192,5 +201,5 @@ export function parseDxf(text: string): DxfResult {
     }
   }
   const loops = chainSegments2D(segs).map((c) => ({ pts: simplifyChain(c.pts, c.closed), closed: c.closed }));
-  return { loops: [...loops, ...direct], circles, skipped: [...skipped] };
+  return { loops: [...loops, ...direct], circles, skipped: [...skipped], ...(mmPerUnit ? { mmPerUnit } : {}) };
 }

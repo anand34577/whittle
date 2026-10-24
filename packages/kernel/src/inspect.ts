@@ -3,7 +3,7 @@ import { type Id, type Vec3, type WhittleDocument, documentEvaluator, resolveEnt
 import { type Edge, type Shape3D, getOC, measureShapeVolumeProperties } from "replicad";
 import { circleOf } from "./construct";
 import { dot, sub } from "./refs";
-import { drawingLoops, entityDrawing } from "./shared";
+import { drawingLoops, entityDrawing, shapeBounds } from "./shared";
 import type { InterferenceItem, MeasurePick, RadiusItem } from "./protocol";
 
 const volume = (s: Shape3D) => measureShapeVolumeProperties(s).volume;
@@ -39,13 +39,13 @@ export function interference(shapes: Map<Id, Shape3D>): InterferenceItem[] {
     for (let j = i + 1; j < ids.length; j++) {
       const a = shapes.get(ids[i]!)!;
       const b = shapes.get(ids[j]!)!;
-      const [alo, ahi] = a.boundingBox.bounds;
-      const [blo, bhi] = b.boundingBox.bounds;
+      const [alo, ahi] = shapeBounds(a);
+      const [blo, bhi] = shapeBounds(b);
       if ([0, 1, 2].some((k) => ahi[k]! < blo[k]! - 1e-6 || bhi[k]! < alo[k]! - 1e-6)) continue;
       try {
         const x = a.intersect(b) as Shape3D;
         const v = volume(x);
-        if (v > 1e-6) out.push({ a: ids[i]!, b: ids[j]!, volume: v, bbox: x.boundingBox.bounds as [Vec3, Vec3] });
+        if (v > 1e-6) out.push({ a: ids[i]!, b: ids[j]!, volume: v, bbox: shapeBounds(x) as [Vec3, Vec3] });
       } catch {
         /* touching or degenerate: not an overlap */
       }

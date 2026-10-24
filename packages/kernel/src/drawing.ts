@@ -4,6 +4,7 @@
  * section view and parts list, and a title block, on an A4 to A1 sheet at a standard scale.
  * Output is a plain SVG, so it opens in a browser, any vector editor or any PDF printer.
  */
+import { boxCenter, shapeBounds } from "./shared";
 import { type Shape3D, ProjectionCamera, drawProjection, makeBox, makeCompound } from "replicad";
 import type { DrawingSettings } from "./protocol";
 import { faceInfo } from "./refs";
@@ -39,7 +40,7 @@ export const scaleLabel = (den: number) => (den >= 1 ? `1:${fmt(den)}` : `${fmt(
 function project(shape: Shape3D, key: View["key"], label: string): View {
   let cam: Parameters<typeof drawProjection>[1];
   if (key === "iso") {
-    const c = shape.boundingBox.center;
+    const c = boxCenter(shape);
     const iso = new ProjectionCamera([c[0] + 1000, c[1] - 1000, c[2] + 800]);
     iso.lookAt([c[0], c[1], c[2]]);
     cam = iso;
@@ -87,7 +88,7 @@ function facePath(face: ReturnType<Shape3D["faces"]["at"]> & object): string {
  * outlined for hatching; null when the part has nothing to cut.
  */
 function sectionView(all: Shape3D): { view: View; mid: number } | null {
-  const [lo, hi] = all.boundingBox.bounds;
+  const [lo, hi] = shapeBounds(all);
   const mid = (lo[1] + hi[1]) / 2;
   if (hi[1] - lo[1] < 1e-6) return null;
   const half = all.clone().cut(makeBox([lo[0] - 1, lo[1] - 1, lo[2] - 1], [hi[0] + 1, mid, hi[2] + 1])) as Shape3D;

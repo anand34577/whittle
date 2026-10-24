@@ -148,8 +148,21 @@ async function runClaude(p: ProviderConfig, text: string, signal: AbortSignal) {
   }
 }
 
+/**
+ * A turn that ended with tool calls never answered (cut off, refused, stopped) would make every later request
+ * fail: the API wants a result for each call. Answer them as not run.
+ */
+function closeOpenToolCalls() {
+  const last = history[history.length - 1];
+  if (last?.role !== "assistant" || !Array.isArray(last.content)) return;
+  const open = last.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => (b as { type?: string }).type === "tool_use");
+  if (!open.length) return;
+  history.push({ role: "user", content: open.map((c) => ({ type: "tool_result" as const, tool_use_id: c.id, content: "Not run: the turn ended first.", is_error: true })) });
+}
+
 async function claudeLoop(client: Anthropic, p: ProviderConfig, text: string, signal: AbortSignal) {
   const tools = DESIGN_TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })) as Anthropic.Beta.BetaTool[];
+  closeOpenToolCalls();
   history.push({ role: "user", content: text });
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const fallback = FALLBACK_MODELS.has(p.model);
