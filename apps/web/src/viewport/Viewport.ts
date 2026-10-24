@@ -401,6 +401,8 @@ export class Viewport {
       const mats = Array.isArray(any.material) ? any.material : any.material ? [any.material] : [];
       for (const m of mats) {
         if (m instanceof LineMaterial) this.lineMaterials.delete(m);
+        // A label's picture is its own (made for it), so it goes too; disposing a material leaves its texture on the GPU.
+        (m as THREE.Material & { map?: THREE.Texture | null }).map?.dispose();
         m.dispose();
       }
     });
@@ -996,7 +998,8 @@ export class Viewport {
           const mat = new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: style === "hover" ? 0.35 : 0.55,
+            // Light enough that the face's shading still reads through; the outline below makes the pick crisp.
+            opacity: style === "hover" ? 0.3 : 0.42,
             depthWrite: false,
             // Kept out of tone mapping, which greys a light tint on a light body until it hardly shows.
             toneMapped: false,
@@ -1011,6 +1014,21 @@ export class Viewport {
           m.raycast = () => {};
           m.renderOrder = 9;
           this.highlightGroup.add(m);
+          // The face's own outline, in the highlight color.
+          const pts: number[] = [];
+          for (const e of v.data.faceEdges?.[pick.index] ?? []) {
+            const s = v.data.edgeRanges[e * 2];
+            const c = v.data.edgeRanges[e * 2 + 1];
+            if (s !== undefined && c !== undefined) for (let k = s * 3; k < (s + c) * 3; k++) pts.push(v.data.edgePositions[k]!);
+          }
+          if (pts.length) {
+            const og = new LineSegmentsGeometry();
+            og.setPositions(pts);
+            const outline = new LineSegments2(og, this.lineMat(color, style === "hover" ? 1.6 : 2.2));
+            outline.renderOrder = 10;
+            outline.raycast = () => {};
+            this.highlightGroup.add(outline);
+          }
         } else if (pick.kind === "edge") {
           const s = v.data.edgeRanges[pick.index * 2];
           const c = v.data.edgeRanges[pick.index * 2 + 1];

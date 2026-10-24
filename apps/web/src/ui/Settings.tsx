@@ -118,7 +118,13 @@ function Workspace() {
           label="Default material"
           value={prefs.material}
           options={MATERIALS.map((m) => ({ value: m.id, label: m.label, group: m.group, hint: `${m.density} g/cm³` }))}
-          onChange={(v) => setPrefs({ material: v })}
+          onChange={(v) => setPrefs({ material: v, materialSet: true })}
+        />
+        <Select
+          label="Decimal places"
+          value={String(prefs.precision ?? 2)}
+          options={["0", "1", "2", "3", "4", "5", "6"].map((d) => ({ value: d, label: d === "2" ? "2 (default)" : d, hint: (12.3456789).toFixed(Number(d)) }))}
+          onChange={(v) => setPrefs({ precision: Number(v) })}
         />
       </div>
       <Switch label="Constraint-ready shapes" hint="New rectangles, circles, polygons and slots are drawn as lines and arcs you can dimension, constrain, trim and fillet" checked={smartSketchOn(prefs)} onChange={(v) => setPrefs({ smartSketch: v })} />

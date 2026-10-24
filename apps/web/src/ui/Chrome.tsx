@@ -420,9 +420,6 @@ function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
     const modifyIds = Object.values(SKETCH_MODIFY).flat();
     return (
       <div className={`toolbar toolbar--sketch ${labels ? "" : "toolbar--icons"}`} role="toolbar" aria-label="Sketch tools">
-        <div className="toolbar__mode">
-          <span className="pill pill--accent">Sketch</span>
-        </div>
         <div className="toolbar__scroll" onWheel={wheelX}>
           <div className="toolgroup" role="group" aria-label="Select">
             <div className="toolgroup__tools">

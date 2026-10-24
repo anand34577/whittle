@@ -1,6 +1,6 @@
 /** Pieces of the build shared by the feature builders (build, extra, surface): errors, sketch outlines to drawings, placement helpers. */
 import { type Evaluator, type Feature, type Id, type ResolvedEntity, type SketchFeature, type Vec3, entityOutline, polygonInside, chainSegments, crossesItself, splineBeziers, resolveEntity } from "@whittle/core";
-import { Blueprint, CompoundBlueprint, Drawing, Blueprints, Plane, type Shape3D, type Wire, draw, drawCircle, drawEllipse, drawPointsInterpolation, drawRoundedRectangle, drawText, iterTopo } from "replicad";
+import { BoundingBox, Blueprint, CompoundBlueprint, Drawing, Blueprints, Plane, type Face, type Shape3D, type Wire, getOC, draw, drawCircle, drawEllipse, drawPointsInterpolation, drawRoundedRectangle, drawText, iterTopo } from "replicad";
 import type { FeatureFix, SketchFrame } from "./protocol";
 
 
@@ -377,8 +377,26 @@ export function orient(s: Shape3D, dir: Vec3, at: Vec3): Shape3D {
 
 export const AXES: Record<"x" | "y" | "z", Vec3> = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 
+/**
+ * A shape's bounding box. OpenCascade's tight ("optimal") box throws on some valid solids (a pattern of shelled boxes
+ * fused together), which used to drop the whole body from the view; the standard box is a little looser but always works.
+ */
+export function shapeBounds(s: Shape3D | Face): [Vec3, Vec3] {
+  try {
+    return s.boundingBox.bounds as [Vec3, Vec3];
+  } catch {
+    const box = new BoundingBox();
+    try {
+      getOC().BRepBndLib.Add(s.wrapped, box.wrapped, true);
+      return box.bounds as [Vec3, Vec3];
+    } finally {
+      box.delete();
+    }
+  }
+}
+
 export function boxCenter(s: Shape3D): Vec3 {
-  const [a, b] = s.boundingBox.bounds;
+  const [a, b] = shapeBounds(s);
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
 }
 

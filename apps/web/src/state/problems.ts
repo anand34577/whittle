@@ -96,12 +96,16 @@ export function nextSteps(s: Pick<AppState, "doc" | "regen">): { id: string; why
   const out: { id: string; why: string }[] = [];
   const unused = live.find((f) => f.type === "sketch" && f.entities.length + (f.geometry?.length ?? 0) > 0 && !doc.features.some((g) => g.type !== "sketch" && JSON.stringify(g).includes(f.id)));
   if (unused) out.push({ id: "extrude", why: `Pull ${unused.name} into a solid` }, { id: "revolve", why: `Spin ${unused.name} around an axis` });
-  if ((s.regen?.bodies.length ?? 0) > 0) {
-    if (!has("fillet") && !has("chamfer")) out.push({ id: "fillet", why: "Round sharp edges: nicer to hold, stronger to print" });
-    if (!has("shell")) out.push({ id: "shell", why: "Hollow it into a case, cup or enclosure" });
-    if (!has("hole")) out.push({ id: "hole", why: "Add screw holes, counterbored or countersunk" });
+  const bodies = s.regen?.bodies ?? [];
+  // Rounding, hollowing and drilling need a solid; a design of surfaces only gets thicken instead.
+  const solid = bodies.some((b) => b.volume > 1e-9);
+  if (bodies.length > 0 && !solid) out.push({ id: "surface-thicken", why: "Give the surface a wall thickness to make it a solid" });
+  if (bodies.length > 0) {
+    if (solid && !has("fillet") && !has("chamfer")) out.push({ id: "fillet", why: "Round sharp edges: safer to handle and stronger" });
+    if (solid && !has("shell")) out.push({ id: "shell", why: "Hollow it into a case, cup or enclosure" });
+    if (solid && !has("hole")) out.push({ id: "hole", why: "Add screw holes, counterbored or countersunk" });
     if (doc.parameters.length === 0) out.push({ id: "params", why: "Name the key sizes so one change updates everything" });
-    out.push({ id: "export", why: "STL or 3MF to print, STEP for other CAD" });
+    out.push({ id: "export", why: "STEP for other CAD and manufacturing, STL or 3MF for meshes and printing" });
   }
   return out.slice(0, 4);
 }

@@ -182,6 +182,17 @@ const plus = (expr: string, k: number) => {
  * Sizes stay formulas of the original's, so the offset follows its edits.
  */
 export function offsetShape(e: SketchEntity, d: number): SketchEntity | string {
+  const out = offsetSizes(e, d);
+  if (typeof out === "string") return out;
+  // Shrinking past nothing would leave a shape the geometry engine can't build: say so now, not as a broken step.
+  const sizes = out.type === "circle" || out.type === "polygon" ? [out.r] : out.type === "slot" ? [out.width] : out.type === "ellipse" ? [out.rx, out.ry] : out.type === "rect" ? [out.w, out.h] : [];
+  if (sizes.some((v) => (num(v) ?? 1) <= 0)) return "That distance shrinks the shape to nothing. Use a smaller inward distance.";
+  // A rounded corner shrinks with the shape, down to a sharp one.
+  if (out.type === "rect" && out.corner && (num(out.corner) ?? 0) < 0) out.corner = "0";
+  return out;
+}
+
+function offsetSizes(e: SketchEntity, d: number): SketchEntity | string {
   const c = { ...structuredClone(e), id: uid("e") } as SketchEntity;
   switch (c.type) {
     case "circle":
@@ -211,7 +222,7 @@ export function offsetShape(e: SketchEntity, d: number): SketchEntity | string {
       return c;
     }
     case "polyline": {
-      if (c.smooth || c.points.some((p) => p[2])) return "Offset works on outlines with straight sides. Turn off Smooth curve or remove arc points first.";
+      if (c.smooth || c.ctrl || c.points.some((p) => p[2])) return "Offset works on outlines with straight sides. Turn off Smooth curve or remove arc points first.";
       const pts = c.points.map(([x, y]) => [num(x), num(y)]);
       if (pts.some(([x, y]) => x === null || y === null)) return PARAM_NOTE;
       const p = pts as Vec2[];

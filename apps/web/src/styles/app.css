@@ -1213,6 +1213,11 @@ button.docname__state:hover {
   background: var(--bg-inset);
   flex-wrap: wrap;
 }
+/* Three or more choices in a narrow field wrap into even columns, not ragged rows. */
+.field .seg:has(> :nth-child(3)) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+}
 .seg__btn {
   flex: 1 1 auto;
   height: 24px;

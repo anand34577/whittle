@@ -225,9 +225,11 @@ function touch(d: Draft<WhittleDocument>) {
 /** Every feature that creates a body has metadata; nothing else does. */
 function syncBodies(d: Draft<WhittleDocument>) {
   const ids = new Set<Id>();
+  let built = 0; // bodies the kernel will have made before this step (a join with none yet makes the first)
   for (const f of d.features) {
-    if (!createsBody(f as Feature)) continue;
+    if (!createsBody(f as Feature, built === 0)) continue;
     ids.add(f.id);
+    if (!f.suppressed) built++;
     if (!d.bodies[f.id]) {
       d.bodies[f.id] = { name: nextBodyName(d as WhittleDocument), color: nextBodyColor(d as WhittleDocument), visible: true };
     }
@@ -269,7 +271,8 @@ export function mutate(label: string, recipe: (d: Draft<WhittleDocument>) => voi
 export function replaceDocument(doc: WhittleDocument, fileName: string | null) {
   history.clear();
   set({
-    doc,
+    // A file from an older version may lack metadata for some bodies (so they couldn't be hidden or renamed).
+    doc: produce(doc, syncBodies),
     fileName,
     dirty: false,
     session: null,
@@ -432,6 +435,9 @@ export function deleteFeature(id: Id) {
   if (session) commitSession();
   const f = findFeature(get().doc, id);
   if (!f) return;
+  // Deleting the sketch being edited leaves sketch mode, or the editor would point at nothing.
+  const { mode } = get();
+  if (mode.kind === "sketch" && mode.sketchId === id) set({ mode: { kind: "model" }, selectedEntity: null, sketchSel: [], pendingConstraint: null });
   mutate(`Delete ${f.name}`, (d) => {
     const i = d.features.findIndex((x) => x.id === id);
     if (i < 0) return;

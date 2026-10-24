@@ -27,6 +27,7 @@ export function featureInputs(f: Feature): Id[] {
     case "construct":
       return [...new Set([...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId)])];
     case "extrude":
+      return [...new Set([f.sketch, ...(f.target ? [f.target] : []), ...(f.toFace ? [f.toFace.bodyId] : []), ...(f.startFace ? [f.startFace.bodyId] : [])])];
     case "revolve":
       return [f.sketch, ...(f.target ? [f.target] : [])];
     case "primitive":
@@ -37,9 +38,18 @@ export function featureInputs(f: Feature): Id[] {
     case "shell":
       return [...new Set([...(f.bodyId ? [f.bodyId] : []), ...f.faces.map((x) => x.bodyId)])];
     case "mirror":
-      return [...(f.bodyId ? [f.bodyId] : []), ...(f.planeRef ? [f.planeRef] : [])];
+      return [...new Set([...(f.bodyId ? [f.bodyId] : []), ...(f.planeRef ? [f.planeRef] : []), ...(f.features ?? [])])];
     case "pattern":
-      return [...(f.bodyId ? [f.bodyId] : []), ...(f.axisRef ? [f.axisRef] : []), ...(f.path ? [f.path] : [])];
+      return [
+        ...new Set([
+          ...(f.bodyId ? [f.bodyId] : []),
+          ...(f.axisRef ? [f.axisRef] : []),
+          ...(f.path ? [f.path] : []),
+          ...(f.axisGeom?.edge ? [f.axisGeom.edge.bodyId] : []),
+          ...(f.axisGeom?.face ? [f.axisGeom.face.bodyId] : []),
+          ...(f.features ?? []),
+        ]),
+      ];
     case "move":
       return f.bodyId ? [f.bodyId] : [];
     case "hole":
@@ -105,16 +115,28 @@ export function reorderProblem(doc: WhittleDocument, from: number, to: number): 
   return null;
 }
 
-/** Features that create a body with their own id (and so need body metadata). */
-export function createsBody(f: Feature): boolean {
+/**
+ * Features that create a body with their own id (and so need body metadata).
+ * `first`: no body exists yet, so a join makes a new body too (the kernel's "nothing to join" case).
+ */
+export function createsBody(f: Feature, first = false): boolean {
   switch (f.type) {
     case "extrude":
     case "revolve":
-    case "primitive":
     case "loft":
+      // A surface is always a body of its own, whatever the operation says.
+      return f.op === "new" || !!f.surface || (first && f.op === "join");
     case "sweep":
+      return f.op === "new" || (!!f.surface && !f.pipe) || (first && f.op === "join");
+    case "primitive":
     case "coil":
-      return f.op === "new";
+    case "rib":
+      return f.op === "new" || (first && f.op === "join");
+    case "surface":
+      // These make a new surface (or solid) body; the others edit the body they are given.
+      return ["patch", "ruled", "offset", "untrim", "extend", "stitch", "thicken"].includes(f.op);
+    case "boundaryFill":
+      return true;
     case "split":
       return f.keep === "both";
     case "offset":
@@ -124,7 +146,8 @@ export function createsBody(f: Feature): boolean {
       return true;
     case "mirror":
     case "pattern":
-      return !f.merge;
+      // Repeating features changes the bodies they touched; only copies of a whole body are new ones.
+      return !f.merge && !f.features?.length;
     case "move":
       return f.copy;
     case "import":
@@ -138,7 +161,7 @@ export function createsBody(f: Feature): boolean {
 export function isSketchConsumed(doc: WhittleDocument, sketchId: Id): boolean {
   return doc.features.some(
     (f) =>
-      ((f.type === "extrude" || f.type === "revolve") && f.sketch === sketchId) ||
+      ((f.type === "extrude" || f.type === "revolve" || f.type === "rib") && f.sketch === sketchId) ||
       (f.type === "loft" && f.sketches.includes(sketchId)) ||
       (f.type === "sweep" && (f.profile === sketchId || f.path === sketchId)),
   );
@@ -153,7 +176,7 @@ export function activeEnd(doc: WhittleDocument): number {
 export function bodyIdsBefore(doc: WhittleDocument, endIndex = activeEnd(doc)): Id[] {
   const ids: Id[] = [];
   doc.features.slice(0, endIndex).forEach((f) => {
-    if (!f.suppressed && createsBody(f)) ids.push(f.id);
+    if (!f.suppressed && createsBody(f, ids.length === 0)) ids.push(f.id);
   });
   return ids;
 }

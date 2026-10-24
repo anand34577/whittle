@@ -37,8 +37,12 @@ export function pasteSteps() {
   const fresh = JSON.parse(text) as Feature[];
   mutate(`Paste ${fresh.length} step${fresh.length > 1 ? "s" : ""}`, (d) => {
     const at = activeEnd(d as never);
-    for (const f of fresh) f.name = nextName(d as never, FEATURE_LABELS[f.type]);
-    d.features.splice(at, 0, ...(fresh as Draft<Feature>[]));
+    // One at a time, so each name counts the copies before it (two pasted extrudes aren't both "Extrude 3").
+    fresh.forEach((f, i) => {
+      // Named like the original ("Box 2" pastes as "Box 3"), not by its type's general word.
+      f.name = nextName(d as never, f.name.replace(/\s+\d+$/, "").trim() || FEATURE_LABELS[f.type]);
+      d.features.splice(at + i, 0, f as Draft<Feature>);
+    });
     if (d.rollback !== null) d.rollback += fresh.length;
   });
 }

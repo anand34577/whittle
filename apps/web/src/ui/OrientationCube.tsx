@@ -75,6 +75,7 @@ export function OrientationCube({ viewport, tick }: { viewport: Viewport | null;
         viewport.orbitBy(dx * 1.6, dy * 1.6);
       }}
       onPointerUp={() => setTimeout(() => (drag.current = null))}
+      onPointerCancel={() => (drag.current = null)}
       onClickCapture={(e) => {
         // The end of a drag isn't a click on whatever zone it ended over.
         if (drag.current?.moved) e.stopPropagation();
@@ -83,7 +84,7 @@ export function OrientationCube({ viewport, tick }: { viewport: Viewport | null;
       <div className="orientcube__stage">
         <div className="orientcube__cube" ref={cube}>
           {FACES.map((f) => (
-            <div key={f.id} className="orientcube__face" style={{ transform: faceMatrix(f), width: H * 2, height: H * 2, left: -H, top: -H }}>
+            <div key={f.id} className="orientcube__face" data-face={f.id} style={{ transform: faceMatrix(f), width: H * 2, height: H * 2, left: -H, top: -H }}>
               {zones(f).map(({ c, v, dir }) => {
                 const face = c === 0 && v === 0;
                 return (

@@ -105,7 +105,7 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
 
   return (
     <div className={`field ${error ? "field--error" : ""}`}>
-      <label htmlFor={id} className="field__label scrub" title="Drag to change" onPointerDown={onLabelDown} onPointerMove={onLabelMove} onPointerUp={onLabelUp}>
+      <label htmlFor={id} className="field__label scrub" title="Drag to change" onPointerDown={onLabelDown} onPointerMove={onLabelMove} onPointerUp={onLabelUp} onPointerCancel={() => (scrub.current = null)}>
         {label}
       </label>
       <div className="field__box">

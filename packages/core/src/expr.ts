@@ -157,8 +157,15 @@ export function parse(src: string): Node {
       if (u.k === "id" && has(UNIT_LITERALS, u.v)) {
         next();
         node.unit = u.v;
+      } else return node;
+      // Mixed units read as a sum, the way people write them: 5' 6"  or  1 m 20 cm.
+      let out: Node = node;
+      while (peek().k === "num" && toks[p + 1]?.k === "id" && has(UNIT_LITERALS, toks[p + 1]!.v)) {
+        const n = next();
+        const unit = next().v;
+        out = { t: "bin", op: "+", left: out, right: { t: "num", value: parseFloat(n.v), unit, pos: n.pos }, pos: n.pos };
       }
-      return node;
+      return out;
     }
     if (t.k === "id") {
       if (isOp(peek(), "(")) {

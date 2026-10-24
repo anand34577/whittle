@@ -1,5 +1,6 @@
 /** Inspect commands that ask the kernel about the solids (interference, tight corners) and body organisation. */
-import { LENGTH_TO_MM, type Id, documentEvaluator, formatQuantity } from "@whittle/core";
+import { type Id, documentEvaluator, formatQuantity } from "@whittle/core";
+import { volumeText } from "./measure";
 import { matchFace } from "./actions";
 import { promptDialog } from "./dialogs";
 import { getKernel } from "./kernel";
@@ -15,7 +16,7 @@ export async function runInterference() {
     if (!r.items.length) return toast("ok", "No bodies overlap.");
     const name = (id: Id) => doc.bodies[id]?.name ?? "Body";
     const first = r.items[0]!;
-    toast("warn", `${r.items.length} overlap${r.items.length > 1 ? "s" : ""}: ${name(first.a)} and ${name(first.b)} share ${formatQuantity(first.volume, "number", doc.units).replace(/\s*$/, "")} mm\u00b3${r.items.length > 1 ? " (and more)" : ""}. Red boxes mark them; run Interference again to refresh.`);
+    toast("warn", `${r.items.length} overlap${r.items.length > 1 ? "s" : ""}: ${name(first.a)} and ${name(first.b)} share ${volumeText(first.volume, doc.units)}${r.items.length > 1 ? " (and more)" : ""}. Red boxes mark them; run Interference again to refresh.`);
   } catch (e) {
     toast("warn", "The check couldn't run: " + (e instanceof Error ? e.message : String(e)));
   }
@@ -60,7 +61,12 @@ export async function runMinRadius() {
   if (v === null) return;
   const cutter = documentEvaluator(doc).eval(v, "length");
   if (!cutter.ok) return;
-  const r = await withTask("Measuring inside corners…", () => getKernel().inspect(doc, "radii"));
+  let r: Awaited<ReturnType<ReturnType<typeof getKernel>["inspect"]>>;
+  try {
+    r = await withTask("Measuring inside corners…", () => getKernel().inspect(doc, "radii"));
+  } catch (e) {
+    return toast("warn", "The check couldn't run: " + (e instanceof Error ? e.message : String(e)));
+  }
   if (r.kind !== "radii") return;
   const bodies = useApp.getState().regen?.bodies ?? [];
   const tight = r.items.filter((i) => i.concave && i.radius < cutter.value / 2 - 1e-6);
@@ -72,14 +78,12 @@ export async function runMinRadius() {
   useApp.setState({ selection: picks });
   if (!tight.length) toast("ok", `No inside corners are tighter than a ${formatQuantity(cutter.value, "length", unit)} cutter's radius.`);
   else toast("warn", `${tight.length} inside corner${tight.length > 1 ? "s are" : " is"} tighter than a ${formatQuantity(cutter.value, "length", unit)} cutter can reach (selected). Smallest radius: ${formatQuantity(Math.min(...tight.map((t) => t.radius)), "length", unit)}.`);
-  void LENGTH_TO_MM;
 }
 
 const PALETTE = ["#6aa6e8", "#e8956a", "#7bc78a", "#d27fc9", "#e3c95f", "#6fd0d0", "#b58de8", "#e87a7a"];
 
 /** Give each component (or each body without one) its own color. */
 export function colorByComponent() {
-  const { doc } = useApp.getState();
   const keys = new Map<string, number>();
   mutate("Color by component", (d) => {
     for (const [id, m] of Object.entries(d.bodies)) {
@@ -88,7 +92,6 @@ export function colorByComponent() {
       m.color = PALETTE[keys.get(key)! % PALETTE.length]!;
     }
   });
-  void doc;
 }
 
 /** Put the selected bodies in one new component (they then move together under joints). */

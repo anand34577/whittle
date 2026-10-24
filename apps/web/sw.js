@@ -6,26 +6,22 @@
  * Designs, accounts and the API are never cached here.
  */
 /* global BUILD */
-const META = "whittle-meta";
+const OWN = `whittle-${BUILD.version}`;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
-      const { version, files } = BUILD;
-      const cache = await caches.open(`whittle-${version}`);
-      await cache.addAll(files.map((f) => new Request(f, { cache: "reload" })));
-      await (await caches.open(META)).put("./version", new Response(version));
+      const cache = await caches.open(OWN);
+      await cache.addAll(BUILD.files.map((f) => new Request(f, { cache: "reload" })));
     })(),
   );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    (async () => {
-      const version = await (await (await caches.open(META)).match("./version"))?.text();
-      for (const key of await caches.keys()) if (key !== META && key !== `whittle-${version}`) await caches.delete(key);
-    })(),
-  );
+  // This worker's own build, not a shared note: a newer build installing meanwhile must not make it delete its own files.
+  event.waitUntil((async () => {
+    for (const key of await caches.keys()) if (key !== OWN) await caches.delete(key);
+  })());
 });
 
 self.addEventListener("message", (event) => {

@@ -200,8 +200,24 @@ export function loopsToEntities(loops: Vec2[][], width: number): SketchEntity[] 
   return out;
 }
 
+const CSS_MM: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6 };
+
+/**
+ * Millimetres per SVG user unit, from the root's width and viewBox, for an SVG saved at a real size (like Whittle's own export).
+ * Pixel and unitless sizes say nothing about the real size, so they give undefined.
+ */
+export function svgMmPerUnit(width: string | null, viewBox: string | null): number | undefined {
+  const m = /^\s*([\d.]+(?:e[-+]?\d+)?)\s*(mm|cm|in|pt|pc)\s*$/i.exec(width ?? "");
+  if (!m) return undefined;
+  const mm = Number.parseFloat(m[1]!) * CSS_MM[m[2]!.toLowerCase()]!;
+  const vb = (viewBox ?? "").trim().split(/[\s,]+/).map(Number);
+  // With no viewBox, a user unit is a CSS pixel whatever the width says.
+  if (!(vb.length === 4 && vb[2]! > 0)) return 25.4 / 96;
+  return mm > 0 ? mm / vb[2]! : undefined;
+}
+
 /** Read an SVG file's closed shapes as dense point loops in the SVG's own units (needs a DOM). */
-function svgLoops(text: string): Vec2[][] {
+function svgLoops(text: string): { loops: Vec2[][]; mmPerUnit?: number } {
   const parsed = new DOMParser().parseFromString(text, "image/svg+xml");
   const root = parsed.documentElement;
   if (root.nodeName !== "svg" || parsed.querySelector("parsererror")) throw new Error("That isn't a readable SVG file.");
@@ -216,6 +232,7 @@ function svgLoops(text: string): Vec2[][] {
       if (/^on/i.test(a.name) || (/^(xlink:)?href$/i.test(a.name) && !a.value.trim().startsWith("#"))) el.removeAttribute(a.name);
     }
   }
+  const mmPerUnit = svgMmPerUnit(root.getAttribute("width"), root.getAttribute("viewBox"));
   host.appendChild(svg);
   document.body.appendChild(host);
   try {
@@ -242,7 +259,7 @@ function svgLoops(text: string): Vec2[][] {
       loops.push(...splitAtJumps(pts, (scale * total) / Math.max(count, 1)));
       if (budget <= 0) break;
     }
-    return loops;
+    return { loops, ...(mmPerUnit ? { mmPerUnit } : {}) };
   } finally {
     host.remove();
   }
@@ -259,12 +276,15 @@ export function importSvgIntoSketch() {
     const file = input.files?.[0];
     if (!file) return;
     try {
-      const loops = svgLoops(await file.text());
+      const { loops, mmPerUnit } = svgLoops(await file.text());
+      // A drawing saved at a real size (millimetres, inches...) starts at that size; one in pixels is scaled to 50 mm.
+      const xs = loops.flat().map((p) => p[0]);
+      const natural = mmPerUnit && xs.length ? (Math.max(...xs) - Math.min(...xs)) * mmPerUnit : 0;
       const answer = await promptDialog({
         title: `Import ${file.name}`,
-        message: "The artwork keeps its proportions. Shapes inside shapes become holes.",
+        message: natural > 0 ? "The artwork keeps its proportions and starts at the size it was drawn. Shapes inside shapes become holes." : "The artwork keeps its proportions. Shapes inside shapes become holes.",
         label: "Width",
-        initial: "50",
+        initial: natural > 0 ? trim(natural, 2) : "50",
         unit: "mm",
         type: "number",
         confirmLabel: "Import",
@@ -286,6 +306,8 @@ export function importSvgIntoSketch() {
   input.click();
 }
 
+const UNIT_NAMES: Record<number, string> = { 1: "millimetres", 10: "centimetres", 1000: "metres", 25.4: "inches", 304.8: "feet", 914.4: "yards", 0.0254: "thousandths of an inch", 0.001: "micrometres", 100: "decimetres" };
+
 /** Ask for a DXF file and add its lines, arcs, circles and outlines to the sketch being edited. */
 export function importDxfIntoSketch() {
   const s = useApp.getState();
@@ -301,9 +323,12 @@ export function importDxfIntoSketch() {
       if (!dxf.loops.length && !dxf.circles.length) return toast("warn", "No lines, arcs, circles or outlines were found in that DXF.");
       const answer = await promptDialog({
         title: `Import ${file.name}`,
-        message: "Scale of the drawing: 1 if it is in millimetres, 25.4 if it is in inches.",
+        // The file's own unit, when its header gives one, is the starting answer.
+        message: dxf.mmPerUnit
+          ? `The file says it was drawn in ${UNIT_NAMES[dxf.mmPerUnit] ?? "its own units"}, so the scale is set to match. Change it if the import comes out the wrong size.`
+          : "Scale of the drawing: 1 if it is in millimetres, 25.4 if it is in inches.",
         label: "Scale",
-        initial: "1",
+        initial: String(dxf.mmPerUnit ?? 1),
         type: "number",
         confirmLabel: "Import",
         validate: (v) => (parseFloat(v) > 0 ? null : "Enter a number greater than zero"),

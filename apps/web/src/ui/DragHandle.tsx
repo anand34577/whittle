@@ -357,6 +357,13 @@ export function DragHandles({
   const drag = useRef<{ key: string; x: number; y: number; start: number; flip0: boolean; u: [number, number]; ppm: number } | null>(null);
   const [live, setLive] = useState<string | null>(null);
   const [snapped, setSnapped] = useState(false);
+  const endDrag = () => {
+    drag.current = null;
+    // The last rebuild may still be on its way: give its answer a moment to arrive.
+    dragging.until = performance.now() + 3000;
+    setLive(null);
+    setSnapped(false);
+  };
   if (!vp || !specs.length) return null;
 
   const move = (e: React.PointerEvent, s: Spec) => {
@@ -424,13 +431,9 @@ export function DragHandles({
               setLive(s.key);
             }}
             onPointerMove={(e) => move(e, s)}
-            onPointerUp={() => {
-              drag.current = null;
-              // The last rebuild may still be on its way: give its answer a moment to arrive.
-              dragging.until = performance.now() + 3000;
-              setLive(null);
-              setSnapped(false);
-            }}
+            onPointerUp={endDrag}
+            // A touch the browser takes over (to scroll or zoom) ends the drag too, or it would stay "dragging" for good.
+            onPointerCancel={endDrag}
           >
             <span className="drag-handle__dot" />
             {s.primary && feature && (

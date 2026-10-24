@@ -70,11 +70,14 @@ export function describeDim(d: Dim): string {
 }
 
 /** Format an internal value (mm or rad) in the given display unit. */
+/** Decimal places for lengths and angles shown on screen: a preference the app sets. Stored values keep full precision. */
+export const display = { digits: 2 };
+
 export function formatQuantity(
   value: number,
   kind: QuantityKind,
   lengthUnit: LengthUnit = "mm",
-  digits = 2,
+  digits = display.digits,
 ): string {
   if (kind === "length") {
     return `${trim(value / LENGTH_TO_MM[lengthUnit], digits)} ${lengthUnit}`;

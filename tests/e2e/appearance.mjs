@@ -54,8 +54,8 @@ expect(!meta.b.material, "the other body keeps the design default", meta.b);
 await state(() => window.whittle.useApp.setState({ selection: [] }));
 await page.waitForTimeout(300);
 const text = await page.locator(".panel").first().innerText();
-// 1 cm³ of brass is 8.5 g and 1 cm³ of the default (aluminium here) 2.7 g: 11.2 g in all.
-expect(/11\.2 g/.test(text), "design mass sums per-body materials", text.slice(0, 400));
+// 1 cm³ of brass is 8.5 g and 1 cm³ of the default (steel) 7.85 g: 16.35 g in all.
+expect(/16\.3 g/.test(text), "design mass sums per-body materials", text.slice(0, 400));
 await page.screenshot({ path: `${out}/materials.png` });
 
 if (errors.length) {

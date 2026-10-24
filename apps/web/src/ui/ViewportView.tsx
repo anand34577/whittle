@@ -246,6 +246,7 @@ function DockButton({ id, label }: { id: string; label?: string }) {
       onClick={c.run}
       disabled={!isAvailable(c, state)}
       aria-pressed={c.on ? !!on : undefined}
+      aria-label={label ?? c.label}
       title={`${c.label}${c.keys ? `  (${c.keys})` : ""}${c.hint ? "\n" + c.hint : ""}`}
     >
       <Icon name={c.icon ?? "more"} size={18} />
@@ -315,14 +316,14 @@ function SketchPalette({ frame }: { frame: SketchFrame | null }) {
   return (
     <div className="dock sketch-palette" role="toolbar" aria-label="Sketch palette">
       <div className="dock__group">
-        <button className="dock__btn" onClick={() => requestView("normal")} title="Look at the sketch plane head-on">
+        <button className="dock__btn" onClick={() => requestView("normal")} aria-label="Look at" title="Look at the sketch plane head-on">
           <Icon name="camera" size={18} />
           <span>Look at</span>
         </button>
       </div>
       <div className="dock__group">
         {toggles.map((t) => (
-          <button key={t.key} className={`dock__btn ${t.on ? "is-on" : ""}`} aria-pressed={t.on} disabled={t.disabled} title={t.title} onClick={t.toggle}>
+          <button key={t.key} className={`dock__btn ${t.on ? "is-on" : ""}`} aria-pressed={t.on} aria-label={t.label} disabled={t.disabled} title={t.title} onClick={t.toggle}>
             <Icon name={t.icon} size={18} />
             <span>{t.label}</span>
           </button>

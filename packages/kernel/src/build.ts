@@ -20,7 +20,7 @@ import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeeping
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
 
-import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
+import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
 export * from "./shared";
 
 interface SketchBuilt {
@@ -88,8 +88,8 @@ function fullRoundPartner(body: Shape3D, e: Edge): { partner: Edge; width: numbe
 }
 
 function bboxOverlap(a: Shape3D, b: Shape3D): boolean {
-  const [a0, a1] = a.boundingBox.bounds;
-  const [b0, b1] = b.boundingBox.bounds;
+  const [a0, a1] = shapeBounds(a);
+  const [b0, b1] = shapeBounds(b);
   const eps = 1e-6;
   return a0[0] <= b1[0] + eps && b0[0] <= a1[0] + eps && a0[1] <= b1[1] + eps && b0[1] <= a1[1] + eps && a0[2] <= b1[2] + eps && b0[2] <= a1[2] + eps;
 }
@@ -322,8 +322,9 @@ export class Builder {
     for (const [id, shape] of prev.bodies) {
       try {
         bodies.push(this.mesh(id, shape, quality));
-      } catch (e) {
-        statuses.push({ id, state: "error", message: "This body couldn't be displayed: " + String(e) });
+      } catch {
+        // The kernel's own exceptions carry no readable text.
+        statuses.push({ id, state: "error", message: "This body couldn't be displayed: its shape is damaged. Edit or suppress the last step that changed it." });
       }
     }
     const sketches: SketchFrame[] = [];
@@ -1045,7 +1046,12 @@ export class Builder {
         const src = bodies.get(id!)!;
         const copies = copiesOf(src);
         if (f.merge) {
-          bodies.set(id!, clean(src.fuse(fuseTree(copies))));
+          const merged = clean(src.fuse(fuseTree(copies)));
+          // OpenCascade can return an empty shape when many copies overlap wall on wall; say so rather than lose the body.
+          if (safeVolume(src) > 0 && !(safeVolume(merged) > 0)) {
+            throw new FeatureError("The copies overlap too much to merge into one body. Space them further apart, or turn off Merge to keep them as separate bodies.");
+          }
+          bodies.set(id!, merged);
         } else {
           bodies.set(f.id, makeCompound(copies) as Shape3D);
         }
@@ -1106,7 +1112,7 @@ export class Builder {
     const down = scale(info.normal, -1);
     const d = ev.num(f.diameter, "length", "Diameter");
     if (d <= 0) throw new FeatureError("The hole diameter must be greater than zero.");
-    const [b0, b1] = body.boundingBox.bounds;
+    const [b0, b1] = shapeBounds(body);
     const span = Math.hypot(b1[0] - b0[0], b1[1] - b0[1], b1[2] - b0[2]) * 2 + 10;
     const depth = f.through ? span : ev.num(f.depth, "length", "Depth");
     if (depth <= 0) throw new FeatureError("The hole depth must be greater than zero.");
@@ -1179,7 +1185,7 @@ function throughDistance(bodies: Map<Id, Shape3D>, frame: SketchFrame): number {
   if (bodies.size === 0) throw new FeatureError("There's nothing to go through yet. Create a body first, or use a distance.");
   let far = 0;
   for (const b of bodies.values()) {
-    const [lo, hi] = b.boundingBox.bounds;
+    const [lo, hi] = shapeBounds(b);
     for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) {
       far = Math.max(far, Math.hypot(x - frame.origin[0], y - frame.origin[1], z - frame.origin[2]));
     }
@@ -1513,7 +1519,10 @@ function shellBySubtraction(body: Shape3D, faces: Face[], t: number, outward = 0
   /** The body grown (`grow`) or shrunk by `d`, with sharp (intersection) joins: rounded ones fail once the wall is thicker than a fillet's radius. */
   const offsetBody = (d: number, grow: boolean): Shape3D => {
     // ponytail: an offset exactly equal to a fillet radius degenerates; a hair more gives the sharp inner corner.
+    const started = performance.now();
     for (const k of [1, 1.001, 1.01]) {
+      // A slow failure (a wall as thick as the body is) only gets slower with a hair more: give up rather than freeze.
+      if (performance.now() - started > 2500) break;
       try {
         const s = offsetSharp(body, grow ? d * k : -d * k);
         const v = measureShapeVolumeProperties(s).volume;
@@ -1713,7 +1722,7 @@ function largestWorking(start: number, attempt: (v: number) => unknown, budgetMs
 }
 
 function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyResult {
-  const [min, max] = shape.boundingBox.bounds;
+  const [min, max] = shapeBounds(shape);
   const diag = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) || 1;
   const tolerance = Math.max(0.005, diag * (quality === "final" ? 0.0004 : 0.0015));
   const angularTolerance = quality === "final" ? 0.15 : 0.3;

@@ -1,5 +1,6 @@
 import type { Id, WhittleDocument } from "@whittle/core";
 import { strToU8, zipSync } from "fflate";
+import { shapeBounds } from "./shared";
 import { type Shape3D, exportSTEP, makeCompound, measureShapeVolumeProperties } from "replicad";
 import { buildDrawingSVG } from "./drawing";
 import type { DrawingSettings, ExportFormat, MeshQuality } from "./protocol";
@@ -61,7 +62,7 @@ type MeshOptions = (shape: Shape3D) => { tolerance: number; angularTolerance: nu
  * Draft is about ten times coarser (small files for previews and sharing); fine is about four times finer (smooth prints of curved parts).
  */
 export function meshOptionsFor(shape: Shape3D, quality: MeshQuality = "standard") {
-  const [a, b] = shape.boundingBox.bounds;
+  const [a, b] = shapeBounds(shape);
   const diagonal = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
   if (quality === "draft") return { tolerance: Math.min(2, Math.max(0.05, diagonal * 2e-4)), angularTolerance: 0.35 };
   if (quality === "fine") return { tolerance: Math.min(0.25, Math.max(0.0025, diagonal * 5e-6)), angularTolerance: 0.05 };
@@ -127,6 +128,18 @@ end_header
   return out;
 }
 
+/** Metalness and roughness of each body finish (the same values the viewport shows). */
+const PBR: Record<string, [number, number]> = {
+  matte: [0.04, 0.62],
+  satin: [0.08, 0.34],
+  metal: [0.9, 0.28],
+  gloss: [0.05, 0.14],
+  brushed: [0.85, 0.48],
+  polished: [1, 0.08],
+  rubber: [0, 0.92],
+  glass: [0, 0.12],
+};
+
 /**
  * glTF 2.0 binary (.glb): the web, AR, game engines and renderers.
  * Metres (the glTF unit) and Y-up, one node per body with its color.
@@ -178,9 +191,10 @@ function buildGLB(doc: WhittleDocument, entries: [Id, Shape3D][], meshOptions: M
     const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
     const rgb = [0, 2, 4].map((i) => lin(parseInt(hex.slice(i, i + 2), 16) || 0));
     const look = doc.bodies[id]?.look;
+    const [metal, rough] = PBR[look ?? ""] ?? PBR.matte!;
     materials.push({
       name: doc.bodies[id]?.name ?? id,
-      pbrMetallicRoughness: { baseColorFactor: [...rgb, look === "glass" ? 0.45 : 1], metallicFactor: look === "metal" ? 0.9 : 0.05, roughnessFactor: look === "metal" ? 0.3 : look === "satin" ? 0.35 : 0.6 },
+      pbrMetallicRoughness: { baseColorFactor: [...rgb, look === "glass" ? 0.45 : 1], metallicFactor: metal, roughnessFactor: rough },
       ...(look === "glass" ? { alphaMode: "BLEND" } : {}),
     });
     meshes.push({ name: doc.bodies[id]?.name ?? id, primitives: [{ attributes: { POSITION: k * 3, NORMAL: k * 3 + 1 }, indices: k * 3 + 2, material: k }] });

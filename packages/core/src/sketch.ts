@@ -567,10 +567,24 @@ export function entitySnapPoints(r: ResolvedEntity): { p: Vec2; kind: "end" | "m
       out.push({ p: [r.cx, r.cy], kind: "center" });
       for (const p of entityOutline(r)) out.push({ p, kind: "end" });
       break;
-    case "slot":
+    case "slot": {
       out.push({ p: [r.cx, r.cy], kind: "center" });
+      // The end arcs' centers, and where the straight sides meet the arcs.
+      const half = r.length / 2;
+      const rad = r.width / 2;
+      const at = (x: number, y: number): Vec2 => {
+        const q = rot([x, y], r.angle);
+        return [q[0] + r.cx, q[1] + r.cy];
+      };
+      if (half > 1e-9) out.push({ p: at(-half, 0), kind: "center" }, { p: at(half, 0), kind: "center" });
+      for (const x of [-half, half]) for (const y of [-rad, rad]) out.push({ p: at(x, y), kind: "end" });
       break;
+    }
     case "ellipse":
+      out.push({ p: [r.cx, r.cy], kind: "center" });
+      // The ends of both axes.
+      for (const [x, y] of [[r.rx, 0], [-r.rx, 0], [0, r.ry], [0, -r.ry]] as Vec2[]) out.push({ p: rotAbout([r.cx + x, r.cy + y], [r.cx, r.cy], r.angle), kind: "end" });
+      break;
     case "gear":
       out.push({ p: [r.cx, r.cy], kind: "center" });
       break;

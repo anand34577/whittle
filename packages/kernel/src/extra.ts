@@ -41,7 +41,7 @@ import {
   measureShapeVolumeProperties,
 } from "replicad";
 import type { SketchFrame } from "./protocol";
-import { FeatureError, bodyForRefs, boxCenter, clean, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./shared";
+import { FeatureError, bodyForRefs, boxCenter, clean, shapeBounds, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./shared";
 import { circleOf } from "./construct";
 import { add, cross, dist, dot, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 
@@ -63,7 +63,7 @@ export function joinKeepingFaces(a: Shape3D, b: Shape3D): Shape3D {
 
 /** The plane offset where a body is widest across (its parting line along that plane's normal). */
 export function widestSection(body: Shape3D, plane: Parameters<Shape3D["split"]>[0]): number {
-  const [lo, hi] = body.boundingBox.bounds;
+  const [lo, hi] = shapeBounds(body);
   const reach = Math.max(...lo.map(Math.abs), ...hi.map(Math.abs)) * 1.0;
   const n = 40;
   const vols: { h: number; v: number }[] = [];
@@ -200,7 +200,7 @@ export function replaceFaces(f: ReplaceFaceFeature, bodies: Map<Id, Shape3D>, pl
   } else throw new FeatureError("Click the flat face (or pick a plane) to replace them with.", undefined, true);
   const bodyId = f.faces[0]!.bodyId;
   const body = bodyForRefs(bodies, bodyId);
-  const [lo, hi] = body.boundingBox.bounds;
+  const [lo, hi] = shapeBounds(body);
   const span = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 3 + 100;
   let out = body;
   let warning: string | undefined;
@@ -271,7 +271,7 @@ function deleteBlend(body: Shape3D, face: Face, faces: Face[]): Shape3D | null {
   if (!sides[0] || !sides[1] || sides[0].geomType !== "PLANE" || sides[1].geomType !== "PLANE") return null;
   const planes = sides.map((s) => ({ n: norm(s!.normalAt().toTuple()), p: s!.center.toTuple() }));
   if (Math.abs(dot(planes[0]!.n, planes[1]!.n)) > 0.999) return null;
-  const [lo, hi] = face.boundingBox.bounds;
+  const [lo, hi] = shapeBounds(face);
   const pad = Math.max(...[0, 1, 2].map((k) => hi[k]! - lo[k]!)) * 0.02 + 1e-3;
   // Pad across the blend but never along it, or the filler would stick out past the ends.
   const along = norm(sub(long[0]!.endPoint.toTuple(), long[0]!.startPoint.toTuple()));
@@ -397,7 +397,7 @@ export function boundaryCells(f: BoundaryFillFeature, bodies: Map<Id, Shape3D>):
   CELL_INFO.set(
     f.id,
     cells.map((c) => {
-      const [lo, hi] = c.boundingBox.bounds;
+      const [lo, hi] = shapeBounds(c);
       return { volume: volume(c), center: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2] as Vec3 };
     }),
   );
@@ -526,8 +526,8 @@ export function applyJoint(f: JointFeature, bodies: Map<Id, Shape3D>, sketches: 
       for (const g of group) {
         const mine = bodies.get(g);
         if (!mine) continue;
-        const [alo, ahi] = mine.boundingBox.bounds;
-        const [blo, bhi] = shape.boundingBox.bounds;
+        const [alo, ahi] = shapeBounds(mine);
+        const [blo, bhi] = shapeBounds(shape);
         if ([0, 1, 2].some((k) => ahi[k]! < blo[k]! - 1e-6 || bhi[k]! < alo[k]! - 1e-6)) continue;
         try {
           if (volume(mine.intersect(shape) as Shape3D) > 1e-3) {

@@ -69,6 +69,7 @@ import {
 } from "@whittle/core";
 import type { BodyResult } from "@whittle/kernel";
 import { commitSession, history, mutate, undo, useApp } from "./store";
+import { LOOKS } from "../viewport/looks";
 
 export interface ToolDef {
   name: string;
@@ -245,7 +246,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
     description: "Rename a body or set its color (#rrggbb) and finish.",
     input_schema: {
       type: "object",
-      properties: { body: { type: "string" }, name: { type: "string" }, color: { type: "string" }, finish: { type: "string", enum: ["matte", "satin", "metal", "glass"] }, visible: { type: "boolean" }, opacity: { type: "number", description: "0.05 (nearly invisible) to 1 (solid)" } },
+      properties: { body: { type: "string" }, name: { type: "string" }, color: { type: "string" }, finish: { type: "string", enum: LOOKS.map((l) => l.id), description: "glass is clear (see-through)" }, visible: { type: "boolean" }, opacity: { type: "number", description: "0.05 (nearly invisible) to 1 (solid)" } },
       required: ["body"],
     },
   },
@@ -264,10 +265,10 @@ const doc = () => useApp.getState().doc;
 const bodies = (): BodyResult[] => useApp.getState().regen?.bodies ?? [];
 
 /** Numbers become expressions; strings pass through (formulas). */
-function ex(v: unknown, fallback?: string): string {
+function ex(v: unknown, fallback?: string, name?: string): string {
   if (v === undefined || v === null || v === "") {
     if (fallback !== undefined) return fallback;
-    throw new ApiInputError("A required value is missing.");
+    throw new ApiInputError(name ? `${name} is required.` : "A required value is missing.");
   }
   if (typeof v === "number") {
     if (!Number.isFinite(v)) throw new ApiInputError("Numbers must be finite.");
@@ -377,16 +378,16 @@ function entityFrom(s: Record<string, unknown>): SketchEntity {
       const [w, h, c] = [Number(s.width), Number(s.height), Number(s.corner_radius ?? 0)];
       if (c < 0) throw new ApiInputError("corner_radius can't be negative.");
       if (w > 0 && h > 0 && c > maxRectCorner(w, h) + 1e-9) throw new ApiInputError(`corner_radius ${c} is too big for a ${w} x ${h} rectangle: the largest that fits is ${trim(maxRectCorner(w, h), 2)}.`);
-      return { ...base, type: "rect", x, y, w: ex(s.width), h: ex(s.height), anchor: "center", ...(s.corner_radius ? { corner: ex(s.corner_radius) } : {}), ...(s.angle ? { angle: ex(s.angle) } : {}) };
+      return { ...base, type: "rect", x, y, w: ex(s.width, undefined, "width"), h: ex(s.height, undefined, "height"), anchor: "center", ...(s.corner_radius ? { corner: ex(s.corner_radius) } : {}), ...(s.angle ? { angle: ex(s.angle) } : {}) };
     }
     case "circle":
       return { ...base, type: "circle", cx: x, cy: y, r };
     case "polygon":
       return { ...base, type: "polygon", cx: x, cy: y, r, sides: ex(s.sides, "6"), angle: ex(s.angle, "0") };
     case "slot":
-      return { ...base, type: "slot", cx: x, cy: y, length: ex(s.length), width: ex(s.width), angle: ex(s.angle, "0") };
+      return { ...base, type: "slot", cx: x, cy: y, length: ex(s.length, undefined, "length"), width: ex(s.width, undefined, "width"), angle: ex(s.angle, "0") };
     case "ellipse":
-      return { ...base, type: "ellipse", cx: x, cy: y, rx: ex(s.rx), ry: ex(s.ry), angle: ex(s.angle, "0") };
+      return { ...base, type: "ellipse", cx: x, cy: y, rx: ex(s.rx, undefined, "rx"), ry: ex(s.ry, undefined, "ry"), angle: ex(s.angle, "0") };
     case "polyline":
     case "path": {
       const pts = s.points;
@@ -416,7 +417,48 @@ const EXPR_KEYS = new Set([
   "distance", "distance2", "taper", "twist", "angle", "width", "depth", "height", "radius", "radius2", "pitch", "size", "thickness",
   "diameter", "headDiameter", "headDepth", "sinkAngle", "count", "spacing", "offset", "factor", "neutral", "scale", "padding", "thin", "count2", "spacing2", "angle2",
 ]);
-const ENUM_KEYS = new Set(["extent", "mode", "flip", "op", "axis", "axis2", "thinSide", "shape", "ruled", "orientation", "section", "lefthand", "style", "through", "plane", "merge", "pattern", "copy", "keepTools", "keep", "center", "pull", "direction"]);
+/** The words each setting takes (any feature that has it); anything else is refused rather than half-understood. */
+const ENUMS: Record<string, string[]> = {
+  extent: ["one", "symmetric", "two", "through", "face"],
+  mode: ["equal", "two", "angle"],
+  op: ["new", "join", "cut", "intersect"],
+  axis: ["x", "y", "z", "line"],
+  axis2: ["x", "y", "z"],
+  thinSide: ["center", "inside", "outside"],
+  shape: ["box", "cylinder", "sphere", "cone", "torus", "tube"],
+  orientation: ["fixed", "frenet"],
+  section: ["circle", "triangle", "square"],
+  style: ["simple", "counterbore", "countersink"],
+  plane: ["XY", "XZ", "YZ"],
+  pattern: ["linear", "circular", "path"],
+  keep: ["both", "above", "below"],
+  center: ["body", "origin"],
+  pull: ["x", "y", "z"],
+  direction: ["inside", "outside", "both"],
+};
+/** Words models often use for an operation. A silent mistake here builds the wrong shape (an unknown op cut like intersect). */
+const OP_WORDS: Record<string, string> = { add: "join", union: "join", fuse: "join", merge: "join", subtract: "cut", remove: "cut", difference: "cut", common: "intersect", intersection: "intersect", create: "new", body: "new" };
+const BOOL_KEYS = new Set(["flip", "ruled", "lefthand", "through", "merge", "copy", "keepTools"]);
+const ENUM_KEYS = new Set([...Object.keys(ENUMS), ...BOOL_KEYS]);
+
+function enumValue(k: string, v: unknown): unknown {
+  if (BOOL_KEYS.has(k)) {
+    if (typeof v === "boolean") return v;
+    if (v === "true" || v === "false") return v === "true";
+    throw new ApiInputError(`${k} is true or false.`);
+  }
+  const allowed = ENUMS[k]!;
+  const word = typeof v === "string" ? v.trim() : "";
+  const hit = allowed.find((a) => a.toLowerCase() === word.toLowerCase()) ?? (k === "op" ? OP_WORDS[word.toLowerCase()] : undefined);
+  if (!hit) throw new ApiInputError(`${k} is one of ${allowed.join(", ")} (got ${JSON.stringify(v)}).`);
+  return hit;
+}
+
+/** A list setting, or a clear error instead of a crash. */
+function list(k: string, v: unknown): unknown[] {
+  if (!Array.isArray(v)) throw new ApiInputError(`${k} is a list.`);
+  return v;
+}
 
 /** Refuse values that cannot make a solid, with every reason at once, before anything is changed. */
 function refuseBadValues(f: Feature) {
@@ -430,13 +472,13 @@ function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
   for (const [k, v] of Object.entries(s)) {
     if (v === undefined) continue;
     if (k === "tipAngle") rec[k] = v === "" || v === null || v === false ? undefined : ex(v);
-    else if (EXPR_KEYS.has(k)) rec[k] = ex(v);
-    else if (ENUM_KEYS.has(k)) rec[k] = v;
+    else if (EXPR_KEYS.has(k)) rec[k] = ex(v, undefined, k);
+    else if (ENUM_KEYS.has(k)) rec[k] = enumValue(k, v);
     else if (k === "position" || k === "translate") {
       if (!Array.isArray(v) || v.length !== 3) throw new ApiInputError(`${k} is [x, y, z].`);
       rec[k] = v.map((x) => ex(x));
     } else if (k === "sketch" || k === "profile" || k === "path") rec[k] = sketchRef(v);
-    else if (k === "sketches") rec[k] = (v as unknown[]).map(sketchRef);
+    else if (k === "sketches") rec[k] = list(k, v).map(sketchRef);
     else if (k === "body") {
       const id = bodyRef(v);
       if (f.type === "fillet" || f.type === "chamfer") rec.edges = edgesBySelector(id, s.edges ?? "all");
@@ -451,8 +493,8 @@ function applySettings(f: Draft<Feature>, s: Record<string, unknown>) {
       } else if (f.type === "combine") rec.target = id;
       else rec.bodyId = id;
     } else if (k === "target") rec.target = bodyRef(v);
-    else if (k === "tools") rec.tools = (v as unknown[]).map(bodyRef);
-    else if (k === "bodies") rec.bodies = (v as unknown[]).map(bodyRef);
+    else if (k === "tools") rec.tools = list(k, v).map(bodyRef);
+    else if (k === "bodies") rec.bodies = list(k, v).map(bodyRef);
     else if (k === "to_face") {
       const o = v as { body?: unknown; face?: unknown };
       if (!o || typeof o !== "object" || !o.body) throw new ApiInputError('to_face is {body, face}, e.g. {"body": "Body 1", "face": "bottom"}.');
@@ -710,10 +752,10 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
         mutate(label(`set ${pname}`), (d) => {
           const p = d.parameters.find((x) => x.name === pname);
           if (p) {
-            p.expr = ex(input.value);
+            p.expr = ex(input.value, undefined, "value");
             p.kind = kind;
             if (input.comment !== undefined) p.comment = String(input.comment);
-          } else d.parameters.push({ id: uid("p"), name: pname, expr: ex(input.value), kind, ...(input.comment ? { comment: String(input.comment) } : {}) });
+          } else d.parameters.push({ id: uid("p"), name: pname, expr: ex(input.value, undefined, "value"), kind, ...(input.comment ? { comment: String(input.comment) } : {}) });
         });
         await settled();
         const v = documentEvaluator(doc()).params.get(pname);
@@ -781,7 +823,7 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
         // Validate on a copy first so a bad setting changes nothing.
         const trial = structuredClone(f) as Feature;
         if (trial.type === "sketch") {
-          if (settings.shapes) trial.entities = (settings.shapes as Record<string, unknown>[]).map(entityFrom);
+          if (settings.shapes) trial.entities = (list("shapes", settings.shapes) as Record<string, unknown>[]).map(entityFrom);
         } else {
           applySettings(trial as Draft<Feature>, settings);
           refuseBadValues(trial);
@@ -813,6 +855,7 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
       case "set_body_appearance": {
         const id = bodyRef(input.body);
         if (input.color !== undefined && !/^#[0-9a-f]{6}$/i.test(String(input.color))) throw new ApiInputError("color is #rrggbb.");
+        if (input.finish !== undefined && !LOOKS.some((l) => l.id === input.finish)) throw new ApiInputError(`finish is one of ${LOOKS.map((l) => l.id).join(", ")}.`);
         mutate(label("appearance"), (d) => {
           const b = d.bodies[id]!;
           if (input.name) b.name = String(input.name);

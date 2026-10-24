@@ -2,7 +2,7 @@
  * Personal preferences: look and feel, workspace profile, navigation and the
  * defaults for new designs. Kept on this device (localStorage), applied live.
  */
-import type { LengthUnit } from "@whittle/core";
+import { type LengthUnit, display } from "@whittle/core";
 import type { DrawingSettings } from "@whittle/kernel";
 
 export type ThemeId = "daylight" | "daylightdark" | "graphite" | "paper" | "midnight" | "blueprint" | "studio" | "contrast";
@@ -32,6 +32,8 @@ export interface Prefs {
   tangentChain: boolean;
   /** Default material for mass estimates. */
   material: string;
+  /** The person picked the default material themself (older builds set PLA for them). */
+  materialSet?: boolean;
   reduceMotion: boolean;
   /** New shapes become constraint-ready geometry (dimension, constrain, trim, fillet them). */
   smartSketch: boolean | null;
@@ -45,6 +47,8 @@ export interface Prefs {
   slicer?: string;
   /** The desktop app looks for a newer release once a day. */
   updateCheck: boolean;
+  /** Decimal places for measurements and read-outs (0 to 6). */
+  precision?: number;
 }
 
 export interface ThemeInfo {
@@ -88,11 +92,11 @@ export interface ProfileInfo {
 }
 
 export const PROFILES: ProfileInfo[] = [
-  { id: "beginner", label: "New to 3D design", blurb: "Guided steps, helpful hints everywhere, the essential tools up front.", icon: "sparkStep", units: "mm", material: "pla", hints: true },
-  { id: "maker", label: "Maker & hobbyist", blurb: "3D printing, laser cutting, woodworking and home projects.", icon: "print", units: "mm", material: "pla", hints: true },
-  { id: "engineer", label: "Engineer & professional", blurb: "Parametric parts, precise dimensions, STEP for manufacturing and other CAD.", icon: "params", units: "mm", material: "al", hints: false },
-  { id: "designer", label: "Product & industrial designer", blurb: "Forms, surfaces and finishes, renders, and handoff to engineering.", icon: "vector", units: "mm", material: "abs", hints: false },
-  { id: "educator", label: "Teacher or student", blurb: "Learn and teach CAD: clear steps, explanations and simple sharing.", icon: "users", units: "mm", material: "pla", hints: true },
+  { id: "beginner", label: "New to 3D design", blurb: "Guided steps, helpful hints everywhere, the essential tools up front.", icon: "sparkStep", units: "mm", material: "steel", hints: true },
+  { id: "maker", label: "Maker & hobbyist", blurb: "3D printing, laser cutting, woodworking and home projects.", icon: "print", units: "mm", material: "steel", hints: true },
+  { id: "engineer", label: "Engineer & professional", blurb: "Parametric parts, precise dimensions, STEP for manufacturing and other CAD.", icon: "params", units: "mm", material: "steel", hints: false },
+  { id: "designer", label: "Product & industrial designer", blurb: "Forms, surfaces and finishes, renders, and handoff to engineering.", icon: "vector", units: "mm", material: "steel", hints: false },
+  { id: "educator", label: "Teacher or student", blurb: "Learn and teach CAD: clear steps, explanations and simple sharing.", icon: "users", units: "mm", material: "steel", hints: true },
 ];
 
 export const NAV_PRESETS: { id: NavPreset; label: string; blurb: string }[] = [
@@ -120,7 +124,7 @@ export const DEFAULT_PREFS: Prefs = {
   hints: true,
   toolLabels: true,
   tangentChain: true,
-  material: "pla",
+  material: "steel",
   reduceMotion: false,
   smartSketch: null,
   meshQuality: "standard",
@@ -150,7 +154,14 @@ export function normalizePrefs(p: Partial<Prefs>): Prefs {
   if (!["draft", "standard", "fine"].includes(out.meshQuality)) out.meshQuality = "standard";
   if (!NAV_PRESETS.some((n) => n.id === out.nav)) out.nav = DEFAULT_PREFS.nav;
   if (out.keys !== "classic") out.keys = "whittle";
+  // Damaged or older stored values fall back too: an unknown unit would make every new design's lengths unreadable.
+  if (!ACCENTS.some((a) => a.id === out.accent)) out.accent = DEFAULT_PREFS.accent;
+  if (!["compact", "comfortable", "spacious"].includes(out.density)) out.density = DEFAULT_PREFS.density;
+  if (!["mm", "cm", "m", "in", "ft"].includes(out.units)) out.units = DEFAULT_PREFS.units;
+  if (out.profile !== null && !PROFILES.some((x) => x.id === out.profile)) out.profile = null;
   if (out.drawing && typeof out.drawing !== "object") out.drawing = undefined;
+  // Older builds gave most profiles PLA without asking: a general-purpose default unless it was chosen.
+  if (out.material === "pla" && !out.materialSet) out.material = DEFAULT_PREFS.material;
   out.updateCheck = out.updateCheck !== false;
   return out;
 }
@@ -186,6 +197,7 @@ export function applyPrefs(p: Prefs, theme: ThemeId) {
   el.dataset.density = p.density;
   el.dataset.motion = p.reduceMotion ? "reduced" : "full";
   el.style.setProperty("--ui-scale", String(p.scale));
+  display.digits = Math.max(0, Math.min(6, Math.round(p.precision ?? 2)));
 }
 
 /** What a mouse drag does under a navigation preset. */
