@@ -926,4 +926,4 @@ is checked by hand against `whittle-server`: after one visit, the app reopens an
 | 7. v1.x | Assemblies, drawings, sheet metal, direct editing | |
 | 8. v2 | Collaboration, plugins, scripting | |
 
-See `PLAN.md` for the full product plan and `docs/ARCHITECTURE.md` for design notes.
+See `docs/ARCHITECTURE.md` for design notes.

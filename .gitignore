@@ -11,3 +11,7 @@ apps/desktop/src-tauri/gen/
 .claude/
 Claude-*.cmd
 target-*/
+
+# Internal working notes
+PLAN.md
+docs/AUDIT_HANDOFF.md
