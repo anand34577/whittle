@@ -1,7 +1,7 @@
 {
   "name": "whittle",
   "private": true,
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Whittle: open-source parametric 3D CAD. Sketch, model and export precise parts on Windows, macOS, Linux, a server or the browser.",
   "license": "MPL-2.0",
   "type": "module",
