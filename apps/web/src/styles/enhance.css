@@ -780,9 +780,9 @@ details.points summary {
   width: 56px;
 }
 
-/* A group that is just one button opening its list */
+/* A group that is just one button opening its list: its button lines up with the other groups' tools. */
 .toolgroup--menu {
-  justify-content: center;
+  justify-content: flex-start;
 }
 .tool--menu .tool__label {
   display: inline-flex;

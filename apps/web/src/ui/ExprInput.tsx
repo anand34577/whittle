@@ -184,10 +184,11 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
   label?: string;
 }) {
+  // Three or more choices get the panel's full width under their label: beside it they wrapped into ragged rows.
   return (
-    <div className="field">
+    <div className={`field ${options.length > 2 ? "field--stack" : ""}`}>
       {label && <span className="field__label">{label}</span>}
-      <div className="seg" role="radiogroup">
+      <div className="seg" role="radiogroup" aria-label={label}>
         {options.map((o) => (
           <button
             key={o.value}

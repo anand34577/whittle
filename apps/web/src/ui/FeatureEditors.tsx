@@ -55,7 +55,7 @@ const OPS: { value: BodyOp; label: string; title: string }[] = [
   { value: "new", label: "New body", title: "Create a separate body" },
   { value: "join", label: "Join", title: "Add material to a body" },
   { value: "cut", label: "Cut", title: "Remove material" },
-  { value: "intersect", label: "Keep overlap", title: "Keep only where they overlap" },
+  { value: "intersect", label: "Intersect", title: "Keep only where they overlap" },
 ];
 
 const AUTO = "__auto__";
@@ -94,8 +94,7 @@ function BodySelect({ value, onChange, allowAuto, exclude, label = "Body" }: { v
   );
 }
 
-/** A sketch picker limited to sketches earlier in the timeline. */
-/** A path to follow: a sketch (open line or outline) or a 3D curve. */
+/** A path to follow: a sketch (open line or outline) or a 3D curve, earlier in the timeline. */
 function PathSelect({ f, value, onChange, label, placeholder = "The path to follow…" }: { f: Feature; value: Id; onChange: (v: Id) => void; label: string; placeholder?: string }) {
   const sketches = useSketchesBefore(f.id);
   const features = useApp((s) => s.doc.features);
@@ -105,6 +104,7 @@ function PathSelect({ f, value, onChange, label, placeholder = "The path to foll
   return <Select label={label} value={all.some((s) => s.id === value) ? value : ""} placeholder={placeholder} onChange={onChange} options={all.map((s) => ({ value: s.id, label: s.name, icon: s.icon }))} />;
 }
 
+/** A sketch picker limited to sketches earlier in the timeline. */
 function SketchSelect({ f, value, onChange, label, placeholder = "Choose a sketch…" }: { f: Feature; value: Id; onChange: (v: Id) => void; label: string; placeholder?: string }) {
   const sketches = useSketchesBefore(f.id);
   return (
@@ -130,6 +130,15 @@ function OpField({ f }: { f: ExtrudeFeature | RevolveFeature | PrimitiveFeature 
   const surface = canSurface && !!(f as { surface?: boolean }).surface;
   return (
     <>
+      {!surface && <Segmented label="Result" value={f.op} options={OPS} onChange={(op) => setBodyOp(f.id, op)} />}
+      {!surface && f.op !== "new" && (
+        <BodySelect
+          value={f.target}
+          exclude={f.id}
+          allowAuto={f.op === "join" ? "Latest body" : "All bodies it touches"}
+          onChange={(v) => upd(f, "Target", (d) => void (d.target = v))}
+        />
+      )}
       {canSurface && (
         <Segmented
           label="Output"
@@ -139,15 +148,6 @@ function OpField({ f }: { f: ExtrudeFeature | RevolveFeature | PrimitiveFeature 
             { value: "surface", label: "Surface", title: "A skin with no volume: the sides only (no caps), and open lines work too" },
           ]}
           onChange={(v) => upd(f as ExtrudeFeature, "Output", (d) => void ((d as { surface?: boolean }).surface = v === "surface" ? true : undefined))}
-        />
-      )}
-      {!surface && <Segmented label="Result" value={f.op} options={OPS} onChange={(op) => setBodyOp(f.id, op)} />}
-      {!surface && f.op !== "new" && (
-        <BodySelect
-          value={f.target}
-          exclude={f.id}
-          allowAuto={f.op === "join" ? "Latest body" : "All bodies it touches"}
-          onChange={(v) => upd(f, "Target", (d) => void (d.target = v))}
         />
       )}
     </>
@@ -187,27 +187,30 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
         <ExprInput label="Other side" kind="length" value={f.distance2 ?? "0"} min={0} onChange={(v) => upd(f, "Second distance", (d) => void (d.distance2 = v))} />
       )}
       {f.extent !== "symmetric" && f.extent !== "face" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
-      <Toggle
-        label="Start from a face"
-        hint="Begin on a flat face of the model instead of the sketch plane (the offset below then counts from that face)"
-        checked={f.startFace !== undefined}
-        onChange={(on) => upd(f, "Start from a face", (d) => void (d.type === "extrude" && (d.startFace = on ? null : undefined)))}
-      />
-      {f.startFace !== undefined && (
-        <PickLine
-          icon="plane"
-          text={f.startFace ? "Starts on the face you chose. Click another face to change it" : "Click the flat face to start from"}
-          clearable={!!f.startFace}
-          onClear={() => upd(f, "Clear start face", (d) => void (d.type === "extrude" && (d.startFace = null)))}
+      <OpField f={f} />
+      <Disclosure summary="Start" defaultOpen={f.startFace !== undefined || !!(f.startOffset && f.startOffset !== "0")}>
+        <Toggle
+          label="Start from a face"
+          hint="Begin on a flat face of the model instead of the sketch plane (the offset below then counts from that face)"
+          checked={f.startFace !== undefined}
+          onChange={(on) => upd(f, "Start from a face", (d) => void (d.type === "extrude" && (d.startFace = on ? null : undefined)))}
         />
-      )}
-      <ExprInput
-        label="Start offset"
-        kind="length"
-        value={f.startOffset ?? "0"}
-        hint="Begin the extrusion this far above (or below) the sketch plane"
-        onChange={(v) => upd(f, "Start offset", (d) => void (d.type === "extrude" && (d.startOffset = v === "0" ? undefined : v)))}
-      />
+        {f.startFace !== undefined && (
+          <PickLine
+            icon="plane"
+            text={f.startFace ? "Starts on the face you chose. Click another face to change it" : "Click the flat face to start from"}
+            clearable={!!f.startFace}
+            onClear={() => upd(f, "Clear start face", (d) => void (d.type === "extrude" && (d.startFace = null)))}
+          />
+        )}
+        <ExprInput
+          label="Start offset"
+          kind="length"
+          value={f.startOffset ?? "0"}
+          hint="Begin the extrusion this far above (or below) the sketch plane"
+          onChange={(v) => upd(f, "Start offset", (d) => void (d.type === "extrude" && (d.startOffset = v === "0" ? undefined : v)))}
+        />
+      </Disclosure>
       <Disclosure summary="Thin wall" defaultOpen={!!f.thin}>
         <ExprInput
           label="Wall"
@@ -246,7 +249,6 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
           onChange={(v) => upd(f, "Twist", (d) => void (d.twist = v === "0" ? undefined : v))}
         />
       </Disclosure>
-      <OpField f={f} />
     </>
   );
 }
@@ -513,16 +515,7 @@ function PatternEditor({ f }: { f: PatternFeature }) {
       />
       {f.pattern === "path" ? (
         <>
-          <Select
-            label="Path sketch"
-            value={f.path ?? ""}
-            placeholder="Choose a sketch with a path…"
-            options={useApp
-              .getState()
-              .doc.features.filter((x) => x.type === "sketch" || x.type === "curve")
-              .map((x) => ({ value: x.id, label: x.name, icon: "path" as const }))}
-            onChange={(v) => upd(f, "Path", (d) => void (d.path = v))}
-          />
+          <PathSelect f={f} label="Path sketch" value={f.path ?? ""} placeholder="Choose a sketch with a path…" onChange={(v) => upd(f, "Path", (d) => void (d.type === "pattern" && (d.path = v)))} />
           <Toggle label="Turn copies with the path" checked={!!f.follow} onChange={(v) => upd(f, "Follow", (d) => void (d.follow = v))} />
         </>
       ) : (
@@ -701,7 +694,7 @@ function CombineEditor({ f }: { f: CombineFeature }) {
         options={[
           { value: "join", label: "Join" },
           { value: "cut", label: "Cut" },
-          { value: "intersect", label: "Keep overlap" },
+          { value: "intersect", label: "Intersect", title: "Keep only where they overlap" },
         ]}
         onChange={(v) => upd(f, "Operation", (d) => void (d.op = v))}
       />
@@ -1072,9 +1065,7 @@ function PickLine({ icon, text, onClear, clearable }: { icon: "move" | "thread" 
 }
 
 function RibEditor({ f }: { f: RibFeature }) {
-  // Select the stable array, then filter: a selector that builds a new array every call loops forever.
-  const features = useApp((s) => s.doc.features);
-  const sketches = features.filter((x) => x.type === "sketch");
+  const sketches = useSketchesBefore(f.id);
   const set = (label: string, recipe: (d: RibFeature) => void) => upd(f, label, (d) => void (d.type === "rib" && recipe(d)));
   return (
     <>

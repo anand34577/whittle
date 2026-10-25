@@ -33,10 +33,29 @@ export function parseSTL(bytes: Uint8Array): Float32Array {
   return Float32Array.from(nums);
 }
 
-export function stlToShape(bytes: Uint8Array): Shape3D {
-  const tris = parseSTL(bytes);
+/** Triangles of a Wavefront OBJ (polygons are split into fans; normals, textures and groups are ignored). */
+export function parseOBJ(bytes: Uint8Array): Float32Array {
+  const v: number[][] = [];
+  const out: number[] = [];
+  for (const line of new TextDecoder().decode(bytes).split("\n")) {
+    const t = line.replace(/#.*/, "").trim().split(/\s+/);
+    if (t[0] === "v") v.push([+t[1]!, +t[2]!, +t[3]!]);
+    else if (t[0] === "f") {
+      // "7", "7/1" or "7/1/3"; negative indices count back from the last vertex.
+      const ids = t.slice(1).map((s) => {
+        const i = Number.parseInt(s, 10);
+        return i < 0 ? v.length + i : i - 1;
+      });
+      for (let k = 1; k + 1 < ids.length; k++) for (const i of [ids[0]!, ids[k]!, ids[k + 1]!]) out.push(...(v[i] ?? [Number.NaN, 0, 0]));
+    }
+  }
+  if (out.some((x) => !Number.isFinite(x))) throw new Error("This OBJ file looks damaged.");
+  return Float32Array.from(out);
+}
+
+export function stlToShape(bytes: Uint8Array, tris = parseSTL(bytes)): Shape3D {
   const count = tris.length / 9;
-  if (count === 0) throw new Error("This STL file has no triangles.");
+  if (count === 0) throw new Error("This mesh file has no triangles.");
   if (count > MAX_STL_TRIANGLES) {
     throw new Error(`This mesh has ${count.toLocaleString()} triangles; Whittle imports up to ${MAX_STL_TRIANGLES.toLocaleString()}. Simplify it in your mesh tool first.`);
   }

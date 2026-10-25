@@ -514,6 +514,8 @@ function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
       )}
       {picked.length > 0 && <GeometryActions />}
       {(sketch.constraints?.length ?? 0) > 0 && (
+        <>
+        <h3 className="constraints__title">Constraints <span className="muted">{sketch.constraints!.length}</span></h3>
         <ul className="constraints__list" aria-label="Constraints">
           {sketch.constraints!.map((c) => (
             <li key={c.id} className={`${sol?.bad.includes(c.id) ? "is-bad" : ""} ${sel.includes(c.id) ? "is-selected" : ""}`}>
@@ -534,6 +536,7 @@ function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
             </li>
           ))}
         </ul>
+        </>
       )}
     </div>
   );
@@ -575,6 +578,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
               onChange={(v) => updateFeature(sketch.id, "Offset", (d) => void ((d as SketchFeature).plane.offset = v), "offset")}
             />
             <ImageSection sketch={sketch} />
+            <Disclosure summary="Sketching tips">
             <div className="tips">
               <p>
                 <b>Draw:</b> pick a tool above, then click twice. Start typing to enter exact sizes.
@@ -589,6 +593,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
                 <b>Arrange:</b> select a shape to duplicate, mirror, rotate or copy it around a circle.
               </p>
             </div>
+            </Disclosure>
           </div>
         )}
       </div>
@@ -770,7 +775,7 @@ function Inspector() {
             </div>
           </div>
         )}
-        {body && meta && (
+        {body && meta && (meta.component || meta.grounded || doc.features.some((x) => x.type === "joint")) && (
           <div className="panel__section">
             <h3 className="eyebrow">Assembly</h3>
             <Select
@@ -915,7 +920,7 @@ function SketchSummary({ id }: { id: string }) {
         <dt>On</dt>
         <dd>{plane}</dd>
         <dt>Shapes</dt>
-        <dd className="mono">{sk.entities.length + (sk.geometry?.length ?? 0)}</dd>
+        <dd className="mono">{sk.entities.length + (sk.geometry?.filter((g) => g.type !== "point").length ?? 0)}</dd>
         <dt>State</dt>
         <dd>{state}</dd>
         <dt>Used by</dt>

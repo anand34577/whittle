@@ -513,6 +513,10 @@
 [data-theme^="daylight"] .panel__section > .eyebrow {
   margin-inline: 0;
 }
+/* A read-out table starts right under its title bar. */
+[data-theme^="daylight"] .panel__section > .eyebrow + .stats {
+  margin-top: -10px;
+}
 
 /* Fields: a quiet label on the left, a flat white value box on the right. */
 [data-theme^="daylight"] .field {

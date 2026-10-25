@@ -1216,12 +1216,15 @@ button.docname__state:hover {
 /* Three or more choices in a narrow field wrap into even columns, not ragged rows. */
 .field .seg:has(> :nth-child(3)) {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
 }
 .seg__btn {
   flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   height: 24px;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: var(--r-1);
   font-size: var(--fs-sm);
   color: var(--text-2);
@@ -2058,6 +2061,11 @@ button.docname__state:hover {
 .constraints__name { all: unset; cursor: pointer; font-size: var(--fs-sm); }
 .constraints__name:focus-visible { outline: 2px solid var(--select); border-radius: 4px; }
 .constraints__list li > .field { margin: 0; }
+.constraints__title { display: flex; justify-content: space-between; margin: 4px 0 2px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
+.constraints__list li { min-height: 28px; }
+.constraints__list .btn--icon { width: 24px; height: 24px; min-height: 0; padding: 0; opacity: 0.6; }
+.constraints__list li:hover .btn--icon, .constraints__list .btn--icon:focus-visible { opacity: 1; }
+.constraints__list li:hover:not(.is-selected):not(.is-bad) { background: var(--bg-inset); }
 
 /* Constraint labels on the sketch: dimension values above, relation glyphs beside the geometry. */
 .cmark {

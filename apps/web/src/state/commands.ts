@@ -159,7 +159,7 @@ export const COMMANDS: Command[] = [
   { id: "torus", label: "Torus", group: "Shapes", icon: "torus", keywords: "ring donut o-ring primitive", hint: "Add a ring", when: inModel, run: model(() => addPrimitive("torus")) },
   { id: "tube", label: "Tube", group: "Shapes", icon: "tube", keywords: "pipe sleeve spacer hollow cylinder bushing primitive", hint: "Add a hollow cylinder", when: inModel, run: model(() => addPrimitive("tube")) },
   { id: "parts", label: "Parts library", short: "Parts", group: "Create", icon: "library", keys: "P", keywords: "gear nut bolt washer bracket standoff hinge insert ready made catalog", hint: "Insert ready-made, editable parts", when: inModel, run: model(() => useApp.setState({ panel: "parts" })) },
-  { id: "import", label: "Import STEP / STL", short: "Import", group: "Create", icon: "import", keywords: "open insert step stp stl mesh reference", hint: "Bring in a part from another CAD tool or a mesh", when: inModel, run: model(importModel) },
+  { id: "import", label: "Import STEP / STL / OBJ", short: "Import", group: "Create", icon: "import", keywords: "open insert step stp stl obj mesh reference", hint: "Bring in a part from another CAD tool or a mesh", when: inModel, run: model(importModel) },
   // Modify
   { id: "fillet", label: "Fillet", group: "Modify", icon: "fillet", keys: "F", keywords: "round edges rounded smooth radius", hint: "Round off sharp edges", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeature("fillet")) },
   { id: "chamfer", label: "Chamfer", group: "Modify", icon: "chamfer", keywords: "bevel edges angle cut corner", hint: "Bevel edges with a flat cut", when: (s) => inModel(s) && hasBodies(s), run: model(() => startEdgeFeature("chamfer")) },

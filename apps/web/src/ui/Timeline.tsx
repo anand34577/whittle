@@ -46,7 +46,7 @@ interface Menu {
 /** The key values of a step, for its tooltip: "10 mm · Join", "R 2 mm · 4 edges". */
 export function summary(f: Feature, units: string): string {
   const v = (e: string | undefined) => (e === undefined ? "" : /^\s*-?[\d.]+\s*$/.test(e) ? `${e.trim()} ${units}` : e);
-  const op = "op" in f && typeof f.op === "string" ? { new: "New body", join: "Join", cut: "Cut", intersect: "Keep overlap" }[f.op as string] : undefined;
+  const op = "op" in f && typeof f.op === "string" ? { new: "New body", join: "Join", cut: "Cut", intersect: "Intersect" }[f.op as string] : undefined;
   const n = (k: number, what: string) => `${k} ${what}${k === 1 ? "" : "s"}`;
   const parts: (string | undefined)[] = (() => {
     switch (f.type) {

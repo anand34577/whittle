@@ -726,7 +726,7 @@ export interface CombineFeature extends FeatureBase {
 export interface ImportFeature extends FeatureBase {
   type: "import";
   /** "whittle" brings in every body of another Whittle design (a derived copy). */
-  format: "step" | "stl" | "whittle";
+  format: "step" | "stl" | "obj" | "whittle";
   fileName: string;
   /** Base64 file contents. */
   data: string;
