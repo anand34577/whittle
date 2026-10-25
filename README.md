@@ -22,9 +22,8 @@ fillets and real threads, not approximate meshes. On top of it is an interface b
 the next step is always on screen, every number accepts a formula, and when something can't be built, Whittle says
 why and suggests a fix.
 
-> **Status: 0.15, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
-> work end to end. Full assemblies (mates, bills of materials), sheet metal and CAM are on the
-> [roadmap](PLAN.md#10-roadmap).
+> **Status: 0.17, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
+> work end to end. Full assemblies (mates, bills of materials), sheet metal and CAM are planned.
 
 <p align="center">
   <img src="docs/media/screenshot-box.png" alt="The Whittle workspace with a project box: toolbar, design browser, 3D view and properties" width="100%">
@@ -204,8 +203,8 @@ docs              User guide, architecture, self-hosting, design API, and the im
 tests/e2e         Browser tests for the core flow, tools, sketching, constraints, pictures and the server
 ```
 
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how it fits together, [PLAN.md](PLAN.md) holds the product
-plan, and [docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md) documents the design API.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how it fits together and
+[docs/AI_INTEGRATION.md](docs/AI_INTEGRATION.md) documents the design API.
 
 ## Contributing
 
