@@ -15,7 +15,7 @@ beforeAll(async () => {
 
 const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
 
-for (const format of ["step", "stl"] as const) {
+for (const format of ["step", "stl", "obj"] as const) {
   it(`imports a ${format.toUpperCase()} file and scales it`, async () => {
     const src = newDocument();
     const box = makePrimitive(src, "box") as PrimitiveFeature;

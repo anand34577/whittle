@@ -13,7 +13,7 @@ import { Drawing, type Edge, type Face, type FaceFinder, Plane, type Shape3D, ty
 import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import "./fastTopo";
-import { stlToShape } from "./stl";
+import { parseOBJ, stlToShape } from "./stl";
 import { circleOf, constructFrame } from "./construct";
 import { surfaceTool, prismSurface, revolveSurface } from "./surface";
 import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
@@ -304,7 +304,7 @@ export class Builder {
           const shapes = [...nested.shapes(sub).values()];
           if (!shapes.length) throw new Error("That design has no bodies to bring in.");
           this.imports.set(key, (shapes.length === 1 ? shapes[0]! : makeCompound(shapes)) as Shape3D);
-        } else this.imports.set(key, f.format === "step" ? ((await importSTEP(blob)) as Shape3D) : stlToShape(bytes));
+        } else this.imports.set(key, f.format === "step" ? ((await importSTEP(blob)) as Shape3D) : f.format === "obj" ? stlToShape(bytes, parseOBJ(bytes)) : stlToShape(bytes));
       } catch (e) {
         this.importErrors.set(key, e instanceof Error && !/^\d+$/.test(e.message) ? e.message : FRIENDLY.import!);
       }

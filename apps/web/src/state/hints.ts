@@ -92,7 +92,7 @@ export function hintFor(s: AppState): string {
       case "loft":
         return f.sketches.length < 2 ? "Click the sketches to blend between, in order" : "Click more sketches to add them · Enter to finish";
       case "combine":
-        return !f.target ? "Click the body to keep" : "Click the tool bodies · choose Join, Cut or Keep overlap · Enter to finish";
+        return !f.target ? "Click the body to keep" : "Click the tool bodies · choose Join, Cut or Intersect · Enter to finish";
       case "move":
         return "Click a body to move it · type distances or drag the labels to scrub · Enter to finish";
       case "sweep":

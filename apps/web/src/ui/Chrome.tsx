@@ -331,6 +331,7 @@ const MODEL_FAMILIES: Record<string, { name: string; ids: string[] }> = {
   chamfer: { name: "Chamfer", ids: ["chamfer", "chamfer-all"] },
   sweep: { name: "Sweep", ids: ["sweep", "pipe"] },
   measure: { name: "Measure", ids: ["measure", "check-geometry"] },
+  pattern: { name: "Pattern", ids: ["pattern", "mirror"] },
 };
 
 /** Sketch tool families: one button each, the other ways to draw it behind its arrow. */
@@ -363,11 +364,11 @@ const SKETCH_TOOL_IDS: Record<string, string> = { polygonC: "tool-polygonc", pol
 function toolsFor(profile: Profile | null) {
   const pro = profile === "engineer" || profile === "designer";
   // Ordered the way the work flows (Create, Modify, Assemble, Construct, Inspect, Insert), the layout most CAD users already know.
-  const solids = ["#From a sketch", "extrude", "revolve", "sweep", "loft", "pipe", "rib", "web", "#Features", "hole", "thread", "thread-face", "spring", "emboss", "engrave", "boundary-fill"];
+  const solids = ["#From a sketch", "extrude", "revolve", "sweep", "loft", "pipe", "rib", "web", "#Features", "hole", "thread", "thread-face", "spring", "emboss", "engrave", "boundary-fill", "#Repeat", "pattern", "mirror"];
   const primitives = ["#Primitives", "box", "cylinder", "sphere", "cone", "torus", "tube"];
   const curves = ["#3D curves", "curve-3d", "curve-edges", "curve-faces", "curve-project"];
   return {
-    create: { primary: pro ? ["extrude", "revolve", "sweep", "loft", "hole"] : ["extrude", "revolve", "hole", "box"], more: [...solids, ...primitives, ...curves] },
+    create: { primary: pro ? ["extrude", "revolve", "sweep", "loft", "hole", "pattern"] : ["extrude", "revolve", "hole", "box", "pattern"], more: [...solids, ...primitives, ...curves] },
     modify: pro
       ? { primary: ["press-pull", "fillet", "chamfer", "shell", "draft", "move"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "bounding-solid", "align"] }
       : { primary: ["fillet", "chamfer", "shell", "move", "combine"], more: ["#Faces", "press-pull", "replace-face", "delete-face", "split-faces", "draft", "#Edges", "fillet", "chamfer", "fillet-all", "chamfer-all", "#Bodies", "shell", "move", "combine", "mirror", "pattern", "split", "offset", "scale", "bounding-solid", "align"] },
@@ -479,9 +480,8 @@ function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
         <>
           <Group label="Create" ids={create.primary} more={create.more} />
           <Group label="Modify" ids={modify.primary} more={modify.more} />
-          <Group label="Assemble" ids={[]} more={["#Components", "make-component", "ground", "#Motion", "joint", "#Check", "interference", "clear-interference", "explode", "component-colors"]} />
           <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
-          <Group label="Inspect" ids={["measure", "section"]} more={["#Measure", "measure", "section", "check-geometry", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra", "#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
+          <Group label="Inspect" ids={["measure", "section"]} more={["#Measure", "measure", "section", "check-geometry", "interference", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra", "#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
         </>
       )}
       {tab === "surface" && (

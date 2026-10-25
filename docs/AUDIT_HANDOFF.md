@@ -48,3 +48,26 @@ Verified with:
 ## Left to do (next pickup)
 
 Not yet audited deeply: `ViewportView.tsx`, `sketchTools.ts`, `FeatureEditors.tsx`, `Account.tsx`/admin UI, and the desktop (Tauri) shell.
+
+# Part-design audit (2026-10-24)
+
+Compared with SolidCraft's part-modeling feature list (sketch, constraints, solid features, construction geometry, inspection, file exchange). Whittle already covers nearly all of it. This round fixed what the comparison and a screen-by-screen pass turned up.
+
+## Fixed
+
+- **Extrude panel:** Result (New body / Join / Cut / Intersect) now sits right under the distance and direction, where it can be seen without scrolling. Start face and start offset moved into a collapsed **Start** section. Output (Solid / Surface) comes after Result in every feature that has both.
+- **Choice buttons:** a choice of three or more options takes the panel's full width under its label instead of wrapping into ragged rows ("Around an axis" and "Keep overlap" were clipped). "Keep overlap" is now called **Intersect**, the usual CAD name.
+- **Ribbon:** Pattern (with Mirror) is on the Create group. The Assemble group is gone (part design only; joints and components are still in Ctrl+K, and Interference is under Inspect). Groups that are a single menu button now line up with the other tools.
+- **Sketch panel:** the constraint list has a "Constraints N" heading and compact rows, and the delete buttons show on hover. The long help text is folded into **Sketching tips**.
+- **Body panel:** the Assembly section only shows once the design uses components, grounding or joints.
+- **Sketch summary:** the shape count no longer counts line end points as shapes.
+- **Mirror:** a body centred on the mirror plane used to mirror onto itself, so nothing seemed to happen. The plane now starts at the body's side.
+- **Shell:** the 2 mm default filled thin parts solid and failed at once. Thin parts now start at a quarter of their thinnest side.
+- **Import:** Wavefront **OBJ** meshes can be inserted (button, drag and drop), through the same path as STL. The round-trip test covers it.
+- **Pattern along a path / Rib:** their sketch lists offered sketches from later in the timeline (which don't exist yet when the step builds). They now only list earlier ones, like every other picker.
+- Daylight panels: a read-out table starts right under its title bar (there was an empty band).
+
+## Gaps left on purpose
+
+- **IGES:** the bundled OpenCascade build has no IGES reader or writer. It needs a custom WASM build.
+- **Plastic-part features** (boss, snap fit, lip), **blend curve**, **sketch curvature comb**, **compare bodies**: not built yet.

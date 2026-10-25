@@ -268,6 +268,13 @@ export function startShell() {
   if (f.type === "shell") {
     f.faces = faces;
     f.bodyId = faces[0]?.bodyId ?? selectedBodyId();
+    // The 2 mm default would fill a thin part solid: start at a quarter of its thinnest side instead.
+    const r = get().regen;
+    const b = r?.bodies.find((x) => x.id === (f.bodyId ?? lastBodyId())) ?? r?.bodies[r.bodies.length - 1];
+    if (b) {
+      const thin = Math.min(...[0, 1, 2].map((i) => b.bbox[1][i]! - b.bbox[0][i]!));
+      if (thin > 0 && thin < 8) f.thickness = String(+(thin / 4 / LENGTH_TO_MM[get().doc.units]).toPrecision(2));
+    }
   }
   beginNewFeature(f, `New ${f.name}`);
 }
@@ -316,11 +323,11 @@ export function startCombine() {
   beginNewFeature(makeCombine(get().doc, target, ids.slice(1)), "New Combine");
 }
 
-/** Pick a STEP or STL file and add it as a body. */
+/** Pick a STEP, STL or OBJ file and add it as a body. */
 export function importModel() {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".step,.stp,.stl,.whittle";
+  input.accept = ".step,.stp,.stl,.obj,.whittle";
   input.onchange = () => {
     const file = input.files?.[0];
     if (file) void importFile(file);
@@ -330,8 +337,8 @@ export function importModel() {
 
 export async function importFile(file: File) {
   const ext = file.name.toLowerCase().split(".").pop();
-  const format = ext === "stl" ? "stl" : ext === "step" || ext === "stp" ? "step" : ext === "whittle" ? "whittle" : null;
-  if (!format) return toast("warn", "Only STEP (.step, .stp), STL and Whittle (.whittle) files can be inserted.");
+  const format = ext === "stl" ? "stl" : ext === "obj" ? "obj" : ext === "step" || ext === "stp" ? "step" : ext === "whittle" ? "whittle" : null;
+  if (!format) return toast("warn", "Only STEP (.step, .stp), STL, OBJ and Whittle (.whittle) files can be inserted.");
   if (file.size > 40 * 1024 * 1024) return toast("warn", "That file is larger than 40 MB. Try a simplified version.");
   // Reading and encoding a big file takes a moment: show how far along it is, and let the window breathe meanwhile.
   const task = startTask(`Reading ${file.name}…`, 0);
@@ -362,7 +369,14 @@ export async function importFile(file: File) {
 export function startMirror() {
   const body = selectedBodyId() ?? lastBodyId();
   if (!body) return toast("info", "Create a body first, then mirror it.");
-  beginNewFeature(makeMirror(get().doc, body), "New Mirror");
+  const f = makeMirror(get().doc, body);
+  // A body centred on the plane would mirror onto itself and nothing seems to happen: start the plane at its side instead.
+  const b = get().regen?.bodies.find((x) => x.id === body);
+  if (b && f.type === "mirror") {
+    const [lo, hi] = [b.bbox[0][0], b.bbox[1][0]];
+    if (lo < 0 && hi > 0 && Math.abs(lo + hi) < 0.05 * (hi - lo)) f.offset = String(+(hi / LENGTH_TO_MM[get().doc.units]).toPrecision(4));
+  }
+  beginNewFeature(f, "New Mirror");
 }
 
 export function startPattern() {

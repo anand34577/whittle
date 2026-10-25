@@ -460,7 +460,7 @@ function StartCard() {
             {" · "}
           </>
         )}
-        Drop a STEP or STL file here ·<kbd>Ctrl K</kbd> finds any command
+        Drop a STEP, STL or OBJ file here ·<kbd>Ctrl K</kbd> finds any command
       </p>
     </div>
   );

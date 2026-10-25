@@ -190,6 +190,7 @@ await step("05-extrude-start-offset", async () => {
   await page.waitForTimeout(500);
   const ex = await state(() => window.whittle.useApp.getState().doc.features.filter((f) => f.type === "extrude").at(-1));
   expect(ex, "an extrude feature exists", {});
+  await page.getByRole("button", { name: "Start", exact: true }).click(); // the start options sit in their own section
   await page.getByLabel("Start offset").first().fill("12");
   await page.keyboard.press("Enter");
   await waitBuilt();

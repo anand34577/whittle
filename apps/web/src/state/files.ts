@@ -281,14 +281,14 @@ export function startLaunchQueue() {
 /** Open a file dropped onto the window. */
 export async function openDroppedFile(file: File) {
   if (file.type.startsWith("image/")) return placeImage(file, file.name);
-  if (/\.(step|stp|stl)$/i.test(file.name)) {
+  if (/\.(step|stp|stl|obj)$/i.test(file.name)) {
     useApp.setState({ panel: null });
     await importFile(file);
     return;
   }
   const lower = file.name.toLowerCase();
   if (!lower.endsWith(FILE_EXTENSION) && !lower.endsWith(".json")) {
-    toast("warn", "Drop a Whittle design, a STEP or STL file to import it, or a picture to trace over.");
+    toast("warn", "Drop a Whittle design, a STEP, STL or OBJ file to import it, or a picture to trace over.");
     return;
   }
   if (!(await confirmDiscard())) return;
