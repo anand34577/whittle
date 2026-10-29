@@ -10,6 +10,7 @@ import boldUrl from "@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-700-nor
 import { loadFont, setOC } from "replicad";
 import gcsWasmUrl from "@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm?url";
 import { Builder, isValidShape } from "./build";
+import { isEngineAbort } from "./shared";
 import { initSolver } from "./solver";
 import { exportShapes } from "./exporters";
 import { interference, minDistance, radii, textOutlines } from "./inspect";
@@ -114,6 +115,10 @@ async function handle(req: KernelRequest) {
       post({ type: "export", seq: req.seq, ...file }, [file.data.buffer]);
     }
   } catch (e) {
+    if (isEngineAbort(e)) {
+      post({ type: "error", seq: req.seq, fatal: true, message: "The geometry engine ran out of memory or stopped, so it was restarted. Try a simpler change, or a coarser preview." });
+      return;
+    }
     post({ type: "error", seq: req.seq, message: e instanceof Error ? e.message : String(e) });
   }
 }

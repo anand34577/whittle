@@ -47,7 +47,7 @@ export async function exportShapes(
 
   if (format === "drawing") {
     const parts = drawing?.parts ? entries.map(([id, s]) => ({ name: doc.bodies[id]?.name ?? id, volume: measureShapeVolumeProperties(s).volume, material: doc.bodies[id]?.material })) : undefined;
-    return { data: strToU8(buildDrawingSVG(entries.map(([, s]) => s), { ...drawing, title: doc.name, parts })), mime: "image/svg+xml", ext: "svg" };
+    return { data: strToU8(buildDrawingSVG(entries.map(([, s]) => s), { ...drawing, title: doc.name, parts, units: doc.units })), mime: "image/svg+xml", ext: "svg" };
   }
   if (format === "obj") return { data: strToU8(buildOBJ(doc, entries, meshOptions)), mime: "model/obj", ext: "obj" };
   if (format === "ply") return { data: buildPLY(entries, meshOptions), mime: "application/x-ply", ext: "ply" };
@@ -76,7 +76,7 @@ export function hex6(color: string | undefined): string {
   return /^[0-9a-f]{6}$/i.test(h) ? h : "cccccc";
 }
 
-/** Wavefront OBJ: one named object per body, with a material per body color (inline .mtl names). */
+/** Wavefront OBJ: one named object per body (geometry only: OBJ keeps colours in a separate .mtl file, which isn't written). */
 function buildOBJ(doc: WhittleDocument, entries: [Id, Shape3D][], meshOptions: MeshOptions): string {
   const out = [`# ${doc.name}, exported from Whittle (units: millimetres)`];
   let base = 1;

@@ -19,10 +19,11 @@ jobs:
           - { arch: arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Server
         run: |
-          sh install.sh --server
+          # The edited deploy/install.sh, not the one inside the published release (audit X-7).
+          WHITTLE_DEPLOY_SCRIPT="$PWD/deploy/install.sh" sh install.sh --server
           curl -fsS --retry 15 --retry-delay 2 --retry-connrefused http://localhost:8080/api/health
           curl -fsS http://localhost:8080/api/config
           systemctl is-active whittle
@@ -45,7 +46,7 @@ jobs:
     name: macOS
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: sh install.sh
       - run: test -d /Applications/Whittle.app && ls /Applications/Whittle.app/Contents/MacOS
       - run: sh install.sh --uninstall && test ! -e /Applications/Whittle.app
@@ -54,7 +55,7 @@ jobs:
     name: Windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install
         shell: powershell
         run: ./install.ps1
@@ -69,7 +70,7 @@ jobs:
     name: Docker Compose
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: docker compose -f deploy/docker-compose.yml up -d
       - run: curl -fsS --retry 20 --retry-delay 2 --retry-all-errors http://localhost:8080/api/health
       - if: always()

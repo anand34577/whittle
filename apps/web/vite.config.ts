@@ -55,6 +55,7 @@ export default defineConfig({
     outDir: r("dist"),
     emptyOutDir: true,
     target: "es2022",
-    chunkSizeWarningLimit: 4000,
+    // Just above today's main chunk (about 1.6 MB), so the build says when it grows (audit X-6).
+    chunkSizeWarningLimit: 1700,
   },
 });

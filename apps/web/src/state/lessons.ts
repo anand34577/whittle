@@ -3,7 +3,8 @@
  * so people learn by doing it in the real app, not by reading.
  */
 import { type Feature, parameterUses } from "@whittle/core";
-import type { AppState } from "./store";
+import { type AppState, useApp } from "./store";
+import { commandById } from "./commands";
 
 export interface LessonStep {
   title: string;
@@ -64,7 +65,7 @@ export const LESSONS: Lesson[] = [
     minutes: 4,
     steps: [
       { title: "Add a box", body: "Shape › Box (or Ctrl+K, type box). Make it 80 × 50 × 6 and press Enter.", done: (s) => made(s, "primitive", (f) => f.shape === "box") },
-      { title: "Drill holes", body: "Press D (Hole), click the top face, then click to place two or more holes. Press Enter.", done: (s) => made(s, "hole", (f) => f.points.length >= 2) },
+      { title: "Drill holes", get body() { return `Press ${commandById("hole")?.keys ?? "the Hole button"} (Hole), click the top face, then click to place two or more holes. Press Enter.`; }, done: (s) => made(s, "hole", (f) => f.points.length >= 2) },
       { title: "Countersink them", body: "Double-click the Hole step in the timeline, choose Countersink, press Enter.", done: (s) => made(s, "hole", (f) => f.style === "countersink") },
       { title: "Soften the corners", body: "Click the four upright corner edges (Shift adds), press F, set 5 mm, press Enter.", done: (s) => made(s, "fillet", (f) => f.edges.length > 0) },
       { title: "Check a size", body: "Press I (Measure) and click a hole's edge to read its diameter.", done: (s) => s.mode.kind === "measure" && s.measure.length > 0 },
@@ -79,7 +80,12 @@ export const LESSONS: Lesson[] = [
       { title: "Create a parameter", body: "Open Parameters (the fx button, top right). Add one named width with the value 60 mm.", done: (s) => s.doc.parameters.length > 0 },
       {
         title: "Use it in a sketch",
-        body: "Sketch on XY, draw a rectangle, then type width in its Width box. Formulas work too: width / 2.",
+        // Constraint-ready shapes (the default) have a width dimension, whole shapes a Width box (audit G-1).
+        get body() {
+          return useApp.getState().prefs.smartSketch === false
+            ? "Sketch on XY, draw a rectangle, then type width in its Width box. Formulas work too: width / 2."
+            : "Sketch on XY, draw a rectangle, then double-click its width dimension and type width. Formulas work too: width / 2.";
+        },
         done: (s) => s.doc.parameters.some((p) => parameterUses({ parameters: [], features: s.doc.features.filter((f) => f.type === "sketch") }, p.name) > 0),
       },
       { title: "Extrude it", body: "Finish the sketch, press E, press Enter.", done: (s) => made(s, "extrude") },

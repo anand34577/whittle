@@ -1,5 +1,5 @@
 /** Title bar, toolbar, status bar and toasts: the quiet frame around the viewport. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { COMMANDS, CONSTRAINT_COMMANDS, type Command, commandById, isAvailable, whyUnavailable } from "../state/commands";
 import { aiAvailable } from "../state/platform";
 import { hintFor } from "../state/hints";
@@ -79,7 +79,11 @@ export function TitleBar() {
           aria-label="Design name"
           spellCheck={false}
           onChange={(e) => setName(e.target.value)}
-          onBlur={() => name.trim() && name !== doc.name && mutate("Rename design", (d) => void (d.name = name.trim()))}
+          onBlur={() => {
+            // An emptied name goes back to the design's name instead of staying blank on screen (audit UI-1).
+            if (!name.trim()) setName(doc.name);
+            else if (name !== doc.name) mutate("Rename design", (d) => void (d.name = name.trim()));
+          }}
           onKeyDown={(e) => {
             e.stopPropagation();
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
@@ -560,7 +564,8 @@ const SEVERITY_ICON = { error: "error", warning: "warning", info: "info" } as co
 /** IDE-style problem counts in the status bar; click for the list, each with where it is and a fix. */
 function ProblemsButton() {
   const state = useApp();
-  const list = problemsOf(state);
+  // Worked out again only when the design, its build or the open step change, not on every hover (audit UI-1).
+  const list = useMemo(() => problemsOf({ doc: state.doc, regen: state.regen, session: state.session }), [state.doc, state.regen, state.session]);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const count = (sev: string) => list.filter((p) => p.severity === sev).length;
@@ -669,7 +674,8 @@ export function Toasts() {
 /* ───────────────────────────── Command palette ───────────────────────────── */
 
 /** Whole words beat word starts, which beat letters inside a word ("round" finds Fillet before Ground). */
-function score(c: Command, q: string): number {
+/** `recent`: the recent-command list, read once per search rather than once per command (audit UI-1). */
+function score(c: Command, q: string, recentList: string[] = recentCommands()): number {
   if (!q) return 1;
   const label = c.label.toLowerCase();
   const labelWords = label.split(/[^a-z0-9]+/);
@@ -684,7 +690,7 @@ function score(c: Command, q: string): number {
     else if (label.includes(w) || keyWords.some((x) => x.includes(w))) s += 1;
     else return 0;
   }
-  const recent = recentCommands().indexOf(c.id);
+  const recent = recentList.indexOf(c.id);
   return s + (recent >= 0 ? 1.5 - recent * 0.15 : 0);
 }
 
@@ -696,7 +702,8 @@ export function CommandPalette() {
   // With nothing typed, what you used lately comes first.
   const recent = q ? [] : recentCommands();
   const rank = (id: string) => (recent.includes(id) ? recent.indexOf(id) : recent.length);
-  const list = COMMANDS.map((c) => ({ c, s: score(c, q), why: q ? whyUnavailable(c, state) : null }))
+  const recentAll = recentCommands();
+  const list = COMMANDS.map((c) => ({ c, s: score(c, q, recentAll), why: q ? whyUnavailable(c, state) : null }))
     .filter((x) => x.s > 0 && (q ? true : isAvailable(x.c, state)))
     .sort((a, b) => Number(!!a.why) - Number(!!b.why) || rank(a.c.id) - rank(b.c.id) || b.s - a.s)
     .slice(0, 12);
@@ -782,7 +789,8 @@ export function QuickBox() {
             ? ["extrude", "revolve", "loft", "sweep"]
             : ["sketch", "extrude", "revolve", "fillet", "shell", "hole", "box", "cylinder", "press-pull"];
   const context = ids.map(commandById).filter((c) => isAvailable(c, state));
-  const found = q.trim() ? COMMANDS.map((c) => ({ c, s: score(c, q) })).filter((x) => x.s > 0 && isAvailable(x.c, state)).sort((a, b) => b.s - a.s).slice(0, 6).map((x) => x.c) : context;
+  const recentAll = q.trim() ? recentCommands() : [];
+  const found = q.trim() ? COMMANDS.map((c) => ({ c, s: score(c, q, recentAll) })).filter((x) => x.s > 0 && isAvailable(x.c, state)).sort((a, b) => b.s - a.s).slice(0, 6).map((x) => x.c) : context;
   const run = (c: Command | undefined) => {
     if (!c) return;
     close();

@@ -149,10 +149,11 @@ describe("splines", () => {
     expect(sol.state).not.toBe("error");
     const g = sk.geometry!.find((x) => x.id === spl)!;
     const c = sk.geometry!.find((x) => x.id === arc)!;
-    if (g.type === "spline" && c.type === "arc") {
-      const [end, next, ctr] = [sol.points[g.pts[0]!]!, sol.points[g.pts[1]!]!, sol.points[c.c]!];
-      const dot = (end[0] - ctr[0]) * (next[0] - end[0]) + (end[1] - ctr[1]) * (next[1] - end[1]);
-      expect(Math.abs(dot)).toBeLessThan(1e-3);
-    }
+    // The check can't be skipped (audit T-3): the kinds are asserted first.
+    expect([g.type, c.type]).toEqual(["spline", "arc"]);
+    if (g.type !== "spline" || c.type !== "arc") return;
+    const [end, next, ctr] = [sol.points[g.pts[0]!]!, sol.points[g.pts[1]!]!, sol.points[c.c]!];
+    const dot = (end[0] - ctr[0]) * (next[0] - end[0]) + (end[1] - ctr[1]) * (next[1] - end[1]);
+    expect(Math.abs(dot)).toBeLessThan(1e-3);
   });
 });

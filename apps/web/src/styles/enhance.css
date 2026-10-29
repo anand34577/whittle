@@ -161,13 +161,6 @@
   padding: 0 4px;
 }
 
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-4px) scale(0.98);
-  }
-}
-
 /* Panels: a hairline of light on the edge facing the model */
 .browser,
 .panel {

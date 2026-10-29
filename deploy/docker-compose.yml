@@ -2,6 +2,7 @@
 #   curl -fsSLO https://raw.githubusercontent.com/anand34577/whittle/main/deploy/docker-compose.yml
 #   docker compose up -d
 # Then open http://<this machine>:8080/ and create the first account (it becomes the administrator).
+# It asks for a setup token: `docker compose logs whittle` shows it (or set WHITTLE_SETUP_TOKEN below).
 # Every setting: https://github.com/anand34577/whittle/wiki/Configuration
 
 services:
@@ -14,6 +15,7 @@ services:
       - whittle-data:/data
     environment:
       WHITTLE_AUTH: local              # local, oidc, local,oidc or none
+      # WHITTLE_SETUP_TOKEN: choose-one  # asked for when creating the first account; unset: a new one is logged at start-up
       # WHITTLE_PUBLIC_URL: https://cad.example.com
       # WHITTLE_SIGNUP: "true"
       # To use PostgreSQL, uncomment this and the postgres service below:

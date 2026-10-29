@@ -1,0 +1,9 @@
+# `cargo audit` settings for whittle-server (run in CI).
+[advisories]
+ignore = [
+  # crypto-bigint timing (via openidconnect -> p256/p384). The server only verifies ID-token signatures with
+  # public keys, so private-key timing leaks don't apply.
+  "RUSTSEC-2026-0387",
+  # rsa "Marvin" timing (via openidconnect). RS256 verification only, no private key; no fixed version exists.
+  "RUSTSEC-2023-0071",
+]

@@ -1,5 +1,5 @@
 /** Sketch "Intersect": the outline where the model crosses the open sketch's plane, drawn into the sketch. */
-import { type SketchEntity, chainSegments2D, makeEntity, simplifyChain, sliceMesh, trim } from "@whittle/core";
+import { type SketchEntity, chainSegments2D, lengthText, makeEntity, simplifyChain, sliceMesh } from "@whittle/core";
 import { type Pick, sketchMutate, toast, useApp } from "./store";
 
 /** Draw the intersection of the (selected, else all visible) bodies with the open sketch's plane into the sketch. */
@@ -14,10 +14,12 @@ export function intersectIntoSketch() {
   if (!segs.length) return toast("info", "The model doesn't cross this sketch plane. Move the plane through the part first.");
   const chains = chainSegments2D(segs).map((c) => ({ ...c, pts: simplifyChain(c.pts, c.closed) })).filter((c) => c.pts.length >= (c.closed ? 3 : 2));
   if (chains.reduce((n, c) => n + c.pts.length, 0) > 4000) return toast("warn", "That section has too many points. Try selecting just one body.");
+  // The slice is in mm; sketch fields are in the document unit.
+  const len = (mm: number) => lengthText(mm, s.doc.units, 4);
   const entities: SketchEntity[] = chains.map((c) => {
-    const e = makeEntity("polyline", c.pts[0]!, c.pts[1]!);
+    const e = makeEntity("polyline", c.pts[0]!, c.pts[1]!, s.doc.units);
     if (e.type === "polyline") {
-      e.points = c.pts.map(([x, y]) => [trim(Math.round(x * 1e4) / 1e4, 4), trim(Math.round(y * 1e4) / 1e4, 4)]);
+      e.points = c.pts.map(([x, y]) => [len(x), len(y)]);
       if (!c.closed) e.open = true;
     }
     return e;

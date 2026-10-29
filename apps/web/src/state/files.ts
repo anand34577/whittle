@@ -427,7 +427,9 @@ export async function exportDesign(format: ExportFormat, bodyId?: string) {
   commitSession();
   const { doc, prefs } = useApp.getState();
   try {
-    const file = await withTask(`Exporting ${format.toUpperCase()}…`, () => getKernel().export(doc, format, bodyId ? [bodyId] : undefined, prefs.meshQuality, format === "drawing" ? prefs.drawing : undefined));
+    // The parts list names materials, not their ids (audit K-8).
+    const materialNames = format === "drawing" ? Object.fromEntries((await import("../ui/PropertiesPanel")).MATERIALS.map((m) => [m.id, m.label])) : undefined;
+    const file = await withTask(`Exporting ${format.toUpperCase()}…`, () => getKernel().export(doc, format, bodyId ? [bodyId] : undefined, prefs.meshQuality, format === "drawing" ? { ...prefs.drawing, materialNames } : undefined));
     const name = bodyId ? `${safeName(doc.name)} - ${safeName(doc.bodies[bodyId]?.name ?? "body")}` : safeName(doc.name);
     if (await saveBytes(file.data, `${name}.${file.ext}`, file.mime, EXPORT_FILTERS[file.ext]!)) toast("ok", `Exported ${format.toUpperCase()}`);
   } catch (e) {
@@ -579,6 +581,8 @@ interface Draft {
   doc: WhittleDocument;
   fileName: string | null;
   at: string;
+  /** Saved while a sketch or feature dialog was open: it holds that unfinished step too. */
+  unfinished?: boolean;
 }
 
 /** The most recent recovery copy of any design. */
@@ -587,7 +591,7 @@ export async function readAutosave(): Promise<Draft | null> {
     const newest = (await listStored("draft:"))[0];
     if (!newest) return null;
     const data = await readStored<Draft>(newest.key);
-    return data ? { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at } : null;
+    return data ? { doc: migrate(data.doc), fileName: data.fileName ?? null, at: data.at, unfinished: !!data.unfinished } : null;
   } catch {
     return null;
   }
@@ -610,7 +614,9 @@ export function startAutosave() {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       const { doc, fileName, session } = useApp.getState();
-      const toSave = session ? session.base : doc;
+      // Inside a sketch or dialog the live state is kept, so a crash doesn't lose minutes of unfinished work.
+      // An early step opened on its own shows a rolled-back model; the draft keeps the design's real rollback.
+      const toSave = session?.isolated ? { ...doc, rollback: session.base.rollback } : doc;
       // An empty design needs no recovery copy, and an older one of it must not come back.
       if (toSave.features.length === 0) {
         if (!cleared.has(draftKey(toSave.id))) void deleteStored(draftKey(toSave.id)).catch(() => {});
@@ -618,17 +624,29 @@ export function startAutosave() {
         return;
       }
       cleared.delete(draftKey(toSave.id));
-      writeStored(draftKey(toSave.id), { doc: toSave, fileName, at: new Date().toISOString() })
+      const draft = { doc: toSave, fileName, at: new Date().toISOString(), unfinished: !!session } satisfies Draft;
+      writeStored(draftKey(toSave.id), draft)
+        .catch(async (e: unknown) => {
+          // The server keeps a limited number of items per person (audit W-4): make room by dropping the oldest
+          // other design's draft, then try once more.
+          if (!(e instanceof ApiError && e.status === 409)) throw e;
+          const oldest = (await listStored("draft:")).filter((x) => x.key !== draftKey(toSave.id)).at(-1);
+          if (!oldest) throw e;
+          await deleteStored(oldest.key);
+          await writeStored(draftKey(toSave.id), draft);
+        })
         .then(async () => {
           // Copies of other designs go after a week, so they don't pile up.
           for (const e of await listStored("draft:")) {
-            if (e.key !== draftKey(toSave.id) && e.updatedAt && Date.now() - e.updatedAt > WEEK_MS) void deleteStored(e.key);
+            // Drafts with no known time (written by an older version) count as old.
+            if (e.key !== draftKey(toSave.id) && Date.now() - e.updatedAt > WEEK_MS) void deleteStored(e.key);
           }
         })
-        .catch(() => {
+        .catch((e: unknown) => {
           if (!warned) {
             warned = true;
-            toast("warn", "This design is too large for crash recovery. Save it regularly.");
+            const full = e instanceof ApiError && e.status === 409;
+            toast("warn", full ? "There's no room left for a crash-recovery copy of this design. Save it regularly." : "This design is too large for crash recovery. Save it regularly.");
           }
         });
     }, 800);
@@ -647,6 +665,11 @@ export async function startDesktop() {
   const openAll = async () => {
     const files = await invoke<string[]>("startup_files").catch(() => []);
     if (files[0]) await openPath(files[0]);
+    // One design is open at a time: say which ones weren't opened instead of dropping them silently (audit D-1).
+    if (files.length > 1) {
+      const rest = files.slice(1).map((f) => f.split(/[\\/]/).pop()).join(", ");
+      toast("info", `Whittle opens one design at a time. Open the others from File → Open: ${rest}`);
+    }
   };
   await t.event.listen<string>("whittle://open", () => void openAll());
   await openAll();

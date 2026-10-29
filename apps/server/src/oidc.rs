@@ -41,6 +41,8 @@ struct Pending {
     at: Instant,
     /// Link the identity to this (signed-in) account instead of signing in.
     link_user: Option<String>,
+    /// The sign-in was started with the right setup token (or none is configured), so it may create the first account.
+    setup_ok: bool,
 }
 
 #[derive(Default)]
@@ -97,6 +99,8 @@ pub struct StartQuery {
     return_to: Option<String>,
     /// "1": link single sign-on to the signed-in account.
     link: Option<String>,
+    /// WHITTLE_SETUP_TOKEN, needed when this sign-in creates the server's first (administrator) account.
+    setup: Option<String>,
 }
 
 pub async fn start(State(s): State<Shared>, headers: axum::http::HeaderMap, Query(q): Query<StartQuery>) -> Response {
@@ -134,7 +138,11 @@ pub async fn start(State(s): State<Shared>, headers: axum::http::HeaderMap, Quer
     if pending.len() >= MAX_PENDING {
         return fail("Too many sign-ins are in progress. Try again in a few minutes.");
     }
-    pending.insert(csrf.secret().clone(), Pending { verifier, nonce, return_to: safe_return(q.return_to), at: Instant::now(), link_user });
+    let setup_ok = match &s.config.setup_token {
+        Some(want) => q.setup.as_deref().map(str::trim) == Some(want.as_str()),
+        None => true,
+    };
+    pending.insert(csrf.secret().clone(), Pending { verifier, nonce, return_to: safe_return(q.return_to), at: Instant::now(), link_user, setup_ok });
     // The callback only accepts the response in the browser that started the sign-in, so a link an
     // attacker obtained from their own sign-in can't be used to sign a victim into the attacker's account.
     let secure = if s.config.secure_cookies { "; Secure" } else { "" };
@@ -273,9 +281,23 @@ async fn finish(s: &Shared, q: CallbackQuery) -> Result<(axum::http::HeaderValue
             return Err("You don't have an account here yet. Ask an administrator to add you with your email address.".into());
         }
         (None, None) => {
+            // Same lock as password sign-up: two first sign-ins at once can't both become administrator (audit S-1).
+            let _guard = auth::REGISTER_LOCK.lock().await;
+            let first = db::user_count(&s.db).await.map_err(|e| e.to_string())? == 0;
+            if !first && !auto_create {
+                return Err("You don't have an account here yet. Ask an administrator to add you with your email address.".into());
+            }
+            // The first account is the administrator: like password sign-up, it needs the setup token when one is set.
+            if first && !pending.setup_ok {
+                return Err("Enter the setup token from the server's settings (WHITTLE_SETUP_TOKEN) to create the first account.".into());
+            }
             let base = preferred.clone().or_else(|| email.as_ref().map(|e| e.split('@').next().unwrap_or("").to_owned())).unwrap_or_default();
             let username = unique_username(s, &base).await?;
-            let first = db::user_count(&s.db).await.map_err(|e| e.to_string())? == 0;
+            // An address another account already has isn't copied, so sign-in and resets by email still find one account (audit S-4).
+            let email = match email {
+                Some(e) if db::email_taken(&s.db, &e, None).await.map_err(|e| e.to_string())? => None,
+                other => other,
+            };
             let id = random_token(12);
             db::insert_user(
                 &s.db,

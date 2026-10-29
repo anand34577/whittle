@@ -7,6 +7,7 @@
 import type { Id, SketchFeature, SketchGeom, Vec2 } from "./model";
 import { addArc, addCircle, addEllipse, addSpline, addConstraint, addLine, addPoint, dropLengths, dropUnused, geomType, pointAt, usedPoints } from "./constraints";
 import type { ResolvedEntity } from "./sketch";
+import { type LengthUnit, lengthText } from "./units";
 
 type Geo = Pick<SketchFeature, "geometry" | "constraints">;
 
@@ -68,7 +69,8 @@ export function addRectGeometry(sk: Geo, corners: [Vec2, Vec2, Vec2, Vec2], cons
 }
 
 /** Add the geometry for an entity. Returns a message when that kind of shape can't be converted. */
-export function addEntityGeometry(sk: Geo, r: ResolvedEntity): string | undefined {
+/** `units`: the document's length unit, for dimension values this writes (a bare number means the document unit). */
+export function addEntityGeometry(sk: Geo, r: ResolvedEntity, units: LengthUnit = "mm"): string | undefined {
   const construction = r.construction;
   switch (r.type) {
     case "rect": {
@@ -123,18 +125,29 @@ export function addEntityGeometry(sk: Geo, r: ResolvedEntity): string | undefine
       return undefined;
     }
     case "polyline": {
+      if (r.ctrl) return "Control-point splines can't be converted: their curve only passes near the points.";
       if (r.smooth && r.arcs.some(Boolean)) return "Smooth outlines that also have arcs can't be converted. Turn Smooth off first.";
       if (r.splines.some(Boolean)) return "Outlines that mix lines with spline points can't be converted yet.";
       if (r.corner && !r.smooth) {
         if (r.arcs.some(Boolean)) return "Outlines with both arcs and rounded corners can't be converted. Turn the rounding off first.";
         // Straight lines first, then each corner rounded as a tangent arc with a radius dimension.
-        const lines = addChain(sk, r.points.map((p) => ({ p })), !r.open, { construction });
-        const radius = String(Math.round(r.corner * 1e4) / 1e4);
-        const corners = lines.flatMap((id, i) => {
-          const g = (sk.geometry ?? []).find((x) => x.id === id);
-          return g?.type === "line" && (!r.open || i < lines.length - 1) ? [g.b] : [];
-        });
-        for (const c of corners) filletCorner(sk, c, r.corner, radius);
+        // Tried on a copy first, so a corner that can't take the radius leaves the sketch untouched (audit C-12).
+        const round = (g: Geo): string | undefined => {
+          const lines = addChain(g, r.points.map((p) => ({ p })), !r.open, { construction });
+          const radius = lengthText(r.corner, units, 4);
+          const corners = lines.flatMap((id, i) => {
+            const x = (g.geometry ?? []).find((y) => y.id === id);
+            return x?.type === "line" && (!r.open || i < lines.length - 1) ? [x.b] : [];
+          });
+          for (const c of corners) {
+            const why = filletCorner(g, c, r.corner, radius, false, units);
+            if (why) return why;
+          }
+          return undefined;
+        };
+        const why = round(JSON.parse(JSON.stringify({ geometry: sk.geometry ?? [], constraints: sk.constraints ?? [] })) as Geo);
+        if (why) return `The rounded corners can't be converted: ${why}`;
+        round(sk);
         return undefined;
       }
       if (r.smooth && r.points.length >= 3) {
@@ -167,7 +180,7 @@ export function addEntityGeometry(sk: Geo, r: ResolvedEntity): string | undefine
  * stored positions: bake the solution first. Returns a message when the corner
  * can't be treated.
  */
-export function filletCorner(sk: Geo, corner: Id, size: number, text: string, chamfer = false): string | undefined {
+export function filletCorner(sk: Geo, corner: Id, size: number, text: string, chamfer = false, units: LengthUnit = "mm"): string | undefined {
   if (corner === "origin" || geomType(sk, corner) !== "point") return "Pick a corner point where two lines meet.";
   type Line = Extract<SketchGeom, { type: "line" }>;
   const touching = (sk.geometry ?? []).filter((g) => ((g.type === "line" || g.type === "arc") && (g.a === corner || g.b === corner)) || (g.type === "spline" && g.pts.includes(corner)));
@@ -187,7 +200,7 @@ export function filletCorner(sk: Geo, corner: Id, size: number, text: string, ch
   if (theta < 1e-3 || theta > Math.PI - 1e-3) return "Those lines are straight through each other, so there's no corner.";
   const t = chamfer ? size : size / Math.tan(theta / 2);
   const room = Math.min(len1, len2);
-  if (t >= room - 1e-9) return `That's too big for this corner: at most ${(chamfer ? room : room * Math.tan(theta / 2)).toFixed(2)} mm.`;
+  if (t >= room - 1e-9) return `That's too big for this corner: at most ${lengthText(chamfer ? room : room * Math.tan(theta / 2), units, 2)} ${units}.`;
 
   const before = usedPoints(sk);
   const i1 = addPoint(sk, [P[0] + u1[0] * t, P[1] + u1[1] * t]);

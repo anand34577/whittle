@@ -9,7 +9,7 @@
  *     round holes become exact circles.
  */
 import { create } from "zustand";
-import { LENGTH_TO_MM, type SketchEntity, type SketchImage, type Vec2, trim, uid } from "@whittle/core";
+import { LENGTH_TO_MM, type SketchEntity, lengthText, type SketchImage, type Vec2, trim, uid } from "@whittle/core";
 import { promptDialog } from "./dialogs";
 import { simplify } from "./simplify";
 import { contours, fitCircle, grayscale, homography, otsu, signedArea, warp } from "./imageMath";
@@ -297,7 +297,9 @@ export async function traceImage(seed?: Vec2) {
     const cap = 150;
     const mmPerPx = im.width / w;
     const toSketch = ([x, y]: Vec2): Vec2 => fromUV(im, [x / w, y / h]);
-    const n = (v: number) => trim(v, 3);
+    // Picture positions are in mm; sketch fields are in the document unit.
+    const { units } = unitInfo();
+    const n = (mm: number) => lengthText(mm, units);
     const entities: SketchEntity[] = [];
     for (const { l } of kept.slice(0, cap)) {
       const circ = fitCircle(l, 0.025);

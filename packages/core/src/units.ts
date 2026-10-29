@@ -93,3 +93,25 @@ export function trim(value: number, digits: number): string {
   const out = fixed.includes(".") ? fixed.replace(/\.?0+$/, "") : fixed;
   return out === "-0" ? "0" : out; // a tiny negative rounds to "-0"
 }
+
+/**
+ * A length given in mm, as expression text in `unit` (a bare number in an expression means the document unit).
+ * `mmDigits` is the precision in mm; coarser units get more decimals so nothing is lost (0.001 mm is 0.00001 in).
+ */
+export function lengthText(mm: number, unit: LengthUnit, mmDigits = 3): string {
+  const k = LENGTH_TO_MM[unit];
+  return trim(mm / k, mmDigits + Math.max(0, Math.ceil(Math.log10(k))));
+}
+
+/**
+ * A default length (given in mm) as a plain number in the design's unit, so a 1 mm fillet doesn't become
+ * 1 inch (audit W-10) and drag handles still work on it. Inch and foot designs get a nearby round size:
+ * a multiple of 1/16 in (1/64 in below 1/8 in).
+ */
+export function defaultLength(unit: LengthUnit, mm: number): string {
+  if (unit !== "in" && unit !== "ft") return lengthText(mm, unit);
+  const inches = mm / 25.4;
+  const step = inches < 0.125 ? 1 / 64 : 1 / 16;
+  const nice = Math.max(step, Math.round(inches / step) * step);
+  return trim(unit === "in" ? nice : nice / 12, 6);
+}

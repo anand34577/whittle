@@ -1,7 +1,7 @@
 /** Right-hand panel: the active feature's editor, the selected sketch shape, or an inspector. */
 import { useState } from "react";
 import type { Draft } from "immer";
-import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, combineBodies, type Inertia, display, formatQuantity, geomType, principalMoments, trim, documentEvaluator, maxPolylineCorner, maxRectCorner } from "@whittle/core";
+import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, combineBodies, type Inertia, display, formatQuantity, geomType, principalMoments, trim, documentEvaluator, maxPolylineCorner, maxRectCorner, relabelUnits, type WhittleDocument } from "@whittle/core";
 import { availableConstraints, canConstrain, constrainSelection, geoMutate, makeConstrainable, offsetSelection, patternSelection, mirrorSelection, setDimension } from "../state/constraintOps";
 import { commandById, isAvailable } from "../state/commands";
 import { nextSteps } from "../state/problems";
@@ -29,6 +29,7 @@ import { importImage, startImagePick, traceImage, updateImage } from "../state/r
 import { FeatureEditor } from "./FeatureEditors";
 import { fixInUnits } from "./DragHandle";
 import { Icon, type IconName } from "./icons";
+import { ask } from "../state/platform";
 
 export const FEATURE_ICONS: Record<string, IconName> = {
   sketch: "sketch",
@@ -614,6 +615,20 @@ const massText = (g: number) => (g >= 1000 ? `${trim(g / 1000, 2)} kg` : `${trim
 
 const UNIT_NAMES: Record<LengthUnit, string> = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches", ft: "feet" };
 
+/** Switch the design's unit (audit U-2): numbers keep their digits and are read in the new unit. */
+async function changeUnits(to: LengthUnit) {
+  const from = useApp.getState().doc.units;
+  if (to === from) return;
+  const ok = await ask({
+    title: `Use ${UNIT_NAMES[to]}?`,
+    message: `Numbers without a unit will mean ${UNIT_NAMES[to]} instead of ${UNIT_NAMES[from]}, so "20" becomes 20 ${to}. Sizes change by that factor; values written with a unit (like "5 mm") and imported files keep their size. Use this to fix a design that was started in the wrong unit. You can undo it.`,
+    confirmLabel: `Use ${UNIT_NAMES[to]}`,
+  });
+  if (!ok) return;
+  if (useApp.getState().session) commitSession();
+  mutate(`Units: ${UNIT_NAMES[to]}`, (d) => relabelUnits(d as WhittleDocument, to));
+}
+
 /** Densities in g/cm³ (typical values). */
 /** General engineering materials first; printing filaments have a group of their own. */
 const GROUP_ORDER = ["Metals", "Plastics", "Wood & other", "3D printing"];
@@ -725,6 +740,16 @@ function Inspector() {
         </div>
       </header>
       <div className="panel__body">
+        {!body && (
+          <div className="panel__section">
+            <Select
+              label="Units"
+              value={unit}
+              options={(Object.keys(UNIT_NAMES) as LengthUnit[]).map((u) => ({ value: u, label: UNIT_NAMES[u][0]!.toUpperCase() + UNIT_NAMES[u].slice(1) }))}
+              onChange={(to) => void changeUnits(to)}
+            />
+          </div>
+        )}
         {body && meta && (
           <div className="panel__section">
             <h3 className="eyebrow">Appearance</h3>

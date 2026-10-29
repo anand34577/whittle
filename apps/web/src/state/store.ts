@@ -222,6 +222,12 @@ function touch(d: Draft<WhittleDocument>) {
   syncBodies(d);
 }
 
+/**
+ * Name, colour, material... of bodies whose step stopped making a body (Extrude New switched to Join, a
+ * pattern merged), so switching back brings them back instead of a fresh name and colour (audit W-5).
+ */
+const parkedBodies = new Map<Id, WhittleDocument["bodies"][string]>();
+
 /** Every feature that creates a body has metadata; nothing else does. */
 function syncBodies(d: Draft<WhittleDocument>) {
   const ids = new Set<Id>();
@@ -231,10 +237,17 @@ function syncBodies(d: Draft<WhittleDocument>) {
     ids.add(f.id);
     if (!f.suppressed) built++;
     if (!d.bodies[f.id]) {
-      d.bodies[f.id] = { name: nextBodyName(d as WhittleDocument), color: nextBodyColor(d as WhittleDocument), visible: true };
+      const parked = parkedBodies.get(f.id);
+      d.bodies[f.id] = parked ? { ...parked } : { name: nextBodyName(d as WhittleDocument), color: nextBodyColor(d as WhittleDocument), visible: true };
+      parkedBodies.delete(f.id);
     }
   }
-  for (const id of Object.keys(d.bodies)) if (!ids.has(id)) delete d.bodies[id];
+  const stillThere = new Set(d.features.map((f) => f.id));
+  for (const id of Object.keys(d.bodies)) {
+    if (ids.has(id)) continue;
+    if (stillThere.has(id)) parkedBodies.set(id, JSON.parse(JSON.stringify(d.bodies[id])) as WhittleDocument["bodies"][string]);
+    delete d.bodies[id];
+  }
 }
 
 /**
@@ -370,8 +383,13 @@ export function commitSession(explicit = false) {
   const { session, doc, regen, builtDoc } = get();
   if (!session) return;
   const st = session.isNew && builtDoc === doc ? regen?.status.find((x) => x.id === session.featureId) : undefined;
-  if (st?.state === "incomplete") {
-    if (explicit) return toast("info", st.message ?? "Finish the selection first.");
+  // The rebuild may have included an edge the pointer only rests on (the hover preview), so a new fillet or
+  // chamfer with no picked edges is judged here, not by that rebuild (audit W-10).
+  const now = findFeature(doc, session.featureId);
+  const noEdges = session.isNew && (now?.type === "fillet" || now?.type === "chamfer") && now.edges.length === 0;
+  if (noEdges || st?.state === "incomplete") {
+    if (explicit && noEdges) return toast("info", "Click the edges to round first.");
+    if (explicit) return toast("info", st?.message ?? "Finish the selection first.");
     return set({ doc: session.base, session: null });
   }
   set({ session: null });
@@ -443,6 +461,8 @@ export function deleteFeature(id: Id) {
     if (i < 0) return;
     d.features.splice(i, 1);
     delete d.bodies[id];
+    // A folder doesn't keep pointing at the deleted step (audit W-5).
+    for (const folder of d.folders ?? []) folder.features = folder.features.filter((x) => x !== id);
     if (d.rollback !== null && i < d.rollback) d.rollback--;
   });
   set({ selection: [] });

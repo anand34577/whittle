@@ -9,6 +9,7 @@ import {
   type Evaluator,
   type GeomResolved,
   type Id,
+  type LengthUnit,
   type ResolvedEntity,
   type SketchEntity,
   type Vec2,
@@ -18,6 +19,7 @@ import {
   entityOutline,
   entitySnapPoints,
   geomOutline,
+  lengthText,
   makeEntity,
   polylinePath,
   resolveEntity,
@@ -190,6 +192,8 @@ export interface SketchEnv {
   gridSnap?(): boolean;
   entities(): SketchEntity[];
   evaluator(): Evaluator;
+  /** The document's length unit (mm when not given). */
+  units?(): LengthUnit;
   /** Add a shape; `select` selects it and switches back to the Select tool. `sizes` were typed (mm) and become dimensions. */
   add(e: SketchEntity, select?: boolean, sizes?: { width?: number; height?: number; diameter?: number; rx?: number; ry?: number; relations?: DrawnRelation[] }): void;
   select(id: Id | null): void;
@@ -238,7 +242,7 @@ export interface SketchEnv {
   moveGeom(ids: Id[], dx: number, dy: number): void;
 }
 
-const fmt = (n: number) => String(Math.round(n * 1000) / 1000);
+const round3 = (n: number) => String(Math.round(n * 1000) / 1000);
 
 export class SketchController {
   private tool: SketchTool = "select";
@@ -266,6 +270,16 @@ export class SketchController {
   private arcEnd: Vec2 | null = null;
 
   constructor(private env: SketchEnv) {}
+
+  /** The document's length unit: whole-shape fields are written in it (a bare number means the document unit). */
+  private units(): LengthUnit {
+    return this.env.units?.() ?? "mm";
+  }
+
+  /** A length in mm as text in the document unit. */
+  private len(mm: number): string {
+    return lengthText(mm, this.units());
+  }
 
   setTool(tool: SketchTool) {
     if (tool === this.tool) return;
@@ -576,12 +590,12 @@ export class SketchController {
     const [a, b, c] = pts as [Vec2, Vec2, Vec2 | undefined];
     switch (this.tool) {
       case "crect": {
-        const e = makeEntity("rect", a, b);
+        const e = makeEntity("rect", a, b, this.units());
         if (e.type !== "rect") return null;
-        e.x = fmt(a[0]);
-        e.y = fmt(a[1]);
-        e.w = fmt(2 * Math.abs(b[0] - a[0]));
-        e.h = fmt(2 * Math.abs(b[1] - a[1]));
+        e.x = this.len(a[0]);
+        e.y = this.len(a[1]);
+        e.w = this.len(2 * Math.abs(b[0] - a[0]));
+        e.h = this.len(2 * Math.abs(b[1] - a[1]));
         e.anchor = "center";
         return e;
       }
@@ -591,14 +605,14 @@ export class SketchController {
         const n: Vec2 = [-(b[1] - a[1]) / (w || 1), (b[0] - a[0]) / (w || 1)];
         const d = (c[0] - a[0]) * n[0] + (c[1] - a[1]) * n[1];
         if (w < 1e-6 || Math.abs(d) < 1e-6) return null;
-        const e = makeEntity("rect", a, b);
+        const e = makeEntity("rect", a, b, this.units());
         if (e.type !== "rect") return null;
-        e.x = fmt((a[0] + b[0]) / 2 + (n[0] * d) / 2);
-        e.y = fmt((a[1] + b[1]) / 2 + (n[1] * d) / 2);
-        e.w = fmt(w);
-        e.h = fmt(Math.abs(d));
+        e.x = this.len((a[0] + b[0]) / 2 + (n[0] * d) / 2);
+        e.y = this.len((a[1] + b[1]) / 2 + (n[1] * d) / 2);
+        e.w = this.len(w);
+        e.h = this.len(Math.abs(d));
         e.anchor = "center";
-        e.angle = fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI);
+        e.angle = round3((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI);
         return e;
       }
       case "slotC": {
@@ -608,10 +622,10 @@ export class SketchController {
         if (r < 1e-6) return null;
         const half = Math.abs((c[0] - a[0]) * -(b[1] - a[1]) / r + (c[1] - a[1]) * (b[0] - a[0]) / r);
         if (half < 1e-6) return null;
-        const e = makeEntity("slot", [2 * a[0] - b[0], 2 * a[1] - b[1]], b);
+        const e = makeEntity("slot", [2 * a[0] - b[0], 2 * a[1] - b[1]], b, this.units());
         if (e.type !== "slot") return null;
-        e.length = fmt(2 * r);
-        e.width = fmt(2 * half);
+        e.length = this.len(2 * r);
+        e.width = this.len(2 * half);
         return e;
       }
       case "slotW":
@@ -624,17 +638,17 @@ export class SketchController {
         const half = Math.abs((c[0] - a[0]) * n[0] + (c[1] - a[1]) * n[1]);
         const length = this.tool === "slotW" ? axis : axis - 2 * half;
         if (half < 1e-6 || length < 1e-6) return null;
-        const e = makeEntity("slot", a, b);
+        const e = makeEntity("slot", a, b, this.units());
         if (e.type !== "slot") return null;
-        e.length = fmt(length);
-        e.width = fmt(2 * half);
+        e.length = this.len(length);
+        e.width = this.len(2 * half);
         return e;
       }
       case "circle2": {
         const r = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2;
         if (r < 1e-6) return null;
         const m: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-        return makeEntity("circle", m, [m[0] + r, m[1]]);
+        return makeEntity("circle", m, [m[0] + r, m[1]], this.units());
       }
       case "circle3": {
         if (!c) return null;
@@ -643,15 +657,15 @@ export class SketchController {
         const sq = (p: Vec2) => p[0] * p[0] + p[1] * p[1];
         const ux = (sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d;
         const uy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
-        return makeEntity("circle", [ux, uy], a);
+        return makeEntity("circle", [ux, uy], a, this.units());
       }
       case "polygonC": {
         // Circumscribed: the second point is the middle of an edge, so the radius is the apothem.
-        const e = makeEntity("polygon", a, b);
+        const e = makeEntity("polygon", a, b, this.units());
         if (e.type !== "polygon") return null;
         const half = Math.PI / 6;
-        e.r = fmt(Math.hypot(b[0] - a[0], b[1] - a[1]) / Math.cos(half));
-        e.angle = fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI - 30);
+        e.r = this.len(Math.hypot(b[0] - a[0], b[1] - a[1]) / Math.cos(half));
+        e.angle = round3((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI - 30);
         return e;
       }
       case "polygonE": {
@@ -661,13 +675,13 @@ export class SketchController {
         const R = len / (2 * Math.sin(Math.PI / 6));
         const apo = R * Math.cos(Math.PI / 6);
         const c: Vec2 = [(a[0] + b[0]) / 2 - ((b[1] - a[1]) / len) * apo, (a[1] + b[1]) / 2 + ((b[0] - a[0]) / len) * apo];
-        const e = makeEntity("polygon", c, a);
+        const e = makeEntity("polygon", c, a, this.units());
         if (e.type !== "polygon") return null;
-        e.r = fmt(R);
+        e.r = this.len(R);
         return e;
       }
       default:
-        return makeEntity(this.tool as EntityType, a, b);
+        return makeEntity(this.tool as EntityType, a, b, this.units());
     }
   }
 
@@ -793,9 +807,9 @@ export class SketchController {
   private commitPolyline(leaveOpen = false) {
     const open = leaveOpen || this.tool === "path" || this.tool === "cspline";
     if (this.points.length >= (this.tool === "cspline" ? 3 : open ? 2 : 3)) {
-      const e = makeEntity("polyline", this.points[0]!, this.points[1]!);
+      const e = makeEntity("polyline", this.points[0]!, this.points[1]!, this.units());
       if (e.type === "polyline") {
-        e.points = this.points.map(([x, y], i) => (this.arcFlags[i] ? [fmt(x), fmt(y), "arc"] : [fmt(x), fmt(y)]));
+        e.points = this.points.map(([x, y], i) => (this.arcFlags[i] ? [this.len(x), this.len(y), "arc"] : [this.len(x), this.len(y)]));
         if (open) e.open = true;
         if (this.tool === "cspline") e.ctrl = true;
       }
@@ -934,8 +948,8 @@ export class SketchController {
       // Three points fix the arc, the fourth the width.
       const slot = this.arcSlotFor(this.points.slice(0, 3), this.points[3]!);
       if (slot) {
-        const e = makeEntity("polyline", slot.pts[0]!, slot.pts[1]!);
-        if (e.type === "polyline") e.points = slot.pts.map(([x, y], i) => (i % 2 === 1 ? [fmt(x), fmt(y), "arc"] : [fmt(x), fmt(y)]));
+        const e = makeEntity("polyline", slot.pts[0]!, slot.pts[1]!, this.units());
+        if (e.type === "polyline") e.points = slot.pts.map(([x, y], i) => (i % 2 === 1 ? [this.len(x), this.len(y), "arc"] : [this.len(x), this.len(y)]));
         this.env.add(e);
       }
       this.reset();
@@ -950,9 +964,9 @@ export class SketchController {
       const [c0, m0, q0, s0, e0] = this.points as [Vec2, Vec2, Vec2, Vec2, Vec2];
       const pts = ellipseArc(c0, m0, q0, s0, e0, 24);
       if (pts) {
-        const e = makeEntity("polyline", pts[0]!, pts[1]!);
+        const e = makeEntity("polyline", pts[0]!, pts[1]!, this.units());
         if (e.type === "polyline") {
-          e.points = pts.map(([x, y]) => [fmt(x), fmt(y)]);
+          e.points = pts.map(([x, y]) => [this.len(x), this.len(y)]);
           e.open = true;
           e.smooth = true;
         }
@@ -1108,7 +1122,7 @@ export class SketchController {
       if (this.tool === "text") {
         // One click places the text; the panel then asks what it says.
         const size = Math.max(1, Math.round(this.env.gridSpacing()));
-        const t = makeEntity("text", this.cursor, [this.cursor[0], this.cursor[1] + size]);
+        const t = makeEntity("text", this.cursor, [this.cursor[0], this.cursor[1] + size], this.units());
         this.env.add(t, true);
         this.publish();
         return;

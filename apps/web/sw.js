@@ -37,6 +37,8 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(fetch(req).catch(async () => (await caches.match("./")) ?? (await caches.match("./index.html")) ?? Response.error()));
     return;
   }
-  // Built files have content hashes in their names, so a kept copy is always right.
-  event.respondWith(caches.match(req, { ignoreSearch: true }).then((hit) => hit ?? fetch(req)));
+  // Built files have content hashes in their names, so a kept copy is always right whatever the query.
+  // Other files (the manifest, icons) are matched with their query, so a versioned query does fetch anew (audit X-6).
+  const hashed = new URL(req.url).pathname.includes("/assets/");
+  event.respondWith(caches.match(req, { ignoreSearch: hashed }).then((hit) => hit ?? fetch(req)));
 });

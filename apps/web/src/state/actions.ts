@@ -16,6 +16,7 @@ import {
   type Vec2,
   type Vec3,
   activeEnd,
+  defaultLength,
   frameAxes,
   isSketchConsumed,
   planeOrigin,
@@ -182,7 +183,7 @@ function sketchForProfile(): Id | null {
   const picked = selection.find((p) => p.kind === "sketch" || p.kind === "region");
   if (picked && (picked.kind === "sketch" || picked.kind === "region")) return picked.sketchId;
   const end = activeEnd(doc);
-  const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length + (f.geometry?.length ?? 0) > 0);
+  const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch" && !f.suppressed && f.entities.length + (f.geometry?.length ?? 0) > 0);
   const unused = sketches.filter((s) => !isSketchConsumed(doc, s.id));
   return (unused.pop() ?? sketches.pop())?.id ?? null;
 }
@@ -302,7 +303,7 @@ export function startLoft() {
   let ids = selection.filter((p) => p.kind === "sketch").map((p) => (p.kind === "sketch" ? p.sketchId : ""));
   if (ids.length < 2) {
     const end = activeEnd(doc);
-    const unused = doc.features.slice(0, end).filter((f) => f.type === "sketch" && f.entities.length + (f.geometry?.length ?? 0) > 0 && !isSketchConsumed(doc, f.id));
+    const unused = doc.features.slice(0, end).filter((f) => f.type === "sketch" && !f.suppressed && f.entities.length + (f.geometry?.length ?? 0) > 0 && !isSketchConsumed(doc, f.id));
     ids = unused.slice(-2).map((f) => f.id);
   }
   beginNewFeature(makeLoft(get().doc, ids), "New Loft");
@@ -476,11 +477,12 @@ export function startConstructionPlane() {
   const face = selection.map((p) => faceRefFromPick(p)).find((x): x is FaceRef => !!x && x.surface === "PLANE");
   const cp = selection.find((p) => p.kind === "cplane");
   const op = selection.find((p) => p.kind === "plane");
+  const off = defaultLength(doc.units, 10);
   const base: PlaneRef = face
-    ? { kind: "face", face, offset: "10" }
+    ? { kind: "face", face, offset: off }
     : cp?.kind === "cplane"
-      ? { kind: "construction", plane: cp.id, offset: "10" }
-      : { kind: "origin", plane: op?.kind === "plane" ? op.plane : "XY", offset: "10" };
+      ? { kind: "construction", plane: cp.id, offset: off }
+      : { kind: "origin", plane: op?.kind === "plane" ? op.plane : "XY", offset: off };
   const f = makeConstructionPlane(doc, base);
   beginNewFeature(f, `New ${f.name}`);
 }
@@ -540,9 +542,10 @@ export function startWeb() {
   if (!sketch) return toast("info", "A web needs a line: sketch one with the Path tool, then click Web.");
   const f = makeExtrude(get().doc, sketch, (get().regen?.bodies.length ?? 0) > 0 ? "join" : "new");
   if (f.type === "extrude") {
-    f.thin = "2";
+    // Defaults in the design's unit (audit W-10).
+    f.thin = defaultLength(get().doc.units, 2);
     f.thinSide = "center";
-    f.distance = "10";
+    f.distance = defaultLength(get().doc.units, 10);
   }
   f.name = nextName(get().doc, "Web");
   beginNewFeature(f, `New ${f.name}`);
@@ -555,7 +558,7 @@ export function startEmboss(engrave: boolean) {
   const f = makeExtrude(get().doc, sketch, engrave ? "cut" : "join");
   const sk = findFeature(get().doc, sketch, "sketch");
   if (f.type === "extrude") {
-    f.distance = engrave ? "0.6" : "0.8";
+    f.distance = defaultLength(get().doc.units, engrave ? 0.6 : 0.8);
     if (sk?.plane.kind === "face") f.target = sk.plane.face.bodyId;
     f.flip = false;
     if (engrave) f.flip = true;
@@ -667,8 +670,8 @@ export function startEdgeFeatureAll(kind: "fillet" | "chamfer") {
   if (!body) return toast("info", "Create a body first.");
   const f = kind === "fillet" ? makeFillet(get().doc) : makeChamfer(get().doc);
   if (f.type === "fillet" || f.type === "chamfer") f.edges = body.edges.map((e) => ({ bodyId: body.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length }));
-  if (f.type === "fillet") f.radius = "1";
-  if (f.type === "chamfer") f.distance = "0.5";
+  if (f.type === "fillet") f.radius = defaultLength(get().doc.units, 1);
+  if (f.type === "chamfer") f.distance = defaultLength(get().doc.units, 0.5);
   beginNewFeature(f, `New ${f.name}`);
 }
 
@@ -726,6 +729,14 @@ export function handlePick(p: Pick | null, additive: boolean) {
       x.points.push(pt);
     });
     return;
+  }
+  // A step can only use sketches before it in the timeline, and not suppressed ones (audit W-10).
+  if (f && f.type !== "sketch" && (p?.kind === "sketch" || p?.kind === "region")) {
+    const { doc } = get();
+    const at = doc.features.findIndex((x) => x.id === f.id);
+    const sk = doc.features.findIndex((x) => x.id === p.sketchId);
+    if (at >= 0 && sk > at) return toast("info", "That sketch comes after this step in the timeline, so this step can't use it. Pick an earlier sketch.");
+    if (doc.features[sk]?.suppressed) return toast("info", "That sketch is suppressed. Unsuppress it first.");
   }
   if (f && f.type === "sweep" && p?.kind === "sketch") {
     mutate("Pick sketch", (d) => {
@@ -883,7 +894,7 @@ export function handlePick(p: Pick | null, additive: boolean) {
         x.plane = undefined;
         return;
       }
-      const i = x.faces.findIndex((e) => d3(e.center, ref.center) < 1e-6);
+      const i = x.faces.findIndex((e) => e.bodyId === ref.bodyId && d3(e.center, ref.center) < 1e-6);
       if (i >= 0) x.faces.splice(i, 1);
       else x.faces.push(ref);
     });
@@ -930,7 +941,7 @@ export function handlePick(p: Pick | null, additive: boolean) {
     mutate("Pick face", (d) => {
       const x = d.features.find((y) => y.id === f.id);
       if (!x || x.type !== "offsetFace") return;
-      const i = x.faces.findIndex((e) => d3(e.center, ref.center) < 1e-6);
+      const i = x.faces.findIndex((e) => e.bodyId === ref.bodyId && d3(e.center, ref.center) < 1e-6);
       if (i >= 0) x.faces.splice(i, 1);
       else x.faces.push(ref);
     });
@@ -943,7 +954,7 @@ export function handlePick(p: Pick | null, additive: boolean) {
     mutate("Pick face", (d) => {
       const x = d.features.find((y) => y.id === f.id);
       if (!x || x.type !== "draft") return;
-      const i = x.faces.findIndex((e) => d3(e.center, ref.center) < 1e-6);
+      const i = x.faces.findIndex((e) => e.bodyId === ref.bodyId && d3(e.center, ref.center) < 1e-6);
       if (i >= 0) x.faces.splice(i, 1);
       else x.faces.push(ref);
     });
@@ -1024,20 +1035,6 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
-  if (f && (f.type === "fillet" || f.type === "chamfer") && p?.kind === "face") {
-    // A face stands for all its boundary edges (clicking it again takes them back out).
-    const body = pickableBodies().find((b) => b.id === p.bodyId);
-    const refs = (body?.faceEdges[p.index] ?? []).map((i) => edgeRefFromPick({ kind: "edge", bodyId: p.bodyId, index: i }, [body!])).filter((x): x is EdgeRef => !!x);
-    if (!refs.length) return;
-    mutate("Pick face edges", (d) => {
-      const x = d.features.find((y) => y.id === f.id);
-      if (!x || (x.type !== "fillet" && x.type !== "chamfer")) return;
-      const has = (r: EdgeRef) => x.edges.findIndex((e) => d3(e.mid, r.mid) < 1e-6);
-      if (refs.every((r) => has(r) >= 0)) x.edges = x.edges.filter((e) => !refs.some((r) => d3(e.mid, r.mid) < 1e-6));
-      else for (const r of refs) if (has(r) < 0) x.edges.push(r);
-    });
-    return;
-  }
   if (f && (f.type === "fillet" || f.type === "chamfer") && p?.kind === "edge") {
     const ref = edgeRefFromPick(p);
     if (!ref) return;
@@ -1060,10 +1057,16 @@ export function handlePick(p: Pick | null, additive: boolean) {
   if (f && f.type === "shell" && p?.kind === "face") {
     const ref = faceRefFromPick(p);
     if (!ref) return;
+    // A shell hollows one body: a face of another body can't be opened by it (audit W-6).
+    const shellBody = f.bodyId ?? f.faces[0]?.bodyId;
+    if (shellBody && ref.bodyId !== shellBody) {
+      toast("info", "That face is on another body. A shell hollows one body: pick faces of the body being shelled, or start a second shell.");
+      return;
+    }
     mutate("Pick face", (d) => {
       const x = d.features.find((y) => y.id === f.id);
       if (!x || x.type !== "shell") return;
-      const i = x.faces.findIndex((e) => d3(e.center, ref.center) < 1e-6);
+      const i = x.faces.findIndex((e) => e.bodyId === ref.bodyId && d3(e.center, ref.center) < 1e-6);
       if (i >= 0) x.faces.splice(i, 1);
       else x.faces.push(ref);
       x.bodyId ??= ref.bodyId;

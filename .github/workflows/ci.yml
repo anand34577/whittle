@@ -17,8 +17,8 @@ jobs:
     name: Web app (typecheck, unit + geometry tests, build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -29,7 +29,7 @@ jobs:
         continue-on-error: true
       - run: npm test
       - run: npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: web-dist
           path: apps/web/dist
@@ -50,14 +50,20 @@ jobs:
       run:
         working-directory: apps/server
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: apps/server
-      - run: cargo clippy --locked --all-targets
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - uses: taiki-e/install-action@01d7d3e8f09a8177bf5aa678522c5bc96d3fcd57 # cargo-audit
+        with:
+          tool: cargo-audit
+      - name: Dependency advisories (accepted ones are listed in .cargo/audit.toml)
+        run: cargo audit
       - name: Tests on SQLite
         run: cargo test --locked
       - name: Tests on PostgreSQL
@@ -73,17 +79,19 @@ jobs:
     env:
       BROWSER_CHANNEL: chrome
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: apps/server
       - run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: web-dist
           path: apps/web/dist
@@ -102,13 +110,22 @@ jobs:
           node tests/e2e/audit.mjs http://localhost:4173/ test-results/audit
           node tests/e2e/direct.mjs http://localhost:4173/ test-results/direct
           node tests/e2e/sketchchecks.mjs http://localhost:4173/ test-results/sketchchecks
+          node tests/e2e/guidance.mjs http://localhost:4173/ test-results/guidance
+          node tests/e2e/curves.mjs http://localhost:4173/ test-results/curves
+          node tests/e2e/previews.mjs http://localhost:4173/ test-results/previews
+          node tests/e2e/palette.mjs http://localhost:4173/ test-results/palette
+          node tests/e2e/appearance.mjs http://localhost:4173/ test-results/appearance
+          node tests/e2e/drawing.mjs http://localhost:4173/ test-results/drawing
+          node tests/e2e/responsive.mjs http://localhost:4173/ test-results/responsive
+          node tests/e2e/solids.mjs http://localhost:4173/ test-results/solids
+          node tests/e2e/units.mjs http://localhost:4173/ test-results/units
       - name: Self-hosted server (accounts, storage, versions)
         run: |
           cargo build --locked --manifest-path apps/server/Cargo.toml
-          WHITTLE_DATA=$(mktemp -d) WHITTLE_WEB=apps/web/dist WHITTLE_BIND=127.0.0.1:8099 WHITTLE_PUBLIC_URL=http://127.0.0.1:8099 apps/server/target/debug/whittle-server &
+          WHITTLE_DATA=$(mktemp -d) WHITTLE_WEB=apps/web/dist WHITTLE_BIND=127.0.0.1:8099 WHITTLE_PUBLIC_URL=http://127.0.0.1:8099 WHITTLE_SETUP_TOKEN=off apps/server/target/debug/whittle-server &
           npx --yes wait-on@8 -t 60000 http://127.0.0.1:8099/api/health
           node tests/e2e/server.mjs http://127.0.0.1:8099/ test-results/server
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: e2e-screenshots
@@ -122,18 +139,24 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: apps/desktop/src-tauri
       - if: startsWith(matrix.os, 'ubuntu')
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: npm ci
       - run: npm run build
+      - if: startsWith(matrix.os, 'windows')
+        run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: apps/desktop/src-tauri
       - run: cargo test --locked --lib
         working-directory: apps/desktop/src-tauri

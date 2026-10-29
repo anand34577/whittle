@@ -21,7 +21,7 @@ import type {
   WhittleDocument,
 } from "./model";
 import { SCHEMA_VERSION } from "./model";
-import type { LengthUnit } from "./units";
+import { type LengthUnit, defaultLength, lengthText } from "./units";
 
 /** Short, sortable, collision-resistant id (time + randomness). */
 export function uid(prefix = ""): Id {
@@ -48,6 +48,9 @@ export function newDocument(name = "Untitled", units: LengthUnit = "mm"): Whittl
     modifiedAt: now,
   };
 }
+
+/** A default length for a new step, given in mm: in the design's unit, or with "mm" written out in inch and foot designs (audit W-10). */
+const L = (doc: WhittleDocument, mm: number): string => defaultLength(doc.units, mm);
 
 export const FEATURE_LABELS: Record<FeatureType, string> = {
   sketch: "Sketch",
@@ -116,7 +119,7 @@ export function makeExtrude(doc: WhittleDocument, sketch: Id, op: BodyOp = "new"
     type: "extrude",
     name: nextName(doc, "Extrude"),
     sketch,
-    distance: "10",
+    distance: L(doc, 10),
     extent: "one",
     flip: false,
     op,
@@ -128,15 +131,15 @@ export function makeRevolve(doc: WhittleDocument, sketch: Id, op: BodyOp = "new"
 }
 
 export function makeFillet(doc: WhittleDocument): Feature {
-  return { id: uid("fi"), type: "fillet", name: nextName(doc, "Fillet"), edges: [], radius: "2" };
+  return { id: uid("fi"), type: "fillet", name: nextName(doc, "Fillet"), edges: [], radius: L(doc, 2) };
 }
 
 export function makeChamfer(doc: WhittleDocument): Feature {
-  return { id: uid("ch"), type: "chamfer", name: nextName(doc, "Chamfer"), edges: [], distance: "1" };
+  return { id: uid("ch"), type: "chamfer", name: nextName(doc, "Chamfer"), edges: [], distance: L(doc, 1) };
 }
 
 export function makeShell(doc: WhittleDocument): Feature {
-  return { id: uid("sh"), type: "shell", name: nextName(doc, "Shell"), faces: [], thickness: "2" };
+  return { id: uid("sh"), type: "shell", name: nextName(doc, "Shell"), faces: [], thickness: L(doc, 2) };
 }
 
 export const PRIMITIVE_LABELS: Record<PrimitiveShape, string> = {
@@ -154,11 +157,11 @@ export function makePrimitive(doc: WhittleDocument, shape: PrimitiveShape, op: B
     type: "primitive",
     name: nextName(doc, PRIMITIVE_LABELS[shape]),
     shape,
-    width: "40",
-    depth: "30",
-    height: shape === "cone" ? "30" : "20",
-    radius: shape === "torus" ? "20" : "15",
-    radius2: shape === "cone" ? "0" : shape === "torus" ? "5" : shape === "tube" ? "11" : undefined,
+    width: L(doc, 40),
+    depth: L(doc, 30),
+    height: shape === "cone" ? L(doc, 30) : L(doc, 20),
+    radius: shape === "torus" ? L(doc, 20) : L(doc, 15),
+    radius2: shape === "cone" ? "0" : shape === "torus" ? L(doc, 5) : shape === "tube" ? L(doc, 11) : undefined,
     position: ["0", "0", "0"],
     op,
   };
@@ -172,11 +175,11 @@ export function makeHole(doc: WhittleDocument): Feature {
     face: null,
     points: [],
     style: "simple",
-    diameter: "5",
-    depth: "10",
+    diameter: L(doc, 5),
+    depth: L(doc, 10),
     through: true,
-    headDiameter: "9",
-    headDepth: "3",
+    headDiameter: L(doc, 9),
+    headDepth: L(doc, 3),
     tipAngle: "118", // a blind hole ends in a drill point
   };
 }
@@ -203,7 +206,7 @@ export function makeSweep(doc: WhittleDocument, profile: Id, path: Id): Feature 
 
 /** A tube along a path sketch: round or square, solid or hollow (wall 0 = solid). */
 export function makePipe(doc: WhittleDocument, path: Id): Feature {
-  return { id: uid("pi"), type: "sweep", name: nextName(doc, "Pipe"), profile: "", path, orientation: "fixed", pipe: { shape: "circle", size: "10", wall: "2" }, op: "new" };
+  return { id: uid("pi"), type: "sweep", name: nextName(doc, "Pipe"), profile: "", path, orientation: "fixed", pipe: { shape: "circle", size: L(doc, 10), wall: L(doc, 2) }, op: "new" };
 }
 
 /** A coil or thread. `kind` picks sensible starting sizes. */
@@ -213,10 +216,10 @@ export function makeCoil(doc: WhittleDocument, kind: "spring" | "thread" = "spri
     type: "coil",
     name: nextName(doc, kind === "thread" ? "Thread" : "Spring"),
     section: kind === "thread" ? "triangle" : "circle",
-    radius: kind === "thread" ? "4" : "10",
-    pitch: kind === "thread" ? "1.25" : "6",
-    height: kind === "thread" ? "20" : "40",
-    size: kind === "thread" ? "0.75" : "2",
+    radius: kind === "thread" ? L(doc, 4) : L(doc, 10),
+    pitch: kind === "thread" ? L(doc, 1.25) : L(doc, 6),
+    height: kind === "thread" ? L(doc, 20) : L(doc, 40),
+    size: kind === "thread" ? L(doc, 0.75) : L(doc, 2),
     lefthand: false,
     position: ["0", "0", "0"],
     op: "new",
@@ -228,7 +231,7 @@ export function makeSplit(doc: WhittleDocument, bodyId?: Id): Feature {
 }
 
 export function makeOffset(doc: WhittleDocument, bodyId?: Id): Feature {
-  return { id: uid("of"), type: "offset", name: nextName(doc, "Offset"), bodyId, distance: "0.5", copy: false };
+  return { id: uid("of"), type: "offset", name: nextName(doc, "Offset"), bodyId, distance: L(doc, 0.5), copy: false };
 }
 
 export function makeBoundingSolid(doc: WhittleDocument, bodies: Id[] = []): Feature {
@@ -244,7 +247,7 @@ export function makeDraft(doc: WhittleDocument): Feature {
 }
 
 export function makeOffsetFace(doc: WhittleDocument): Feature {
-  return { id: uid("of"), type: "offsetFace", name: nextName(doc, "Press/Pull"), faces: [], distance: "2" };
+  return { id: uid("of"), type: "offsetFace", name: nextName(doc, "Press/Pull"), faces: [], distance: L(doc, 2) };
 }
 
 export function makeConstructionPlane(doc: WhittleDocument, plane: PlaneRef): Feature {
@@ -281,11 +284,11 @@ export function makeConstruct(doc: WhittleDocument, mode: ConstructMode): Featur
 }
 
 export function makeRib(doc: WhittleDocument, sketch: Id): Feature {
-  return { id: uid("rb"), type: "rib", name: nextName(doc, "Rib"), sketch, thickness: "2", depth: "10", flip: false, op: "join" };
+  return { id: uid("rb"), type: "rib", name: nextName(doc, "Rib"), sketch, thickness: L(doc, 2), depth: L(doc, 10), flip: false, op: "join" };
 }
 
 export function makeThread(doc: WhittleDocument): Feature {
-  return { id: uid("th"), type: "thread", name: nextName(doc, "Thread"), face: null, pitch: "1.5", length: "", depth: "", lefthand: false };
+  return { id: uid("th"), type: "thread", name: nextName(doc, "Thread"), face: null, pitch: L(doc, 1.5), length: "", depth: "", lefthand: false };
 }
 
 export function makeReplaceFace(doc: WhittleDocument): Feature {
@@ -338,7 +341,7 @@ export function makeSurface(doc: WhittleDocument, op: SurfaceOp): Feature {
     bodies: [],
     faces: [],
     edges: [],
-    distance: op === "thicken" ? "2" : op === "extend" ? "5" : op === "offset" ? "2" : "10",
+    distance: op === "thicken" ? L(doc, 2) : op === "extend" ? L(doc, 5) : op === "offset" ? L(doc, 2) : L(doc, 10),
     direction: "normal",
     axis: "z",
     plane: "XY",
@@ -360,16 +363,22 @@ export function makePattern(doc: WhittleDocument, bodyId?: Id): Feature {
     pattern: "linear",
     axis: "x",
     count: "3",
-    spacing: "20",
+    spacing: L(doc, 20),
     angle: "360",
     merge: true,
   };
 }
 
-const fmt = (n: number) => String(Math.round(n * 1000) / 1000);
+const round3 = (n: number) => String(Math.round(n * 1000) / 1000);
 
-export function makeEntity(type: EntityType, a: [number, number], b: [number, number]): SketchEntity {
+/**
+ * A whole shape spanning two points given in mm. Its fields are written in `units` (the document's length unit),
+ * because a bare number in an expression means the document unit. Angles stay in degrees.
+ */
+export function makeEntity(type: EntityType, a: [number, number], b: [number, number], units: LengthUnit = "mm"): SketchEntity {
   const id = uid("e");
+  const ang = round3;
+  const fmt = (mm: number) => lengthText(mm, units);
   switch (type) {
     case "rect": {
       const e: RectEntity = {
@@ -395,7 +404,7 @@ export function makeEntity(type: EntityType, a: [number, number], b: [number, nu
         cy: fmt(a[1]),
         r: fmt(Math.hypot(b[0] - a[0], b[1] - a[1])),
         sides: "6",
-        angle: fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI),
+        angle: ang((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI),
       };
       return e;
     }
@@ -408,7 +417,7 @@ export function makeEntity(type: EntityType, a: [number, number], b: [number, nu
         cy: fmt((a[1] + b[1]) / 2),
         length: fmt(len),
         width: fmt(Math.max(len / 4, 1)),
-        angle: fmt((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI),
+        angle: ang((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI),
       };
       return e;
     }
@@ -441,8 +450,8 @@ export function makeEntity(type: EntityType, a: [number, number], b: [number, nu
         cx: fmt(a[0]),
         cy: fmt(a[1]),
         teeth: String(Math.max(8, Math.min(120, Math.round(r)))),
-        module: "2",
-        bore: "5",
+        module: fmt(2),
+        bore: fmt(5),
       };
       return e;
     }

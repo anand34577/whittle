@@ -162,7 +162,7 @@ export function Timeline() {
                 return (
                   <button
                     className={`folder ${fo.open ? "is-open" : ""}`}
-                    title={`${fo.name}: ${fo.features.length} step${fo.features.length > 1 ? "s" : ""} · click to ${fo.open ? "fold" : "open"} · right-click to rename or ungroup`}
+                    title={`${fo.name}: ${fo.features.filter((id) => doc.features.some((x) => x.id === id)).length} step${fo.features.filter((id) => doc.features.some((x) => x.id === id)).length > 1 ? "s" : ""} · click to ${fo.open ? "fold" : "open"} · right-click to rename or ungroup`}
                     onClick={() => setFolder(fo.id, fo.open ? "Fold folder" : "Open folder", (x) => void (x.open = !x.open))}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -174,7 +174,7 @@ export function Timeline() {
                   </button>
                 );
               })()}
-              {i === markerAt && <Marker onDown={(e) => startDrag(e)} />}
+              {i === markerAt && <Marker onDown={(e) => startDrag(e)} at={markerAt} max={doc.features.length} onStep={(to) => setRollback(to >= doc.features.length ? null : to)} />}
               <button
                 draggable
                 onDragStart={(e) => {
@@ -228,7 +228,7 @@ export function Timeline() {
             </div>
           );
         })}
-        {markerAt >= doc.features.length && doc.features.length > 0 && <Marker onDown={(e) => startDrag(e)} />}
+        {markerAt >= doc.features.length && doc.features.length > 0 && <Marker onDown={(e) => startDrag(e)} at={markerAt} max={doc.features.length} onStep={(to) => setRollback(to >= doc.features.length ? null : to)} />}
       </div>
 
       {folderMenu && (
@@ -339,6 +339,27 @@ export function Timeline() {
   }
 }
 
-function Marker({ onDown }: { onDown: (e: React.PointerEvent) => void }) {
-  return <span className="marker" onPointerDown={onDown} title="Drag to roll the design back in time" role="slider" aria-label="Timeline marker" />;
+/** A real slider (audit UI-6): focusable, with its value, and the arrow keys step it like the buttons do. */
+function Marker({ onDown, at, max, onStep }: { onDown: (e: React.PointerEvent) => void; at: number; max: number; onStep: (to: number) => void }) {
+  return (
+    <span
+      className="marker"
+      onPointerDown={onDown}
+      title="Drag to roll the design back in time"
+      role="slider"
+      tabIndex={0}
+      aria-label="Timeline marker"
+      aria-valuemin={0}
+      aria-valuemax={max}
+      aria-valuenow={at}
+      aria-valuetext={`${at} of ${max} steps`}
+      onKeyDown={(e) => {
+        const to = e.key === "ArrowLeft" ? at - 1 : e.key === "ArrowRight" ? at + 1 : e.key === "Home" ? 0 : e.key === "End" ? max : null;
+        if (to === null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onStep(Math.max(0, Math.min(max, to)));
+      }}
+    />
+  );
 }

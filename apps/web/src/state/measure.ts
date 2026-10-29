@@ -47,7 +47,8 @@ function pointOf(p: Pick, bodies: BodyResult[]): Vec3 | null {
 
 function describe(p: Pick, bodies: BodyResult[], unit: LengthUnit): MeasureLine[] {
   const L = (v: number) => formatQuantity(v, "length", unit);
-  const area = (v: number) => (unit === "mm" ? `${trim(v, display.digits)} mm²` : `${trim(v / LENGTH_TO_MM[unit] ** 2, display.digits + 1)} ${unit}²`);
+  // The same unit as the hover chip and the properties panel (audit W-12).
+  const area = (v: number) => areaText(v, unit, display.digits + 1);
   const b = p.kind === "face" || p.kind === "edge" || p.kind === "body" ? bodies.find((x) => x.id === p.bodyId) : undefined;
   if (!b) return [];
   if (p.kind === "edge") {

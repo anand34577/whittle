@@ -13,7 +13,7 @@ export type Expr = string;
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** A named set of values for some parameters, by parameter name. */
 export interface Variant {

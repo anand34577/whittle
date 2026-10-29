@@ -250,7 +250,7 @@ export const PARTS: PartDef[] = [
   {
     id: "knob",
     title: "Round knob",
-    blurb: "Grippy knob with a D-shaft hole",
+    blurb: "Grippy knob with a shaft hole",
     category: "Everyday",
     build: (b) => {
       const dia = b.p("diameter", "30 mm");

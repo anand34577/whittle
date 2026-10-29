@@ -16,6 +16,7 @@ import {
   CONSTRAINT_LABELS,
   DIMENSIONS,
   LENGTH_TO_MM,
+  lengthText,
   addArc,
   endTangent,
   resolveGeometry,
@@ -277,7 +278,7 @@ export function addTangentCircleGeometry(refs: Id[], guess: Vec2) {
       if ("error" in res) failed = res.error;
     }
     // Two tangents leave one freedom: keep the radius it was drawn with (change it with a dimension).
-    if (refs.length === 2) addConstraint(sk, "radius", [id], String(Math.round(r * 1000) / 1000));
+    if (refs.length === 2) addConstraint(sk, "radius", [id], lengthText(r, useApp.getState().doc.units));
   });
   if (failed) toast("info", failed);
 }
@@ -370,6 +371,8 @@ function checkValue(type: ConstraintType, text: string): string | null {
   if (!r.ok) return r.error;
   const round = type === "radius" || type === "diameter";
   if (type !== "angle" && r.value < (round ? 1e-9 : 0)) return round ? `A ${type} must be greater than zero` : "A distance can't be negative";
+  // The solver can't hold two things at no distance apart (audit W-9).
+  if (type === "distance" && Math.abs(r.value) < 1e-9) return "A distance can't be zero. Use Coincident to put them together.";
   return null;
 }
 
@@ -641,7 +644,8 @@ export function movePoints(ids: Id[], dx: number, dy: number) {
 
 /** Shapes that can become constraint geometry (not text or gears, nor outlines that mix splines or rounding with arcs). */
 export function canConstrain(e: SketchEntity): boolean {
-  if (e.type === "polyline") return !e.points.some((p) => p[2] === "spline") && !(e.smooth && e.points.some((p) => p[2])) && !(e.corner && (e.smooth || e.points.some((p) => p[2])));
+  // A control-point spline only passes near its points: turning them into lines would lose the curve (audit C-1).
+  if (e.type === "polyline") return !e.ctrl && !e.points.some((p) => p[2] === "spline") && !(e.smooth && e.points.some((p) => p[2])) && !(e.corner && (e.smooth || e.points.some((p) => p[2])));
   return e.type === "rect" || e.type === "circle" || e.type === "polygon" || e.type === "slot" || e.type === "ellipse";
 }
 
@@ -663,10 +667,10 @@ export function addShapeAsGeometry(e: SketchEntity, sizes: TypedSizes = {}): boo
   try {
     const r = resolveEntity(e, documentEvaluator(useApp.getState().doc));
     const units = useApp.getState().doc.units;
-    const len = (mm: number) => trim(mm / LENGTH_TO_MM[units], 4);
+    const len = (mm: number) => lengthText(mm, units, 4);
     drawMutate("Add shape", (sk) => {
       const before = new Set((sk.geometry ?? []).map((g) => g.id));
-      addEntityGeometry(sk, r);
+      addEntityGeometry(sk, r, units);
       const made = (sk.geometry ?? []).filter((g) => !before.has(g.id));
       const lines = made.filter((g) => g.type === "line").map((g) => g.id);
       const circle = made.find((g) => g.type === "circle")?.id;
@@ -707,14 +711,14 @@ export function makeConstrainable(id: Id | null = useApp.getState().selectedEnti
   const e = o?.sk.entities.find((x) => x.id === id);
   if (!o || !e) return;
   if (!canConstrain(e)) {
-    toast("info", "Text, gears and outlines that mix spline points or rounding with arcs stay whole shapes. Rectangles, circles, ellipses, polygons, slots and lines can be converted.");
+    toast("info", "Text, gears, control-point splines and outlines that mix spline points or rounding with arcs stay whole shapes. Rectangles, circles, ellipses, polygons, slots and lines can be converted.");
     return;
   }
   let msg: string | undefined;
   try {
     const r = resolveEntity(e, documentEvaluator(useApp.getState().doc));
     geoMutate("Make constrainable", (sk) => {
-      msg = addEntityGeometry(sk, r);
+      msg = addEntityGeometry(sk, r, useApp.getState().doc.units);
       if (!msg) sk.entities = sk.entities.filter((x) => x.id !== e.id);
     });
   } catch (err) {
@@ -895,7 +899,7 @@ function trialCorner(id: Id, text: string, chamfer: boolean): { why?: string; sh
   const trial = structuredClone(o.sk);
   bakeSolution(trial, o.sol);
   const before = new Set((trial.geometry ?? []).map((g) => g.id));
-  const why = filletCorner(trial, id, r.value, text, chamfer);
+  const why = filletCorner(trial, id, r.value, text, chamfer, useApp.getState().doc.units);
   if (why) return { why, shapes: [] };
   const added = resolveGeometry(trial).filter((g) => !before.has(g.id) && g.type !== "point");
   return { shapes: added.map((g) => ({ pts: geomOutline(g), closed: false })) };
@@ -922,13 +926,13 @@ export async function cornerAt(id: Id, kind: "fillet" | "chamfer", at?: [number,
   // Try it on a copy first, so a corner that can't take it leaves no empty step in the history.
   const trial = structuredClone(o.sk);
   bakeSolution(trial, o.sol);
-  const why = filletCorner(trial, id, r.value, text, chamfer);
+  const why = filletCorner(trial, id, r.value, text, chamfer, useApp.getState().doc.units);
   if (why) {
     toast("info", why);
     return;
   }
   lastCorner = text;
-  geoMutate(chamfer ? "Chamfer" : "Fillet", (sk) => void filletCorner(sk, id, r.value, text, chamfer));
+  geoMutate(chamfer ? "Chamfer" : "Fillet", (sk) => void filletCorner(sk, id, r.value, text, chamfer, useApp.getState().doc.units));
 }
 
 /** Run a copy-style edit on a trial copy first, so one that can't be done leaves no empty step in the history. */
@@ -974,7 +978,7 @@ function trialOffset(ids: Id[], d: number): { why?: string; shapes: { pts: Vec2[
   const trial = structuredClone(o.sk);
   bakeSolution(trial, o.sol);
   const before = new Set((trial.geometry ?? []).map((g) => g.id));
-  const why = offsetGeometry(trial, ids, d);
+  const why = offsetGeometry(trial, ids, d, undefined, useApp.getState().doc.units);
   if (why) return { why, shapes: [], curves: [] };
   const curves = resolveGeometry(trial).filter((g) => !before.has(g.id) && g.type !== "point");
   return { shapes: curves.map((g) => ({ pts: geomOutline(g), closed: false })), curves };
@@ -1023,7 +1027,7 @@ async function runOffset(ids: Id[], at?: [number, number]) {
   const t = text.trim();
   const back = t.startsWith("-") ? offsetValue(t.slice(1)) : null;
   const gap = r.value > 0 ? t : back?.ok && Math.abs(back.value + r.value) < 1e-9 ? t.slice(1).trim() : trim(-r.value / unitMm(), 6);
-  if (copyEdit("Offset", (sk) => offsetGeometry(sk, ids, r.value, gap))) {
+  if (copyEdit("Offset", (sk) => offsetGeometry(sk, ids, r.value, gap, useApp.getState().doc.units))) {
     lastOffset = text;
     useApp.setState({ sketchSel: [] });
   }
@@ -1117,16 +1121,32 @@ export function setCircleRadius(id: Id, r: number) {
 /* ───────── Move / scale / grid pattern / break (asks for numbers in the document's units) ───────── */
 
 /** Ask for one or more comma-separated lengths or numbers; null when cancelled or invalid. */
-async function askNumbers(title: string, label: string, initial: string, message: string, kinds: ("length" | "number")[]): Promise<number[] | null> {
+/** Split at the commas between values, not those inside a formula's brackets (`max(a, b), 5`), audit W-9. */
+function splitValues(t: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of t) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) (out.push(cur.trim()), (cur = ""));
+    else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+/** Lengths come back in mm, angles in degrees (formulas like "90 deg" or "pi / 2" work). */
+async function askNumbers(title: string, label: string, initial: string, message: string, kinds: ("length" | "number" | "angle")[]): Promise<number[] | null> {
   const ev = () => documentEvaluator(useApp.getState().doc);
   const parse = (t: string): number[] | string => {
-    const parts = t.split(",").map((x) => x.trim());
+    const parts = splitValues(t);
     if (parts.length !== kinds.length) return `Give ${kinds.length} value${kinds.length > 1 ? "s" : ""}, separated by commas`;
     const out: number[] = [];
     for (let i = 0; i < parts.length; i++) {
-      const r = ev().eval(parts[i]!, kinds[i] === "length" ? "length" : "number");
+      const r = ev().eval(parts[i]!, kinds[i]!);
       if (!r.ok) return r.error;
-      out.push(r.value);
+      out.push(kinds[i] === "angle" ? (r.value * 180) / Math.PI : r.value);
     }
     return out;
   };
@@ -1228,7 +1248,7 @@ export function pasteSketchClip() {
 export async function circularPatternSelection() {
   const sel = sketchSelection();
   const u = useApp.getState().doc.units;
-  const r = await askNumbers("Circular pattern", `Copies, sweep (°), center X, center Y (center in ${u})`, "6, 360, 0, 0", "The original counts as one copy. 360° spaces them evenly all the way round; a smaller sweep fans them out.", ["number", "number", "length", "length"]);
+  const r = await askNumbers("Circular pattern", `Copies, sweep (°), center X, center Y (center in ${u})`, "6, 360, 0, 0", "The original counts as one copy. 360° spaces them evenly all the way round; a smaller sweep fans them out.", ["number", "angle", "length", "length"]);
   if (!r) return;
   const sweep = r[1]!;
   if (!sweep) return void toast("info", "The sweep angle can't be zero.");

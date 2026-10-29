@@ -21,7 +21,7 @@ import {
   weldShellsAndFaces,
 } from "replicad";
 import type { SketchFrame } from "./protocol";
-import { AXES, FeatureError, bodyForRefs, clean, hasSolid, orient, shapeBounds } from "./shared";
+import { AXES, FeatureError, ORIGIN_FRAMES, bodyForRefs, clean, hasSolid, orient, shapeBounds } from "./shared";
 import { add, cross, dot, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 
 const volume = (s: Shape3D) => {
@@ -195,7 +195,7 @@ export function surfaceTool(
       const ref = f.planeRef ? planeOf(f.planeRef) : undefined;
       if (f.planeRef && !ref) throw new FeatureError("The construction plane is missing. Pick another plane.");
       const off = ev.num(f.offset, "length", "Offset");
-      const fr = ref ?? { origin: [0, 0, 0] as Vec3, normal: f.plane === "XY" ? ([0, 0, 1] as Vec3) : f.plane === "XZ" ? ([0, 1, 0] as Vec3) : ([1, 0, 0] as Vec3) };
+      const fr = ref ?? { origin: [0, 0, 0] as Vec3, normal: ORIGIN_FRAMES[f.plane]!.normal };
       const q = add(fr.origin, scale(fr.normal, off));
       const [lo, hi] = shapeBounds(shape);
       const span = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 3 + 100;

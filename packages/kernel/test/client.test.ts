@@ -50,14 +50,18 @@ describe("WorkerKernel", () => {
 
   it("a request that never answers restarts the engine", async () => {
     vi.useFakeTimers();
-    vi.stubGlobal("Worker", FakeWorker);
-    const k = new WorkerKernel();
-    const run = k.inspect(newDocument(), "interference" as never);
-    const caught = run.catch((e: Error) => e.message);
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
-    expect(await caught).toMatch(/taking too long/);
-    expect(FakeWorker.all).toHaveLength(2);
-    vi.useRealTimers();
+    // Real timers come back even when an expectation fails, so later tests aren't left on fake time (audit T-3).
+    try {
+      vi.stubGlobal("Worker", FakeWorker);
+      const k = new WorkerKernel();
+      const run = k.inspect(newDocument(), "interference" as never);
+      const caught = run.catch((e: Error) => e.message);
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
+      expect(await caught).toMatch(/taking too long/);
+      expect(FakeWorker.all).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

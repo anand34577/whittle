@@ -141,7 +141,8 @@ export function App() {
       }
       const err = new URLSearchParams(window.location.search).get("login_error");
       if (err) {
-        toast("error", err);
+        // Anyone can put text in a link: say where the message is from and keep it short (audit A-3).
+        toast("error", `Single sign-on didn't work: ${err.replace(/\s+/g, " ").slice(0, 160)}`);
         window.history.replaceState(null, "", window.location.pathname);
       }
       if (new URLSearchParams(window.location.search).get("linked") === "1") {
@@ -162,7 +163,11 @@ export function App() {
       toast("error", text);
     };
     const onRejection = (e: PromiseRejectionEvent) => report(e.reason);
-    const onError = (e: ErrorEvent) => report(e.error ?? e.message);
+    // The browser also fires this for harmless notices, which aren't the person's problem (audit UI-6).
+    const onError = (e: ErrorEvent) => {
+      if (/ResizeObserver loop/i.test(e.message ?? "")) return;
+      report(e.error ?? e.message);
+    };
     window.addEventListener("unhandledrejection", onRejection);
     window.addEventListener("error", onError);
     window.addEventListener("keydown", onKey);

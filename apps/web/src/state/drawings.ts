@@ -4,7 +4,7 @@
  *   - import an SVG (logos, lettering, traced outlines) as editable sketch shapes
  */
 import { promptDialog } from "./dialogs";
-import { type Evaluator, type ResolvedEntity, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, parseDxf, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
+import { type Evaluator, type LengthUnit, type ResolvedEntity, lengthText, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, parseDxf, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
 import { exportText } from "./files";
 import { getKernel } from "./kernel";
 import { simplify } from "./simplify";
@@ -14,12 +14,14 @@ import { findFeature, sketchMutate, toast, useApp } from "./store";
 /* ───────────────────────────── Export ───────────────────────────── */
 
 export interface DrawingShape {
-  /** Exact circle (kept as a true circle in DXF/SVG) or a closed outline. */
+  /** Exact circle (kept as a true circle in DXF/SVG) or an outline. */
   circle?: { cx: number; cy: number; r: number };
   loop?: Vec2[];
+  /** An open path or a single line: exported without closing it (audit W-14). */
+  open?: boolean;
 }
 
-/** The closed shapes of a sketch, in millimetres (construction geometry is skipped; text is outlined by the geometry engine). */
+/** The shapes and open paths of a sketch, in millimetres (construction geometry is skipped; text is outlined by the geometry engine). */
 export function sketchShapes(entities: SketchEntity[], ev: Evaluator): { shapes: DrawingShape[]; skipped: number } {
   const shapes: DrawingShape[] = [];
   let skipped = 0;
@@ -37,7 +39,16 @@ export function sketchShapes(entities: SketchEntity[], ev: Evaluator): { shapes:
       shapes.push({ circle: { cx: r.cx, cy: r.cy, r: r.r } });
       continue;
     }
-    for (const loop of entityLoops(r, 96)) if (loop.length >= 3) shapes.push({ loop });
+    if (r.type === "polyline" && r.open) {
+      const path = entityLoops(r, 96)[0] ?? [];
+      if (path.length >= 2) shapes.push({ loop: path, open: true });
+      else skipped++;
+      continue;
+    }
+    for (const loop of entityLoops(r, 96)) {
+      if (loop.length >= 3) shapes.push({ loop });
+      else skipped++;
+    }
     if (r.type === "gear" && r.bore > 0) {
       shapes.pop(); // replace the sampled bore with an exact circle
       shapes.push({ circle: { cx: r.cx, cy: r.cy, r: r.bore / 2 } });
@@ -82,7 +93,7 @@ export function shapesToSvg(shapes: DrawingShape[], title: string): string {
     .map((s) =>
       s.circle
         ? `<circle cx="${X(s.circle.cx)}" cy="${Y(s.circle.cy)}" r="${n(s.circle.r)}"/>`
-        : `<path d="M${s.loop!.map(([x, y]) => `${X(x)} ${Y(y)}`).join(" L")} Z"/>`,
+        : `<path d="M${s.loop!.map(([x, y]) => `${X(x)} ${Y(y)}`).join(" L")}${s.open ? "" : " Z"}"/>`,
     )
     .join("\n  ");
   const esc = title.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!);
@@ -105,7 +116,11 @@ export function shapesToDxf(shapes: DrawingShape[]): string {
       continue;
     }
     const pts = s.loop!;
-    out.push("0", "POLYLINE", "8", "0", "66", "1", "70", "1", "10", "0", "20", "0", "30", "0");
+    if (s.open && pts.length === 2) {
+      out.push("0", "LINE", "8", "0", "10", n(pts[0]![0]), "20", n(pts[0]![1]), "30", "0", "11", n(pts[1]![0]), "21", n(pts[1]![1]), "31", "0");
+      continue;
+    }
+    out.push("0", "POLYLINE", "8", "0", "66", "1", "70", s.open ? "0" : "1", "10", "0", "20", "0", "30", "0");
     for (const [x, y] of pts) out.push("0", "VERTEX", "8", "0", "10", n(x), "20", n(y), "30", "0");
     out.push("0", "SEQEND", "8", "0");
   }
@@ -130,9 +145,9 @@ export async function exportSketch(sketchId: string, format: "svg" | "dxf") {
       return toast("error", `The text couldn't be outlined for export: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  if (shapes.length === 0) return toast("info", "This sketch has no closed shapes to export.");
+  if (shapes.length === 0) return toast("info", "This sketch has nothing to export.");
   await exportText(format === "svg" ? shapesToSvg(shapes, `${doc.name} - ${sk.name}`) : shapesToDxf(shapes), `${doc.name} - ${sk.name}`, format);
-  if (skipped) toast("info", `${skipped} shape${skipped > 1 ? "s" : ""} with errors couldn't be exported.`);
+  if (skipped) toast("info", `${skipped} shape${skipped > 1 ? "s" : ""} with errors or too few points couldn't be exported.`);
 }
 
 /** The sketch an export command should use: the one being edited, else the selected one. */
@@ -172,7 +187,8 @@ function area(pts: Vec2[]): number {
 }
 
 /** Turn closed loops (in SVG units, y down) into sketch outlines `width` mm wide, centered on the origin. */
-export function loopsToEntities(loops: Vec2[][], width: number): SketchEntity[] {
+/** `width` is in mm; the points are written in `units` (the document unit). */
+export function loopsToEntities(loops: Vec2[][], width: number, units: LengthUnit = "mm"): SketchEntity[] {
   const all = loops.flat();
   if (all.length === 0) return [];
   const xs = all.map((p) => p[0]);
@@ -194,7 +210,7 @@ export function loopsToEntities(loops: Vec2[][], width: number): SketchEntity[] 
     out.push({
       id: uid("e"),
       type: "polyline",
-      points: loop.map(([x, y]) => [trim((x - cx) * scale, 3), trim((cy - y) * scale, 3)] as [string, string]),
+      points: loop.map(([x, y]) => [lengthText((x - cx) * scale, units), lengthText((cy - y) * scale, units)] as [string, string]),
     });
   }
   return out;
@@ -226,10 +242,12 @@ function svgLoops(text: string): { loops: Vec2[][]; mmPerUnit?: number } {
   host.style.cssText = "position:fixed;left:-10000px;top:0;width:1000px;height:1000px;visibility:hidden;pointer-events:none";
   const svg = document.importNode(root, true) as unknown as SVGSVGElement;
   // Only the outlines are wanted: drop anything that could run code or fetch something once it is mounted.
-  for (const s of svg.querySelectorAll("script, foreignObject, image, iframe, object, embed, audio, video, animate, set, animateMotion, animateTransform")) s.remove();
+  // <style> too: while mounted its rules would apply to the whole page, and url() would fetch from anywhere (audit A-3).
+  for (const s of svg.querySelectorAll("script, style, foreignObject, image, iframe, object, embed, audio, video, animate, set, animateMotion, animateTransform")) s.remove();
   for (const el of [svg, ...svg.querySelectorAll("*")]) {
     for (const a of [...el.attributes]) {
       if (/^on/i.test(a.name) || (/^(xlink:)?href$/i.test(a.name) && !a.value.trim().startsWith("#"))) el.removeAttribute(a.name);
+      else if (a.name === "style" && /url\s*\(|@import|expression\s*\(/i.test(a.value)) el.removeAttribute(a.name);
     }
   }
   const mmPerUnit = svgMmPerUnit(root.getAttribute("width"), root.getAttribute("viewBox"));
@@ -291,8 +309,8 @@ export function importSvgIntoSketch() {
         validate: (v) => (parseFloat(v) > 0 ? null : "Enter a width greater than zero"),
       });
       if (answer === null) return;
-      const width = parseFloat(answer);
-      const entities = loopsToEntities(loops, width);
+      // The width is asked in mm; the shapes are written in the document unit.
+      const entities = loopsToEntities(loops, parseFloat(answer), useApp.getState().doc.units);
       if (entities.length === 0) return toast("warn", "No closed shapes were found in that SVG. Convert strokes and text to paths first.");
       sketchMutate(`Import ${file.name}`, (sk) => {
         for (const e of entities) sk.entities.push(e as never);
@@ -334,12 +352,14 @@ export function importDxfIntoSketch() {
         validate: (v) => (parseFloat(v) > 0 ? null : "Enter a number greater than zero"),
       });
       if (answer === null) return;
+      // The scale gives mm per drawing unit; the shapes are written in the document unit.
       const k = parseFloat(answer);
+      const len = (mm: number) => lengthText(mm, useApp.getState().doc.units, 4);
       const entities: SketchEntity[] = [
-        ...dxf.circles.map((c) => ({ id: uid("e"), type: "circle" as const, cx: trim(c.c[0] * k, 4), cy: trim(c.c[1] * k, 4), r: trim(c.r * k, 4) })),
+        ...dxf.circles.map((c) => ({ id: uid("e"), type: "circle" as const, cx: len(c.c[0] * k), cy: len(c.c[1] * k), r: len(c.r * k) })),
         ...dxf.loops
           .filter((l) => l.pts.length >= (l.closed ? 3 : 2))
-          .map((l) => ({ id: uid("e"), type: "polyline" as const, points: l.pts.map(([x, y]) => [trim(x * k, 4), trim(y * k, 4)] as [string, string]), ...(l.closed ? {} : { open: true }) })),
+          .map((l) => ({ id: uid("e"), type: "polyline" as const, points: l.pts.map(([x, y]) => [len(x * k), len(y * k)] as [string, string]), ...(l.closed ? {} : { open: true }) })),
       ];
       sketchMutate(`Import ${file.name}`, (sk) => {
         for (const e of entities) sk.entities.push(e as never);

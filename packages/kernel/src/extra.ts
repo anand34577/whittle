@@ -43,7 +43,7 @@ import {
 import type { SketchFrame } from "./protocol";
 import { FeatureError, bodyForRefs, boxCenter, clean, shapeBounds, deg, orient, planeFromFrame, polyDrawing, sketchPath } from "./shared";
 import { circleOf } from "./construct";
-import { add, cross, dist, dot, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
+import { add, byLength, cross, dist, dot, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 
 type SketchLike = { frame: SketchFrame; source?: SketchFeature; error?: string; wire?: Wire };
 
@@ -417,8 +417,9 @@ export function patternOnPath(f: PatternFeature, src: Shape3D, sketches: Map<Id,
   const p0 = wire.pointAt(0).toTuple();
   const t0 = norm(wire.tangentAt(0).toTuple());
   const copies: Shape3D[] = [];
+  const at = byLength(wire);
   for (let i = 1; i < count; i++) {
-    const t = i / (count - 1);
+    const t = at(i / (count - 1));
     const p = wire.pointAt(t).toTuple();
     let c = src.clone().translate(sub(p, p0));
     if (f.follow) {
@@ -453,9 +454,11 @@ export function jointValue(f: JointFeature, doc: WhittleDocument, ev: Evaluator,
   let angle = TURNS.has(t) || t === "ball" ? ev.num(f.angle, "angle", "Angle") : 0;
   let dist = SLIDES.has(t) ? ev.num(f.distance, "length", "Distance") : 0;
   const dist2 = t === "planar" ? ev.num(f.distance2 ?? "0", "length", "Second distance") : 0;
-  const angle2 = t === "ball" ? ev.num(f.angle2 ?? "0", "angle", "Angle about Y") : 0;
-  const angle3 = t === "ball" ? ev.num(f.angle3 ?? "0", "angle", "Angle about Z") : 0;
-  if (f.link && depth < 8) {
+  let angle2 = t === "ball" ? ev.num(f.angle2 ?? "0", "angle", "Angle about Y") : 0;
+  let angle3 = t === "ball" ? ev.num(f.angle3 ?? "0", "angle", "Angle about Z") : 0;
+  // A chain of links this long is a loop (A follows B follows A): say so instead of quietly stopping (audit K-8).
+  if (f.link && depth >= 8) throw new FeatureError("These joints follow each other in a loop. Remove one of the motion links.");
+  if (f.link) {
     const src = doc.features.find((x) => x.id === f.link!.joint);
     if (!src || src.type !== "joint") throw new FeatureError("The joint this one follows is missing. Choose it again.");
     const sv = jointValue(src, doc, ev, depth + 1);
@@ -465,15 +468,20 @@ export function jointValue(f: JointFeature, doc: WhittleDocument, ev: Evaluator,
     else dist = v;
   }
   if (f.limited) {
-    const rotLimited = t === "revolute";
+    // Revolute and ball joints are limited in angle (a ball on each of its three turns); sliding joints, including
+    // the slide of a cylindrical joint, in distance (audit K-8: a ball's limits used to be read as lengths and ignored).
+    const rotLimited = t === "revolute" || t === "ball";
     const kind = rotLimited ? "angle" : "length";
     const lo = ev.num(f.min, kind, "Minimum");
     const hi = ev.num(f.max, kind, "Maximum");
-    const x = rotLimited ? angle : dist;
-    const c = Math.min(hi, Math.max(lo, x));
-    if (c !== x) warning = c === lo ? "The joint is at its lower limit." : "The joint is at its upper limit.";
-    if (rotLimited) angle = c;
-    else if (SLIDES.has(t)) dist = c;
+    const clamp = (x: number) => {
+      const c = Math.min(hi, Math.max(lo, x));
+      if (c !== x) warning = c === lo ? "The joint is at its lower limit." : "The joint is at its upper limit.";
+      return c;
+    };
+    if (rotLimited) angle = clamp(angle);
+    if (t === "ball") (angle2 = clamp(angle2)), (angle3 = clamp(angle3));
+    else if (SLIDES.has(t)) dist = clamp(dist);
   }
   return { angle, dist, dist2, angle2, angle3, warning };
 }

@@ -172,8 +172,51 @@ pub async fn list(State(s): State<Shared>, CurrentUser(u): CurrentUser) -> ApiRe
     Ok(Json(out))
 }
 
+/// Refuse a save that would take an account's designs over its storage limit (audit S-3).
+/// `freed` is what the save lets go of: the oldest version, when the design already keeps the most allowed.
+async fn check_quota(s: &Shared, owner: &str, adding: u64, freed: u64) -> ApiResult<()> {
+    let quota = s.config.user_quota_bytes;
+    if quota == 0 {
+        return Ok(());
+    }
+    let used: i64 = sqlx::query_scalar(
+        "SELECT CAST(COALESCE(SUM(v.size), 0) AS BIGINT) FROM design_versions v JOIN designs d ON d.id = v.design_id WHERE d.owner_id = $1",
+    )
+    .bind(owner)
+    .fetch_one(&s.db)
+    .await?;
+    if (used.max(0) as u64).saturating_sub(freed) + adding > quota {
+        let mb = |b: u64| (b as f64 / 1048576.0).ceil() as u64;
+        return Err(ApiError::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            format!(
+                "Your designs are using {} MB of the {} MB this server allows per account. Delete designs you no longer need, then save again.",
+                mb(used.max(0) as u64),
+                mb(quota)
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// The quota check for a new version of design `id`. At the version limit the oldest version is pruned after
+/// the save, so it doesn't count.
+async fn check_save_quota(s: &Shared, owner: &str, id: &str, adding: u64) -> ApiResult<()> {
+    if s.config.user_quota_bytes == 0 {
+        return Ok(());
+    }
+    let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM design_versions WHERE design_id = $1").bind(id).fetch_one(&s.db).await?;
+    let oldest: Option<i64> = sqlx::query_scalar("SELECT size FROM design_versions WHERE design_id = $1 ORDER BY version ASC LIMIT 1")
+        .bind(id)
+        .fetch_optional(&s.db)
+        .await?;
+    let freed = if kept >= s.config.max_versions { oldest.unwrap_or(0).max(0) as u64 } else { 0 };
+    check_quota(s, owner, adding, freed).await
+}
+
 pub async fn create(State(s): State<Shared>, CurrentUser(u): CurrentUser, body: Bytes) -> ApiResult<(StatusCode, Json<Saved>)> {
     let (bytes, parsed) = parse_upload(body).await?;
+    check_quota(&s, &u.id, bytes.len() as u64, 0).await?;
     let id = random_token(12);
     tokio::fs::create_dir_all(dir(&s, &id)).await?;
     write_atomic(&version_path(&s, &id, 1), &bytes).await?;
@@ -304,6 +347,7 @@ pub async fn save(State(s): State<Shared>, CurrentUser(u): CurrentUser, Path(id)
         None => None,
     };
     let (bytes, parsed) = parse_upload(body).await?;
+    check_save_quota(&s, &u.id, &id, bytes.len() as u64).await?;
     let version = add_version(&s, &u.id, &id, head, expected, &bytes, &parsed).await?;
     Ok(Json(Saved { id, version, name: parsed.name }))
 }
@@ -381,6 +425,7 @@ pub async fn restore(State(s): State<Shared>, CurrentUser(u): CurrentUser, Path(
     version_exists(&s, &id, v).await?;
     let bytes = tokio::fs::read(version_path(&s, &id, v)).await?;
     let (bytes, parsed) = parse_upload(Bytes::from(bytes)).await?;
+    check_save_quota(&s, &u.id, &id, bytes.len() as u64).await?;
     let version = add_version(&s, &u.id, &id, head, None, &bytes, &parsed).await?;
     Ok(Json(Saved { id, version, name: parsed.name }))
 }

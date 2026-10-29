@@ -14,6 +14,8 @@ export interface Evaluator {
   eval(expr: Expr | number, kind: QuantityKind): EvalResult;
   /** Like eval, but throws a readable error (used inside the kernel). */
   num(expr: Expr | number, kind: QuantityKind, label?: string): number;
+  /** The design's length unit (what a bare number means), for messages. */
+  units?: LengthUnit;
 }
 
 export const PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -47,6 +49,8 @@ export function createEvaluator(
 
   function resolve(name: string): Quantity | undefined {
     if (resolved.has(name)) return resolved.get(name);
+    // A parameter that failed once fails again: don't re-evaluate it on every lookup (audit C-12).
+    if (results.get(name)?.ok === false) return undefined;
     const p = byName.get(name);
     if (!p) return undefined;
     if (visiting.has(name)) throw new Error(`"${name}" depends on itself`);
@@ -82,6 +86,7 @@ export function createEvaluator(
 
   const evaluator: Evaluator = {
     params: results,
+    units: lengthUnit,
     eval: (expr, kind) => {
       if (typeof expr === "string") {
         for (const n of referencedNames(expr)) {
@@ -156,12 +161,18 @@ function eachExpr(features: unknown, fn: (expr: string, set: (v: string) => void
  * Rename a parameter and every reference to it (other parameters and all
  * feature fields), so renaming never breaks the design. Mutates `doc`.
  */
-export function renameParameter(doc: Pick<WhittleDocument, "parameters" | "features">, from: string, to: string): void {
+export function renameParameter(doc: Pick<WhittleDocument, "parameters" | "features"> & { variants?: WhittleDocument["variants"] }, from: string, to: string): void {
   for (const p of doc.parameters) {
     if (p.name === from) p.name = to;
     p.expr = renameIn(p.expr, from, to);
   }
   eachExpr(doc.features, (v, set) => set(renameIn(v, from, to)));
+  // Variants hold values by parameter name, and their formulas can use other parameters (audit C-4).
+  for (const v of doc.variants ?? []) {
+    const next: Record<string, string> = {};
+    for (const [k, e] of Object.entries(v.values)) next[k === from ? to : k] = renameIn(String(e), from, to);
+    v.values = next;
+  }
 }
 
 /** How many features and other parameters use parameter `name` in a formula (field names and words don't count). */
@@ -182,14 +193,19 @@ export function parseCsv(text: string): string[][] {
   let row: string[] = [];
   let cell = "";
   let quoted = false;
+  // One separator per file: a comma, or a semicolon for sheets saved where the comma is the decimal mark.
+  // So an unquoted note with a ";" in a comma file stays whole (audit C-5).
+  const first = text.split(/\r?\n/, 1)[0] ?? "";
+  const sep = !first.includes(",") && first.includes(";") ? ";" : ",";
   for (let i = 0; i < text.length; i++) {
     const c = text[i]!;
     if (quoted) {
       if (c === '"' && text[i + 1] === '"') (cell += '"'), i++;
       else if (c === '"') quoted = false;
       else cell += c;
-    } else if (c === '"') quoted = true;
-    else if (c === "," || c === ";") row.push(cell), (cell = "");
+    } else if (c === '"' && !cell.trim()) (quoted = true), (cell = "");
+    // A " inside an unquoted cell is an inch mark (5' 6"), not a quote.
+    else if (c === sep) row.push(cell), (cell = "");
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && text[i + 1] === "\n") i++;
       row.push(cell), rows.push(row), (row = []), (cell = "");

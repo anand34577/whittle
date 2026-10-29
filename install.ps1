@@ -27,8 +27,12 @@ if ("$env:WHITTLE_ACTION" -eq "uninstall") {
     return
   }
   Write-Host "Uninstalling Whittle $($existing.DisplayVersion)"
-  $cmd = "$($existing.UninstallString)".Trim('"')
-  Start-Process -FilePath $cmd -ArgumentList "/S" -Wait
+  # The uninstall string can carry arguments after the quoted program path (audit X-7).
+  $u = "$($existing.UninstallString)".Trim()
+  if ($u.StartsWith('"')) { $end = $u.IndexOf('"', 1); $cmd = $u.Substring(1, $end - 1); $rest = $u.Substring($end + 1).Trim() }
+  else { $cmd = $u; $rest = "" }
+  $argList = @("/S"); if ($rest) { $argList = @($rest, "/S") }
+  Start-Process -FilePath $cmd -ArgumentList $argList -Wait
   Write-Host "Whittle is uninstalled. Your designs were left in place." -ForegroundColor Green
   return
 }

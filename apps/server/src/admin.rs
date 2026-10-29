@@ -90,6 +90,8 @@ pub struct CreateBody {
 }
 
 pub async fn create(State(s): State<Shared>, headers: HeaderMap, AdminUser(me): AdminUser, Json(b): Json<CreateBody>) -> ApiResult<(StatusCode, Json<User>)> {
+    // The same lock as sign-up: the name and email checks and the insert happen as one (audit S-4).
+    let _guard = auth::REGISTER_LOCK.lock().await;
     let password = Some(b.password.as_str()).filter(|p| !p.is_empty());
     let (require_email, smtp, welcome) = {
         let st = s.settings.read().await;
@@ -158,54 +160,86 @@ pub async fn update(State(s): State<Shared>, headers: HeaderMap, AdminUser(me): 
     if b.is_admin == Some(false) && id == me.id {
         return Err(ApiError::bad_request("Ask another administrator to remove your administrator rights"));
     }
+    // Everything is checked first and then saved in one transaction, so a refused value (a taken email, say)
+    // doesn't leave the earlier changes half applied (audit S-8).
     let mut changes: Vec<String> = Vec::new();
-    if let Some(name) = b.username.as_deref().map(str::trim).filter(|n| *n != t.username) {
-        check_username(name).map_err(ApiError::bad_request)?;
-        if db::user_by(&s.db, "username", name).await?.is_some() {
-            return Err(ApiError::new(StatusCode::CONFLICT, "That username is taken"));
+    let username = match b.username.as_deref().map(str::trim).filter(|n| *n != t.username) {
+        Some(name) => {
+            check_username(name).map_err(ApiError::bad_request)?;
+            // Another account with that name (case doesn't count); changing only the case of one's own is fine.
+            if db::user_by(&s.db, "username", name).await?.is_some_and(|other| other.id != id) {
+                return Err(ApiError::new(StatusCode::CONFLICT, "That username is taken"));
+            }
+            Some(name.to_owned())
         }
-        sqlx::query("UPDATE users SET username = $1 WHERE id = $2").bind(name).bind(&id).execute(&s.db).await?;
-        changes.push(format!("username {} → {name}", t.username));
-    }
-    if let Some(name) = b.display_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-        sqlx::query("UPDATE users SET display_name = $1 WHERE id = $2").bind(name).bind(&id).execute(&s.db).await?;
-        changes.push("name".into());
-    }
-    if let Some(e) = b.email.as_deref() {
-        let required = s.settings.read().await.require_email();
-        let email = clean_email(&s, Some(e), Some(&id), required).await?;
-        sqlx::query("UPDATE users SET email = $1 WHERE id = $2").bind(email).bind(&id).execute(&s.db).await?;
-        changes.push("email".into());
-    }
-    if let Some(a) = b.is_admin {
-        sqlx::query("UPDATE users SET is_admin = $1 WHERE id = $2").bind(a as i64).bind(&id).execute(&s.db).await?;
-        changes.push(if a { "made administrator" } else { "removed administrator" }.into());
-    }
-    if let Some(d) = b.disabled {
-        sqlx::query("UPDATE users SET disabled = $1 WHERE id = $2").bind(d as i64).bind(&id).execute(&s.db).await?;
-        if d {
-            sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(&id).execute(&s.db).await?;
-            security_notice(&s, &headers, &t, "Your Whittle account was disabled", "An administrator disabled your account. You can't sign in until it's enabled again.");
+        None => None,
+    };
+    let display = b.display_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned);
+    let email = match b.email.as_deref() {
+        Some(e) => {
+            let required = s.settings.read().await.require_email();
+            Some(clean_email(&s, Some(e), Some(&id), required).await?)
         }
-        changes.push(if d { "disabled" } else { "enabled" }.into());
-    }
+        None => None,
+    };
     if let Some(l) = b.sso_link {
         if l && t.sso {
             return Err(ApiError::bad_request("This account is already linked to single sign-on"));
         }
-        if l && t.email.is_none() {
+        let email_after = email.clone().unwrap_or(t.email.clone());
+        if l && email_after.is_none() {
             return Err(ApiError::bad_request("Add an email address first: linking matches the email on the single sign-on account"));
         }
-        sqlx::query("UPDATE users SET sso_link = $1 WHERE id = $2").bind(l as i64).bind(&id).execute(&s.db).await?;
+    }
+    let hash = match &b.password {
+        Some(p) => {
+            check_password_rules(p).map_err(ApiError::bad_request)?;
+            Some(hash_password(p.clone()).await?)
+        }
+        None => None,
+    };
+
+    let mut tx = s.db.begin().await?;
+    if let Some(name) = &username {
+        sqlx::query("UPDATE users SET username = $1 WHERE id = $2").bind(name).bind(&id).execute(&mut *tx).await?;
+        changes.push(format!("username {} → {name}", t.username));
+    }
+    if let Some(name) = &display {
+        sqlx::query("UPDATE users SET display_name = $1 WHERE id = $2").bind(name).bind(&id).execute(&mut *tx).await?;
+        changes.push("name".into());
+    }
+    if let Some(e) = &email {
+        sqlx::query("UPDATE users SET email = $1 WHERE id = $2").bind(e).bind(&id).execute(&mut *tx).await?;
+        changes.push("email".into());
+    }
+    if let Some(a) = b.is_admin {
+        sqlx::query("UPDATE users SET is_admin = $1 WHERE id = $2").bind(a as i64).bind(&id).execute(&mut *tx).await?;
+        changes.push(if a { "made administrator" } else { "removed administrator" }.into());
+    }
+    if let Some(d) = b.disabled {
+        sqlx::query("UPDATE users SET disabled = $1 WHERE id = $2").bind(d as i64).bind(&id).execute(&mut *tx).await?;
+        if d {
+            sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(&id).execute(&mut *tx).await?;
+        }
+        changes.push(if d { "disabled" } else { "enabled" }.into());
+    }
+    if let Some(l) = b.sso_link {
+        sqlx::query("UPDATE users SET sso_link = $1 WHERE id = $2").bind(l as i64).bind(&id).execute(&mut *tx).await?;
         changes.push(if l { "will link to single sign-on by email" } else { "cancelled single sign-on link" }.into());
     }
-    if let Some(p) = b.password {
-        check_password_rules(&p).map_err(ApiError::bad_request)?;
-        let hash = hash_password(p).await?;
-        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2").bind(hash).bind(&id).execute(&s.db).await?;
-        sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(&id).execute(&s.db).await?;
-        security_notice(&s, &headers, &t, "Your Whittle password was reset", "An administrator set a new password for your account, and all devices were signed out.");
+    if let Some(h) = &hash {
+        sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2").bind(h).bind(&id).execute(&mut *tx).await?;
+        // Every device is signed out, except the administrator's own session when it is their own account (audit S-7).
+        let keep = if id == me.id { auth::cookie_token(&headers).map(|t| auth::session_id(&t)).unwrap_or_default() } else { String::new() };
+        sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND id <> $2").bind(&id).bind(keep).execute(&mut *tx).await?;
         changes.push("password reset".into());
+    }
+    tx.commit().await?;
+    if b.disabled == Some(true) {
+        security_notice(&s, &headers, &t, "Your Whittle account was disabled", "An administrator disabled your account. You can't sign in until it's enabled again.");
+    }
+    if hash.is_some() {
+        security_notice(&s, &headers, &t, "Your Whittle password was reset", "An administrator set a new password for your account, and all devices were signed out.");
     }
     if !changes.is_empty() {
         db::audit(&s.db, Some(&me.id), "user.update", Some(&t.username), &changes.join(", ")).await;
@@ -242,9 +276,13 @@ pub async fn delete(State(s): State<Shared>, AdminUser(me): AdminUser, Path(id):
             "designs deleted".to_owned()
         }
     };
-    sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(&id).execute(&s.db).await?;
-    sqlx::query("DELETE FROM password_resets WHERE user_id = $1").bind(&id).execute(&s.db).await?;
-    sqlx::query("DELETE FROM users WHERE id = $1").bind(&id).execute(&s.db).await?;
+    let mut tx = s.db.begin().await?;
+    sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(&id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM password_resets WHERE user_id = $1").bind(&id).execute(&mut *tx).await?;
+    // Preferences, recovery drafts and AI provider keys go with the account.
+    sqlx::query("DELETE FROM user_data WHERE user_id = $1").bind(&id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM users WHERE id = $1").bind(&id).execute(&mut *tx).await?;
+    tx.commit().await?;
     db::audit(&s.db, Some(&me.id), "user.delete", Some(&t.username), &detail).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -280,6 +318,16 @@ pub async fn merge(State(s): State<Shared>, AdminUser(me): AdminUser, Path(id): 
     sqlx::query("UPDATE design_versions SET author_id = $1 WHERE author_id = $2").bind(&into.id).bind(&from.id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(&from.id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM password_resets WHERE user_id = $1").bind(&from.id).execute(&mut *tx).await?;
+    // Personal data the kept account doesn't have yet moves over; the rest is dropped with the merged account.
+    sqlx::query(
+        "INSERT INTO user_data (user_id, key, value, updated_at) SELECT $1, key, value, updated_at FROM user_data WHERE user_id = $2
+         ON CONFLICT (user_id, key) DO NOTHING",
+    )
+    .bind(&into.id)
+    .bind(&from.id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM user_data WHERE user_id = $1").bind(&from.id).execute(&mut *tx).await?;
     // Free the unique single sign-on subject before giving it to the kept account.
     sqlx::query("DELETE FROM users WHERE id = $1").bind(&from.id).execute(&mut *tx).await?;
     sqlx::query("UPDATE users SET oidc_subject = $1, password_hash = $2, email = $3, is_admin = $4, sso_link = 0 WHERE id = $5")

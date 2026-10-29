@@ -110,9 +110,9 @@
 /* ── Accent colors ────────────────────────────────────────────── */
 /* Orange is the default from tokens.css; light themes get a darker shade for contrast. */
 [data-accent="amber"] { --accent: oklch(0.8 0.15 80); --accent-hover: oklch(0.85 0.14 82); --accent-ink: oklch(0.22 0.05 70); --accent-soft: oklch(0.8 0.15 80 / 0.15); }
-[data-accent="rose"] { --accent: oklch(0.7 0.17 10); --accent-hover: oklch(0.75 0.16 10); --accent-ink: oklch(0.99 0.01 10); --accent-soft: oklch(0.7 0.17 10 / 0.15); }
-[data-accent="violet"] { --accent: oklch(0.7 0.16 290); --accent-hover: oklch(0.75 0.15 290); --accent-ink: oklch(0.99 0.01 290); --accent-soft: oklch(0.7 0.16 290 / 0.16); }
-[data-accent="blue"] { --accent: oklch(0.7 0.15 255); --accent-hover: oklch(0.75 0.14 255); --accent-ink: oklch(0.99 0.01 255); --accent-soft: oklch(0.7 0.15 255 / 0.16); }
+[data-accent="rose"] { --accent: oklch(0.7 0.17 10); --accent-hover: oklch(0.75 0.16 10); --accent-ink: oklch(0.2 0.05 10); --accent-soft: oklch(0.7 0.17 10 / 0.15); }
+[data-accent="violet"] { --accent: oklch(0.7 0.16 290); --accent-hover: oklch(0.75 0.15 290); --accent-ink: oklch(0.2 0.05 290); --accent-soft: oklch(0.7 0.16 290 / 0.16); }
+[data-accent="blue"] { --accent: oklch(0.7 0.15 255); --accent-hover: oklch(0.75 0.14 255); --accent-ink: oklch(0.2 0.05 255); --accent-soft: oklch(0.7 0.15 255 / 0.16); }
 [data-accent="teal"] { --accent: oklch(0.74 0.12 185); --accent-hover: oklch(0.79 0.11 185); --accent-ink: oklch(0.2 0.04 185); --accent-soft: oklch(0.74 0.12 185 / 0.15); }
 [data-accent="green"] { --accent: oklch(0.73 0.15 145); --accent-hover: oklch(0.78 0.14 145); --accent-ink: oklch(0.2 0.05 145); --accent-soft: oklch(0.73 0.15 145 / 0.15); }
 [data-theme="paper"][data-accent="amber"] { --accent: oklch(0.66 0.15 70); --accent-ink: oklch(0.99 0.01 70); }

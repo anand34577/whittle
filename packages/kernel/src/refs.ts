@@ -109,8 +109,9 @@ function pick<T>(
   if (ranked.length === 1) return { item: ranked[0]!.item, uncertain: ranked[0]!.d > tolerance && !plausible(ranked[0]!.i) };
   const [best, second] = ranked;
   if (best!.d <= tolerance) return { item: best!.item, uncertain: false };
-  // Two candidates nearly equally close: ambiguous.
-  const uncertain = second!.d < best!.d * 2;
+  // Two candidates nearly equally close: ambiguous. A best match that moved or changed size a lot is also only
+  // a guess (audit K-1): the referenced face or edge may be gone and this is merely the nearest look-alike.
+  const uncertain = second!.d < best!.d * 2 || !plausible(best!.i);
   return { item: best!.item, uncertain };
 }
 
@@ -161,4 +162,33 @@ export function resolveEdge(shape: Shape3D, ref: EdgeRef, infos?: EdgeInfo[]): R
     0,
   );
   return loose ? { item: loose.item, uncertain: true } : null;
+}
+
+/**
+ * Maps a fraction of a curve's length to its parameter (audit K-6). A wire's own parameter gives every edge an
+ * equal share whatever its length, and a B-spline's isn't proportional to length either, so "evenly along the
+ * path" is measured on a fine polyline of the curve.
+ */
+export function byLength(curve: { pointAt(t: number): { toTuple(): number[] } }, samples = 1024): (frac: number) => number {
+  const cum = [0];
+  let prev = curve.pointAt(0).toTuple();
+  for (let k = 1; k <= samples; k++) {
+    const p = curve.pointAt(k / samples).toTuple();
+    cum.push(cum[k - 1]! + Math.hypot(p[0]! - prev[0]!, p[1]! - prev[1]!, p[2]! - prev[2]!));
+    prev = p;
+  }
+  const total = cum[samples]!;
+  return (frac) => {
+    if (!(total > 0)) return frac;
+    const want = Math.max(0, Math.min(1, frac)) * total;
+    let lo = 0;
+    let hi = samples;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid]! < want) lo = mid;
+      else hi = mid;
+    }
+    const span = cum[hi]! - cum[lo]!;
+    return (lo + (span > 0 ? (want - cum[lo]!) / span : 0)) / samples;
+  };
 }

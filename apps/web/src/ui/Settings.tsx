@@ -135,9 +135,13 @@ function Workspace() {
 }
 
 /** Choose a profile and take on its defaults. */
-export function applyProfile(id: Profile) {
+/**
+ * Choose a profile. The first time (`defaults`) it also sets the units, material, hints and labels that suit it;
+ * switching later in Settings leaves the person's own choices alone (audit G-3).
+ */
+export function applyProfile(id: Profile, defaults = false) {
   const p = PROFILES.find((x) => x.id === id)!;
-  setPrefs({ profile: id, units: p.units, material: p.material, hints: p.hints, toolLabels: true });
+  setPrefs(defaults ? { profile: id, units: p.units, material: p.material, hints: p.hints, toolLabels: true } : { profile: id });
 }
 
 function Navigation() {
@@ -276,7 +280,7 @@ export function ProfilePicker({ onDone }: { onDone: () => void }) {
             type="button"
             className="profilecard"
             onClick={() => {
-              applyProfile(p.id);
+              applyProfile(p.id, true);
               onDone();
             }}
           >

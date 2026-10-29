@@ -1,5 +1,5 @@
 /** Renders the in-app confirm / prompt dialogs and the tooltip layer. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type ConfirmRequest, type PromptRequest, closeDialog, useDialogs } from "../state/dialogs";
 import { Icon } from "./icons";
 import { GUIDES, GuideCard } from "./toolGuides";
@@ -61,7 +61,9 @@ function PromptView({ req }: { req: PromptRequest }) {
     input.current?.select();
   }, []);
   const numberError = req.type === "number" && value.trim() !== "" && !Number.isFinite(Number(value)) ? "Enter a number" : null;
-  const error = numberError ?? req.validate?.(value) ?? null;
+  // Checked when the text changes, not on every render (audit UI-2).
+  const checked = useMemo(() => req.validate?.(value) ?? null, [req, value]);
+  const error = numberError ?? checked;
   const done = (v: string | null) => {
     closeDialog(req);
     req.resolve(v);
@@ -158,8 +160,11 @@ export function TooltipLayer() {
       const el = current.current;
       const borrowed = el?.getAttribute("data-tip-title");
       if (el && borrowed !== null && borrowed !== undefined) {
-        el.setAttribute("title", borrowed);
+        // A title React set again while hovered is newer than the borrowed one: keep it (audit UI-2).
+        if (!el.hasAttribute("title")) el.setAttribute("title", borrowed);
         el.removeAttribute("data-tip-title");
+        // The name added for the hover goes too, so it can't go stale when the title changes.
+        if (el.hasAttribute("data-tip-aria")) (el.removeAttribute("aria-label"), el.removeAttribute("data-tip-aria"));
       }
       current.current = null;
       setTip(null);
@@ -177,6 +182,7 @@ export function TooltipLayer() {
         // While borrowed, the title can't name an icon-only button: keep its accessible name.
         if (!el.hasAttribute("aria-label") && !el.hasAttribute("aria-labelledby") && !el.textContent?.trim()) {
           el.setAttribute("aria-label", native.split("\n")[0]!);
+          el.setAttribute("data-tip-aria", "");
         }
       }
       const text = native ?? el.getAttribute("data-tip");

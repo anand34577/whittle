@@ -2,7 +2,7 @@
  * End-to-end test of the self-hosted server mode: first-run admin setup,
  * saving to the server, the design gallery, version history and restore,
  * sign-out and sign-in. Needs a fresh whittle-server serving the built app:
- *   WHITTLE_DATA=$(mktemp -d) WHITTLE_WEB=apps/web/dist WHITTLE_PUBLIC_URL=<the address you pass below> whittle-server
+ *   WHITTLE_DATA=$(mktemp -d) WHITTLE_WEB=apps/web/dist WHITTLE_PUBLIC_URL=<the address you pass below> WHITTLE_SETUP_TOKEN=off whittle-server
  *   node tests/e2e/server.mjs http://localhost:8080/ [screenshotDir]
  */
 import { chromium } from "playwright-core";

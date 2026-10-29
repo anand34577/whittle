@@ -47,6 +47,11 @@ export class WorkerKernel implements KernelHost {
       if (msg.type === "ready") return onReady(msg.ms);
       if (msg.type === "progress") return void (this.pending.has(msg.seq) && this.onProgress?.(msg.done, msg.total));
       if (msg.type === "error" && msg.seq === -1) return onFail(new Error(msg.message));
+      if (msg.type === "error" && msg.fatal) {
+        // The engine is broken for good: fail what it was doing and start a fresh one (audit K-2).
+        if (mine === this.worker) this.restart(msg.message);
+        return;
+      }
       const seq = msg.type === "regen" ? msg.result.seq : msg.seq;
       const p = this.pending.get(seq);
       if (!p) return;

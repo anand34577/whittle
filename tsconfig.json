@@ -21,5 +21,5 @@
       "@whittle/kernel/*": ["packages/kernel/src/*"]
     }
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/web/src", "apps/web/vite.config.ts", "vitest.config.ts"]
+  "include": ["packages/*/src", "packages/*/test", "apps/web/src", "apps/web/test", "apps/web/vite.config.ts", "vitest.config.ts"]
 }
