@@ -75,6 +75,8 @@ interface EntityBase {
   /** "auto" makes an entity a hole when it sits inside another profile. */
   mode?: "auto" | "add" | "subtract";
   construction?: boolean;
+  /** Worked out, never saved: a joined outline that loose lines touch; its area comes from their `area` outlines. */
+  covered?: boolean;
 }
 
 export interface RectEntity extends EntityBase {
@@ -133,6 +135,11 @@ export interface PolylineEntity extends EntityBase {
   open?: boolean;
   /** A control-point spline: the points steer a smooth B-spline curve that does not pass through them. */
   ctrl?: boolean;
+  /**
+   * Worked out from constraint geometry, never saved: an area that loose lines and arcs enclose (they cross, overlap
+   * or meet partway along one another). It makes material; walls and exports follow the lines themselves.
+   */
+  area?: boolean;
 }
 
 export interface EllipseEntity extends EntityBase {

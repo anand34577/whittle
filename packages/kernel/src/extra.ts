@@ -4,6 +4,7 @@ import {
   type BoundaryFillFeature,
   type CurveFeature,
   type DeleteFaceFeature,
+  drawnEntities,
   entityOutline,
   type JointFeature,
   type WhittleDocument,
@@ -631,7 +632,7 @@ export function curveTool(f: CurveFeature, bodies: Map<Id, Shape3D>, sketches: M
       const oc = getOC();
       const { origin, xDir, yDir } = sk.frame;
       const polys: Vec3[][] = [];
-      for (const ent of sk.source.entities) {
+      for (const ent of drawnEntities(sk.source.entities)) {
         if (ent.construction) continue;
         const res = resolveEntity(ent, ev);
         const open = res.type === "polyline" && res.open;

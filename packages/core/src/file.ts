@@ -180,7 +180,12 @@ export function migrate(input: unknown): WhittleDocument {
     if (f.type === "sketch") {
       if (!Array.isArray(f.entities)) f.entities = [];
       f.entities = (f.entities as unknown[]).filter(isRecord);
-      for (const e of f.entities as Record<string, unknown>[]) if (e.type === "text" && typeof e.text !== "string") e.text = "";
+      for (const e of f.entities as Record<string, unknown>[]) {
+        if (e.type === "text" && typeof e.text !== "string") e.text = "";
+        // Worked out while building, never saved: a file carrying them would hide or add shapes.
+        delete e.area;
+        delete e.covered;
+      }
       if (f.geometry !== undefined && !Array.isArray(f.geometry)) delete f.geometry;
       if (f.constraints !== undefined && !Array.isArray(f.constraints)) delete f.constraints;
     }

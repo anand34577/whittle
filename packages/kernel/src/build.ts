@@ -8,8 +8,8 @@
  * friendly message (and, where possible, a one-click fix) and later features
  * keep building on the last good state.
  */
-import { type BodyOp, type EdgeRef, type LengthUnit, lengthText, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, entityOutline, expandSketch, frameAxes, planeOrigin, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
-import { Drawing, type Edge, type Face, type FaceFinder, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeSolid, Vector, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
+import { type BodyOp, type EdgeRef, type LengthUnit, lengthText, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, drawnEntities, entityOutline, expandSketch, frameAxes, planeOrigin, sketchGap, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
+import { type Blueprint, Drawing, type Edge, type Face, draw, organiseBlueprints, type FaceFinder, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeSolid, Vector, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
 import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import "./fastTopo";
@@ -605,7 +605,7 @@ export class Builder {
         const picked = !surf && thin <= 0 && f.regions?.length ? regionProfile(sk, f.regions) : null;
         if (picked?.warning) regionWarning = picked.warning;
         const profile = !surf && thin > 0 && f.type === "extrude" ? thinProfile(sk, thin, f.thinSide ?? "center", ev) : (picked?.drawing ?? sk.drawing);
-        if (!profile && !surf) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : "The sketch has no closed shapes yet. Draw a rectangle or circle first.");
+        if (!profile && !surf) throw new FeatureError(thin > 0 ? "The sketch has no outlines or paths to thicken." : noClosedShapes(sk));
         let tool: Shape3D;
         if (f.type === "extrude") {
           const fromFace = f.startFace !== undefined ? distanceToFace(bodies, f.startFace ?? undefined, sk.frame, true) : 0;
@@ -1222,16 +1222,26 @@ function revolveAxis(axis: "x" | "y" | "line", lineId: Id | undefined, sk: Sketc
 }
 
 /**
+ * The sketch's outlines as drawn, for walls and surfaces along them: areas worked out from loose lines are left
+ * out (the lines themselves are open paths), and outlines those lines split up are back in.
+ */
+function drawnDrawing(sk: SketchBuilt, ev: Evaluator): Drawing | null {
+  const derived = sk.source?.entities.some((e) => e.covered || (e.type === "polyline" && e.area));
+  return derived && sk.source ? sketchDrawing({ ...sk.source, entities: drawnEntities(sk.source.entities) }, ev) : sk.drawing;
+}
+
+/**
  * A thin-wall profile: a band `t` wide along every outline of the sketch, plus a
  * wall along every open path (ribs, webs, a box's walls drawn as one line).
  */
 function thinProfile(sk: SketchBuilt, t: number, side: "center" | "inside" | "outside", ev: Evaluator): Drawing | null {
-  let out: Drawing | null = null;
-  if (sk.drawing) {
+  const pieces: Drawing[] = [];
+  const drawing = drawnDrawing(sk, ev);
+  if (drawing) {
     const [grow, shrink] = side === "center" ? [t / 2, -t / 2] : side === "inside" ? [0, -t] : [t, 0];
-    const at = (d: number) => (d === 0 ? sk.drawing!.clone() : sk.drawing!.clone().offset(d, { lineJoinType: "miter" }));
+    const at = (d: number) => (d === 0 ? drawing.clone() : drawing.clone().offset(d, { lineJoinType: "miter" }));
     try {
-      out = at(grow).cut(at(shrink));
+      pieces.push(at(grow).cut(at(shrink)));
     } catch {
       throw new FeatureError("The wall is too thick for this outline. Use a thinner wall.");
     }
@@ -1241,10 +1251,74 @@ function thinProfile(sk: SketchBuilt, t: number, side: "center" | "inside" | "ou
     const r = resolveEntity(e, ev);
     if (r.type !== "polyline" || r.points.length < 2) continue;
     const line = (r.smooth || r.ctrl) && r.points.length >= 3 ? entityOutline(r) : polylinePath(r.points, r.arcs, false, 16, r.splines);
-    const band = polyDrawing(thickenPath(line, t, side));
-    out = out ? out.fuse(band) : band;
+    pieces.push(polyDrawing(thickenPath(line, t, side)));
   }
-  return out;
+  return pieces.length ? fusePlanar(pieces) : null;
+}
+
+/**
+ * Flat pieces joined into one profile. Drawing booleans can drop a hole when the last piece closes a ring (four
+ * wall bands crossing at a frame's corners came out filled), so the join runs on faces in OpenCascade, which keeps
+ * holes, and the outlines are read back as a drawing.
+ */
+function fusePlanar(pieces: Drawing[]): Drawing {
+  if (pieces.length === 1) return pieces[0]!;
+  const oc = getOC();
+  // Every piece facing up, or pieces wound the other way stay separate faces and the holes come out wrong.
+  const up = (f: Face) => (f.normalAt().z < 0 ? (cast(downcast(f.wrapped.Reversed())) as unknown as Face) : f);
+  type Flat = { face?: () => Face; sketches?: Flat[] };
+  // A sketch with holes also lists its loops in `sketches`, so take its own face first.
+  const facesOf = (s: Flat): Face[] => (s.face ? [s.face()] : (s.sketches ?? []).flatMap(facesOf));
+  const faces = pieces.flatMap((d) => facesOf(d.clone().sketchOnPlane("XY") as unknown as Flat)).map(up);
+  let shape = faces[0]!.wrapped;
+  for (const f of faces.slice(1)) {
+    const op = new oc.BRepAlgoAPI_Fuse(shape, f.wrapped);
+    try {
+      op.Build();
+      if (!op.IsDone()) throw new FeatureError("The wall pieces couldn't be joined. Try a slightly different wall thickness.");
+      shape = downcast(op.Shape());
+    } finally {
+      op.delete();
+    }
+  }
+  const unify = new oc.ShapeUpgrade_UnifySameDomain(shape, true, true, false);
+  try {
+    unify.Build();
+    shape = downcast(unify.Shape());
+  } finally {
+    unify.delete();
+  }
+  const loops = (cast(downcast(shape)) as unknown as { faces: Face[] }).faces.flatMap((f) => [f.clone().outerWire(), ...f.clone().innerWires()]);
+  return new Drawing(organiseBlueprints(loops.map((w) => (loopDrawing(w) as unknown as { innerShape: Blueprint }).innerShape)));
+}
+
+/** A closed wire in the XY plane as a drawing, its edges chained end to end (lines and arcs kept exact). */
+function loopDrawing(w: Wire): Drawing {
+  const xy = (v: { x: number; y: number }): [number, number] => [v.x, v.y];
+  const near = (a: [number, number], b: [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6;
+  const left = [...w.edges];
+  const first = left.shift()!;
+  const start = xy(first.startPoint);
+  let pen = draw(start);
+  let at = start;
+  let edge: Edge | undefined = first;
+  while (edge) {
+    const e: Edge = edge;
+    const s = xy(e.startPoint);
+    const back = !near(s, at);
+    const end = back ? s : xy(e.endPoint);
+    // Sample positions along the edge, in the direction it is walked.
+    const along = (t: number) => xy(e.pointAt(back ? 1 - t : t));
+    if (e.geomType === "LINE") pen = pen.lineTo(end);
+    else if (e.geomType === "CIRCLE") {
+      // A full circle (or more than half of one) goes in two halves: a three-point arc can't close on itself.
+      pen = pen.threePointsArcTo(along(0.5), along(0.25)).threePointsArcTo(end, along(0.75));
+    } else for (let i = 1; i <= 16; i++) pen = i === 16 ? pen.lineTo(end) : pen.lineTo(along(i / 16));
+    at = end;
+    const i = left.findIndex((x) => near(xy(x.startPoint), at) || near(xy(x.endPoint), at));
+    edge = i < 0 ? undefined : left.splice(i, 1)[0];
+  }
+  return pen.close();
 }
 
 /** Rotate `v` about the unit axis `k` by `a` radians (Rodrigues). */
@@ -1357,7 +1431,8 @@ function pipeTool(f: SweepFeature, sketches: Map<Id, SketchBuilt>, ev: Evaluator
 /** The outlines (outer and inner wires) and open lines of a sketch, placed on a frame: what a surface is built from. */
 function surfaceWires(sk: SketchBuilt, frame: SketchFrame, ev: Evaluator, skipEntity?: Id): Wire[] {
   const out: Wire[] = [];
-  if (sk.drawing) for (const r of regions(sk.drawing.clone().sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch)) out.push(r.outer, ...r.inner);
+  const drawing = drawnDrawing(sk, ev);
+  if (drawing) for (const r of regions(drawing.clone().sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch)) out.push(r.outer, ...r.inner);
   for (const e of sk.source?.entities ?? []) {
     if (e.type !== "polyline" || !e.open || e.construction || e.id === skipEntity) continue;
     out.push(sketchPath({ ...sk.source!, entities: [e] } as SketchFeature, frame, ev));
@@ -1649,11 +1724,19 @@ function inTriangles(local: Float32Array, [x, y]: [number, number]): boolean {
   return false;
 }
 
+/** Why a sketch gives no closed shape, pointing at the gap when two curves almost meet. */
+function noClosedShapes(sk: SketchBuilt): string {
+  const gap = sk.source ? sketchGap(sk.source, sk.solution) : null;
+  if (!gap) return "The sketch has no closed shapes yet. Draw a rectangle or circle first.";
+  const at = `(${lengthText(gap.at[0], unitName, 2)}, ${lengthText(gap.at[1], unitName, 2)})`;
+  return `The sketch has no closed shapes yet: an end near ${at} stops ${lengthText(gap.gap, unitName, 4)} ${unitName} short of meeting a curve. Drag that end onto the curve to close the shape.`;
+}
+
 /** The chosen regions of a sketch fused into one profile. A point that no longer falls in any region takes the nearest one, with a warning. */
 function regionProfile(sk: SketchBuilt, points: [number, number][]): { drawing: Drawing; warning?: string } {
   const regions = sk.regions ?? [];
   if (!regions.length) {
-    if (!sk.drawing) throw new FeatureError("The sketch has no closed shapes yet. Draw a rectangle or circle first.");
+    if (!sk.drawing) throw new FeatureError(noClosedShapes(sk));
     return { drawing: sk.drawing };
   }
   const chosen = new Set<BuiltRegion>();
