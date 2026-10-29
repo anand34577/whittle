@@ -180,7 +180,7 @@ async fn check_quota(s: &Shared, owner: &str, adding: u64, freed: u64) -> ApiRes
         return Ok(());
     }
     let used: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(v.size), 0) FROM design_versions v JOIN designs d ON d.id = v.design_id WHERE d.owner_id = $1",
+        "SELECT CAST(COALESCE(SUM(v.size), 0) AS BIGINT) FROM design_versions v JOIN designs d ON d.id = v.design_id WHERE d.owner_id = $1",
     )
     .bind(owner)
     .fetch_one(&s.db)
