@@ -132,6 +132,8 @@ const history: Anthropic.Beta.BetaMessageParam[] = [];
 
 /** Models that accept server-side refusal fallbacks ("default" routing). */
 const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"]);
+/** Models that take `output_config.effort` (older ones, such as Haiku 4.5, reject it). */
+const EFFORT_MODELS = new Set([...FALLBACK_MODELS, "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-5", "claude-haiku-5-5"]);
 
 /** Claude errors as friendly messages (the SDK is loaded only when Claude is used). */
 async function runClaude(p: ProviderConfig, text: string, signal: AbortSignal) {
@@ -174,6 +176,8 @@ async function claudeLoop(client: Anthropic, p: ProviderConfig, text: string, si
         tools,
         messages: history,
         ...(fallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" } : {}),
+        // Multi-step design work benefits from more thought than Claude Opus 5.5's default "medium" (audit A-2).
+        ...(EFFORT_MODELS.has(p.model) ? { output_config: { effort: "high" } } : {}),
       } as Anthropic.Beta.MessageCreateParamsNonStreaming,
       { signal },
     );
@@ -195,7 +199,8 @@ async function claudeLoop(client: Anthropic, p: ProviderConfig, text: string, si
     for (const c of calls) {
       const input = (c.input ?? {}) as Record<string, unknown>;
       push({ kind: "tool", name: c.name, input });
-      const result = await runDesignTool(c.name, input);
+      // A tool that throws answers the model with an error instead of ending the turn, as on the OpenAI path (audit A-2).
+      const result = await runDesignTool(c.name, input, { assistant: true }).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }) as Record<string, unknown>);
       patchLastTool(result);
       results.push({ type: "tool_result", tool_use_id: c.id, content: JSON.stringify(result), ...(result.error ? { is_error: true } : {}) });
     }
@@ -290,7 +295,7 @@ async function runOpenAI(p: ProviderConfig, text: string, signal: AbortSignal) {
       if (!parsed) result = { error: "The tool arguments weren't a valid JSON object. Send them again." };
       else {
         try {
-          result = await runDesignTool(c.function.name, input);
+          result = await runDesignTool(c.function.name, input, { assistant: true });
         } catch (e) {
           result = { error: e instanceof Error ? e.message : "The tool failed." };
         }

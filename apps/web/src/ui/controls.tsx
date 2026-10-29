@@ -213,6 +213,8 @@ export function Select<T extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
+        // Screen readers announce the highlighted option while arrowing (audit UI-2).
+        aria-activedescendant={open && options[active] ? `${id}-${active}` : undefined}
         aria-label={ariaLabel ?? label}
         title={current && (current.short || current.label.length > 18) ? current.label : undefined}
         onClick={() => (open ? setOpen(false) : openList())}
@@ -234,6 +236,7 @@ export function Select<T extends string>({
                 {head && <div className="listbox__group">{head}</div>}
                 <div
                   role="option"
+                  id={`${id}-${i}`}
                   data-i={i}
                   aria-selected={o.value === value}
                   aria-disabled={o.disabled}

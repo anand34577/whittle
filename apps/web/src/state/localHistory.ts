@@ -51,8 +51,9 @@ export async function addLocalVersion(v: Omit<LocalVersion, "key">): Promise<voi
   try {
     const store = db.transaction(STORE, "readwrite").objectStore(STORE);
     await done(store.add(v));
-    const keys = (await done(store.index("docId").getAll(v.docId) as IDBRequest<LocalVersion[]>)).sort((a, b) => b.at - a.at).slice(KEEP);
-    for (const k of keys) store.delete(k.key!);
+    // Only the keys are read (not every stored file): they count up, so the highest are the newest (audit W-11).
+    const keys = (await done(store.index("docId").getAllKeys(v.docId) as IDBRequest<number[]>)).sort((a, b) => b - a).slice(KEEP);
+    for (const k of keys) store.delete(k);
   } finally {
     db.close();
   }

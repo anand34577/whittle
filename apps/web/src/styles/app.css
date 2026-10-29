@@ -579,7 +579,8 @@ button.docname__state:hover {
 }
 .tree__row:hover .tree__eye,
 .tree__row:hover .tree__action,
-.tree__row:focus-within .tree__eye {
+.tree__row:focus-within .tree__eye,
+.tree__row:focus-within .tree__action {
   opacity: 1;
 }
 .tree__eye:hover {
@@ -2105,4 +2106,37 @@ button.docname__state:hover {
 /* Measured values (volume, mass, lengths) can be selected and copied with Ctrl+C. */
 .panel dd {
   user-select: text;
+}
+
+/* The dialog itself takes focus when it opens (so Tab starts inside it); it needs no ring. */
+.modal:focus {
+  outline: none;
+}
+
+/* Audit UI-6. */
+/* The 3D view shows that it has keyboard focus. */
+.viewport-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* Touch screens have no hover: buttons that appear on hover are always shown there. */
+@media (hover: none) {
+  .tree__action,
+  .tree__eye,
+  .lib-card__del {
+    opacity: 1;
+  }
+}
+/* White on the theme's danger colour, darkened enough to read. */
+.btn--danger-solid {
+  background: color-mix(in oklab, var(--danger) 78%, black);
+}
+/* The system "reduce motion" setting stops the looping animations too, not only the transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

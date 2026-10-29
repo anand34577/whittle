@@ -1329,7 +1329,7 @@ textarea::placeholder {
   font-size: var(--fs-sm);
 }
 .quick__btn:hover {
-  color: var(--text);
+  color: var(--text-1);
   border-color: var(--text-3);
 }
 .quick__btn.is-on {

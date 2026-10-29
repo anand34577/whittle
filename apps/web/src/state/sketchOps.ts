@@ -4,7 +4,7 @@
  * by parameters are left alone (with a friendly note) so formulas never break.
  */
 import type { Draft } from "immer";
-import { type PolyPoint, type SketchEntity, type Vec2, cloneEntity, offsetPoints, polygonArea, trim, uid } from "@whittle/core";
+import { type PolyPoint, type SketchEntity, type Vec2, cloneEntity, documentEvaluator, LENGTH_TO_MM, offsetPoints, polygonArea, textExtent, trim, uid } from "@whittle/core";
 import { promptDialog } from "./dialogs";
 import { findFeature, sketchMutate, toast, useApp } from "./store";
 
@@ -66,10 +66,23 @@ function transform(e: SketchEntity, map: PointMap, turn: number, flip: number | 
       const y = num(c.y);
       const a = num(c.angle);
       if (x === null || y === null || a === null) return null;
-      const [nx, ny] = map([x, y]);
-      c.x = s(nx);
-      c.y = s(ny);
-      if (flip === null) c.angle = s(a + turn);
+      if (flip === null) {
+        const [nx, ny] = map([x, y]);
+        c.x = s(nx);
+        c.y = s(ny);
+        c.angle = s(a + turn);
+        return c;
+      }
+      // A mirrored copy still reads left to right, so it is placed by its middle, not its start (audit W-9).
+      const size = num(c.size);
+      if (size === null) return null;
+      const [w, h] = textExtent({ text: c.text, size, bold: !!c.bold });
+      const r = (a * Math.PI) / 180;
+      const u: Vec2 = [Math.cos(r), Math.sin(r)];
+      const v: Vec2 = [-u[1], u[0]];
+      const [mx, my] = map([x + (u[0] * w + v[0] * h) / 2, y + (u[1] * w + v[1] * h) / 2]);
+      c.x = s(mx - (u[0] * w + v[0] * h) / 2);
+      c.y = s(my - (u[1] * w + v[1] * h) / 2);
       return c;
     }
     case "polyline": {
@@ -81,7 +94,15 @@ function transform(e: SketchEntity, map: PointMap, turn: number, flip: number | 
         const [nx, ny] = map([x, y]);
         pts.push(arc ? [s(nx), s(ny), arc] : [s(nx), s(ny)]);
       }
-      c.points = flip === null ? pts : pts.reverse();
+      if (flip !== null) {
+        pts.reverse();
+        // A closed outline mustn't start on an arc's middle point after reversing (audit W-9).
+        if (!c.open) {
+          const k = pts.findIndex((q) => q.length === 2);
+          if (k > 0) pts.push(...pts.splice(0, k));
+        }
+      }
+      c.points = pts;
       return c;
     }
   }
@@ -244,12 +265,17 @@ export async function offsetEntity(id = useApp.getState().selectedEntity) {
     label: "Distance",
     message: "A copy grown outward by this distance. Use a negative distance to shrink it inward (walls, clearances, lips).",
     initial: "2",
-    type: "number",
     unit: useApp.getState().doc.units,
-    validate: (x) => (Number.isFinite(parseFloat(x)) && parseFloat(x) !== 0 ? null : "Enter a distance other than zero"),
+    validate: (x) => {
+      const r = documentEvaluator(useApp.getState().doc).eval(x, "length");
+      return !r.ok ? r.error : r.value !== 0 ? null : "Enter a distance other than zero";
+    },
   });
   if (v === null) return;
-  const out = offsetShape(e, parseFloat(v));
+  // Formulas and parameters work, as in every other field (audit W-9); the shape's own values are in the design's unit.
+  const r = documentEvaluator(useApp.getState().doc).eval(v, "length");
+  if (!r.ok) return;
+  const out = offsetShape(e, r.value / LENGTH_TO_MM[useApp.getState().doc.units]);
   if (typeof out === "string") return toast("info", out);
   addAll("Offset shape", [out]);
   useApp.setState({ selectedEntity: out.id });

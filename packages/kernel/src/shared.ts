@@ -40,7 +40,18 @@ export const FRIENDLY: Record<string, string> = {
   draft: "The draft couldn't be applied. Only flat, cylindrical or conical faces can be drafted, and the angle must be small enough.",
 };
 
+/**
+ * True when OpenCascade's WebAssembly module itself failed (out of memory, an abort): it can't be used again,
+ * so the error must not be reported as an ordinary feature failure (audit K-2).
+ */
+export function isEngineAbort(e: unknown): boolean {
+  if (typeof WebAssembly !== "undefined" && e instanceof WebAssembly.RuntimeError) return true;
+  const msg = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  return /^abort\(|\bAborted\(|out of memory|memory access out of bounds/i.test(msg);
+}
+
 export function describeError(f: Feature, e: unknown): string {
+  if (isEngineAbort(e)) throw e;
   if (e instanceof FeatureError) return e.message;
   if (
     e instanceof Error &&
@@ -103,6 +114,29 @@ export function drawingLoops(d: Drawing, perCurve = 10): [number, number][][] {
   return loops((d as unknown as { innerShape: Bp }).innerShape);
 }
 
+/**
+ * The same smooth curve the sketch draws (Catmull-Rom through the points, `smoothClosed`/`smoothOpen` in core),
+ * as exact cubic Bezier pieces, so the solid matches the preview (audit K-3). Open ends mirror their neighbours.
+ */
+export function catmullRomDrawing(pts: [number, number][], closed: boolean): Drawing {
+  const n = pts.length;
+  const at = (i: number): [number, number] => {
+    if (closed) return pts[((i % n) + n) % n]!;
+    if (i < 0) return [2 * pts[0]![0] - pts[1]![0], 2 * pts[0]![1] - pts[1]![1]];
+    if (i >= n) return [2 * pts[n - 1]![0] - pts[n - 2]![0], 2 * pts[n - 1]![1] - pts[n - 2]![1]];
+    return pts[i]!;
+  };
+  let pen = draw(pts[0]!);
+  const last = closed ? n : n - 1;
+  for (let i = 0; i < last; i++) {
+    const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
+    const c1: [number, number] = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2: [number, number] = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+    pen = pen.cubicBezierCurveTo(p2, c1, c2);
+  }
+  return closed ? pen.close() : pen.done();
+}
+
 export function entityDrawing(r: ResolvedEntity): Drawing {
   switch (r.type) {
     case "rect": {
@@ -123,7 +157,7 @@ export function entityDrawing(r: ResolvedEntity): Drawing {
       return polyDrawing(entityOutline(r));
     case "polyline": {
       if (r.ctrl && r.points.length >= 3) return drawPointsInterpolation(entityOutline(r), {}, { closeShape: !r.open });
-      if (r.smooth && r.points.length >= 3) return drawPointsInterpolation(r.points, {}, { closeShape: true });
+      if (r.smooth && r.points.length >= 3) return catmullRomDrawing(r.points, true);
       const d = r.arcs.some(Boolean) || r.splines.some(Boolean) ? penPath(r.points, r.arcs, true, r.splines) : polyDrawing(r.points);
       if (r.corner > 0) {
         try {
@@ -220,7 +254,22 @@ function joinDrawings(parts: Drawing[]): Drawing {
 }
 
 /** The fused outlines of one cluster with its holes (and gear bores) cut out; null when the cluster has no outline. */
-function clusterDrawing(resolved: ResolvedEntity[], outlines: [number, number][][], isHole: boolean[], idx: number[], notes: SketchNotes): Drawing | null {
+function clusterDrawing(resolved: ResolvedEntity[], outlines: [number, number][][], isHole: boolean[], idx: number[], notes: SketchNotes, depth: number[] = []): Drawing | null {
+  // An island inside a hole (a shape two or more levels deep): build level by level, outside in, so each
+  // level adds or cuts what is inside the one before it (audit K-4).
+  if (idx.some((i) => !isHole[i] && (depth[i] ?? 0) >= 2)) {
+    let acc = null as Drawing | null;
+    for (const i of [...idx].sort((a, b) => (depth[a] ?? 0) - (depth[b] ?? 0))) {
+      const d = entityDrawing(resolved[i]!);
+      if (!isHole[i]) acc = acc ? acc.fuse(d) : d;
+      else if (acc) acc = acc.cut(d);
+    }
+    for (const i of idx) {
+      const r = resolved[i]!;
+      if (acc && r.type === "gear" && r.bore > 0) acc = acc.cut(drawCircle(r.bore / 2).translate(r.cx, r.cy));
+    }
+    return acc;
+  }
   let result = null as Drawing | null;
   for (const i of idx) {
     if (isHole[i]) continue;
@@ -285,15 +334,17 @@ export function sketchDrawing(f: SketchFeature, ev: Evaluator, notes: SketchNote
       throw new FeatureError("An outline in this sketch crosses itself. Move its points so no edges cross.");
     }
   });
+  // How many shapes each one lies inside: inside one it is a hole, inside two an island in that hole, and so on.
+  const depth = resolved.map((_, i) => resolved.filter((_, j) => j !== i && polygonInside(outlines[i]!, outlines[j]!) && !polygonInside(outlines[j]!, outlines[i]!)).length);
   const isHole = resolved.map((r, i) => {
     if (r.mode === "subtract") return true;
     if (r.mode === "add") return false;
-    return resolved.some((_, j) => j !== i && polygonInside(outlines[i]!, outlines[j]!) && !polygonInside(outlines[j]!, outlines[i]!));
+    return depth[i]! % 2 === 1;
   });
   if (!isHole.includes(false)) throw new FeatureError("Every shape in this sketch is a hole. Add an outer shape.");
   // Shapes whose bounding boxes don't meet can't affect each other, so each cluster is combined on its own (the
   // boolean cost grows steeply with the number of shapes in one go) and the clusters are then placed side by side.
-  const parts = clusters(outlines).map((idx) => clusterDrawing(resolved, outlines, isHole, idx, notes)).filter((d): d is Drawing => d !== null);
+  const parts = clusters(outlines).map((idx) => clusterDrawing(resolved, outlines, isHole, idx, notes, depth)).filter((d): d is Drawing => d !== null);
   if (parts.length === 1) return parts[0]!;
   return joinDrawings(parts);
 }
@@ -418,7 +469,7 @@ export function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator):
   if (r.type === "polyline" && r.open) {
     if (r.points.length < 2) throw new FeatureError("The path needs at least two points.");
     if (r.ctrl && r.points.length >= 3) d = drawPointsInterpolation(entityOutline(r), {}, { closeShape: false });
-    else if (r.smooth && r.points.length >= 3) d = drawPointsInterpolation(r.points, {}, { closeShape: false });
+    else if (r.smooth && r.points.length >= 3) d = catmullRomDrawing(r.points, false);
     else d = penPath(r.points, r.arcs, false, r.splines);
   } else d = entityDrawing(r);
   const placed = d.sketchOnPlane(planeFromFrame(frame)) as unknown as AnySketch;

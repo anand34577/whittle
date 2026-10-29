@@ -12,6 +12,7 @@ import { problemsOf } from "./problems";
 import type { Draft } from "immer";
 import {
   type EdgeRef,
+  LENGTH_TO_MM,
   type FaceRef,
   type Feature,
   type FeatureType,
@@ -77,7 +78,7 @@ export interface ToolDef {
   input_schema: { type: "object"; properties: Record<string, unknown>; required?: string[] };
 }
 
-const num = { type: ["number", "string"], description: "A number (millimetres / degrees) or a formula using parameters, e.g. \"width / 2\"" };
+const num = { type: ["number", "string"], description: "A number (in the design's length unit, see `units` in get_design; degrees for angles) or a formula using parameters, e.g. \"width / 2\"" };
 
 const FACE_SELECTOR = {
   type: "string",
@@ -162,7 +163,7 @@ export const DESIGN_TOOLS: ToolDef[] = [
   {
     name: "constrain_sketch",
     description:
-      "Professional parametric sketching on an existing sketch: add points, lines, arcs and circles that a constraint solver positions, then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric, midpoint, collinear) and driving dimensions (distance, radius, diameter of a circle, angle) whose values may be formulas using parameters. Positions you give are rough guesses in mm; constraints and dimensions make them exact. Closed loops of lines/arcs become solid profiles (inner loops become holes). Also trims and extends. Returns the ids of what you named and the solver state: 'full' (fully defined), 'under' (dof = freedoms left), 'over' (conflicting/redundant, with a message naming them) or 'error'.",
+      "Professional parametric sketching on an existing sketch: add points, lines, arcs and circles that a constraint solver positions, then constraints (coincident, horizontal, vertical, parallel, perpendicular, tangent, equal, fixed, symmetric, midpoint, collinear) and driving dimensions (distance, radius, diameter of a circle, angle) whose values may be formulas using parameters. Positions and sizes you give are rough guesses in the design's units; constraints and dimensions make them exact. Closed loops of lines/arcs become solid profiles (inner loops become holes). Also trims and extends. Returns the ids of what you named and the solver state: 'full' (fully defined), 'under' (dof = freedoms left), 'over' (conflicting/redundant, with a message naming them) or 'error'.",
     input_schema: {
       type: "object",
       properties: {
@@ -536,9 +537,11 @@ function applySketchEdits(sk: SketchFeature, input: Record<string, unknown>): Re
     if (typeof p !== "string") throw new ApiInputError(`"${r}": use .start or .end on a line or arc, .center on an arc, circle or ellipse, .major on an ellipse.`);
     return p;
   };
+  // Positions and sizes come in the design's units, like every other value (audit W-10); the geometry is kept in mm.
+  const k = LENGTH_TO_MM[doc().units];
   const xy = (v: unknown, what: string): Vec2 => {
-    if (!Array.isArray(v) || v.length !== 2 || !v.every((x) => Number.isFinite(Number(x)))) throw new ApiInputError(`${what} is [x, y] in mm.`);
-    return [Number(v[0]), Number(v[1])];
+    if (!Array.isArray(v) || v.length !== 2 || !v.every((x) => Number.isFinite(Number(x)))) throw new ApiInputError(`${what} is [x, y] in ${doc().units}.`);
+    return [Number(v[0]) * k, Number(v[1]) * k];
   };
   const at = (v: unknown, what: string): Vec2 | Id => (typeof v === "string" ? id(v) : xy(v, what));
   for (const raw of (input.geometry ?? []) as Record<string, unknown>[]) {
@@ -556,14 +559,14 @@ function applySketchEdits(sk: SketchFeature, input: Record<string, unknown>): Re
         if (!gid) throw new ApiInputError(`Arc "${label}": its three points are in a straight line.`);
         break;
       case "circle": {
-        const r = Number(raw.radius);
-        if (!(r > 0)) throw new ApiInputError(`Circle "${label}" needs a radius greater than zero (mm).`);
+        const r = Number(raw.radius) * k;
+        if (!(r > 0)) throw new ApiInputError(`Circle "${label}" needs a radius greater than zero (${doc().units}).`);
         gid = addCircle(sk, at(raw.center, `${label}.center`), r, !!raw.construction);
         break;
       }
       case "ellipse": {
-        const minor = Number(raw.minor);
-        if (!(minor > 0)) throw new ApiInputError(`Ellipse "${label}" needs a minor radius greater than zero (mm).`);
+        const minor = Number(raw.minor) * k;
+        if (!(minor > 0)) throw new ApiInputError(`Ellipse "${label}" needs a minor radius greater than zero (${doc().units}).`);
         const c = at(raw.center, `${label}.center`);
         const major = xy(raw.major, `${label}.major`);
         const cp = typeof c === "string" ? pointAt(sk, c) : c;
@@ -683,8 +686,9 @@ export function describeDesign() {
       name: d.bodies[b.id]?.name ?? b.id,
       color: d.bodies[b.id]?.color,
       size: [0, 1, 2].map((k) => L(b.bbox[1][k]! - b.bbox[0][k]!)).join(" × "),
-      bbox_min: b.bbox[0].map((v) => Math.round(v * 1000) / 1000),
-      bbox_max: b.bbox[1].map((v) => Math.round(v * 1000) / 1000),
+      // In the design's units, like everything else the assistant reads and writes (audit W-10).
+      bbox_min: b.bbox[0].map((v) => Math.round((v / LENGTH_TO_MM[d.units]) * 10000) / 10000),
+      bbox_max: b.bbox[1].map((v) => Math.round((v / LENGTH_TO_MM[d.units]) * 10000) / 10000),
       volume_mm3: Math.round(b.volume * 100) / 100,
       faces: b.faces.length,
       edges: b.edges.length,
@@ -731,9 +735,16 @@ function describeSelection(): Record<string, unknown>[] {
  * Run one operation. Always resolves to a JSON-serialisable result; input
  * problems come back as `{ error }` so an assistant can fix and retry.
  */
-export async function runDesignTool(name: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function runDesignTool(name: string, input: Record<string, unknown>, opts: { assistant?: boolean } = {}): Promise<Record<string, unknown>> {
   try {
-    if (useApp.getState().session) commitSession();
+    const open = useApp.getState().session;
+    // For the assistant, the person's open sketch or feature dialog is theirs: reading is fine, but a change would
+    // have to close it (and their Cancel would no longer undo it as one step), so changes wait (audit A-1).
+    // A script the person runs themselves (`whittle.api.run`) acts on what they have open, as before.
+    if (open && opts.assistant && name !== "get_design") {
+      return { error: `The person has "${open.label}" open in the editor. Ask them to finish or cancel it, then try again. Don't retry until they say so.` };
+    }
+    if (open && !opts.assistant) commitSession();
     const label = (s: string) => `Assistant: ${s}`;
     switch (name) {
       case "get_design":
@@ -873,6 +884,10 @@ export async function runDesignTool(name: string, input: Record<string, unknown>
 
       case "undo": {
         const label0 = history.undoLabel;
+        // For the assistant, only its own steps: the top of the history may be something the person did since.
+        if (opts.assistant && !label0?.startsWith("Assistant: ")) {
+          return { error: label0 ? `The last step is the person's own ("${label0}"), not yours, so it was left alone.` : "There is nothing to undo." };
+        }
         undo();
         await settled();
         return { ok: true, undid: label0 ?? null };

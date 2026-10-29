@@ -13,8 +13,9 @@ import type { Viewport } from "../viewport/Viewport";
 
 /** A kernel fix ("9.8 mm") as a plain number in the document's units, so it stays draggable and reads naturally. */
 export function fixInUnits(value: string, units: LengthUnit): string {
-  const m = /^\s*(-?[\d.]+)\s*mm\s*$/.exec(value);
-  return m ? trim(Number(m[1]) / LENGTH_TO_MM[units], 3) : value;
+  const m = /^\s*(-?[\d.]+)\s*([a-z]+)\s*$/.exec(value);
+  if (m?.[2] === units) return m[1]!; // the kernel already writes fixes in the design's unit
+  return m?.[2] === "mm" ? trim(Number(m[1]) / LENGTH_TO_MM[units], 3) : value;
 }
 
 type Round = (v: number, fine: boolean) => number;
@@ -357,6 +358,8 @@ export function DragHandles({
   const drag = useRef<{ key: string; x: number; y: number; start: number; flip0: boolean; u: [number, number]; ppm: number } | null>(null);
   const [live, setLive] = useState<string | null>(null);
   const [snapped, setSnapped] = useState(false);
+  // What is typed in a handle's number box, kept while it has focus so "2." or "-" can be typed (audit W-15).
+  const [typing, setTyping] = useState<{ key: string; text: string } | null>(null);
   const endDrag = () => {
     drag.current = null;
     // The last rebuild may still be on its way: give its answer a moment to arrive.
@@ -441,17 +444,21 @@ export function DragHandles({
                 className="drag-handle__input mono"
                 inputMode="decimal"
                 aria-label={`${s.label ?? "Value"} in ${s.unit}`}
-                value={Math.round(s.value * 1000) / 1000}
+                value={typing?.key === s.key ? typing.text : String(Math.round(s.value * 1000) / 1000)}
                 onPointerDown={(e) => e.stopPropagation()}
+                onFocus={(e) => setTyping({ key: s.key, text: e.currentTarget.value })}
+                onBlur={() => setTyping(null)}
                 onKeyDown={(e) => {
                   // Enter finishes the edit, Escape abandons it, as everywhere else.
                   if (e.key === "Enter") (e.currentTarget.blur(), commitSession(true));
                   else if (e.key === "Escape") (e.currentTarget.blur(), cancelSession());
                 }}
                 onChange={(e) => {
+                  setTyping({ key: s.key, text: e.target.value });
                   const t = e.target.value.trim();
                   const v = Number(t);
-                  if (t === "" || !Number.isFinite(v)) return;
+                  // Half-typed numbers ("", "-", "2.") wait for the next key; the box keeps showing them.
+                  if (t === "" || t === "-" || t === "." || !Number.isFinite(v)) return;
                   s.set(s.max !== undefined ? Math.min(s.max, s.min !== undefined ? Math.max(s.min, v) : v) : s.min !== undefined ? Math.max(s.min, v) : v, !!s.flip);
                 }}
               />

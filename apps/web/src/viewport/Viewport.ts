@@ -201,7 +201,7 @@ export class Viewport {
   private gridStep = 0;
   private sketchFrame: SketchFrame | null = null;
   private filter: PickFilter = { faces: true, edges: true, planes: false, sketches: true };
-  private sketchHit: { id: Id; pts: Vec3[][] }[] = [];
+  private sketchHit: { id: Id; pts: { pts: Vec3[]; closed: boolean }[] }[] = [];
   /** Pickable sketch areas (profiles). */
   private regionMeshes: THREE.Mesh[] = [];
   private anim: { from: Turntable; to: Turntable; t0: number; dur: number } | null = null;
@@ -369,7 +369,8 @@ export class Viewport {
     this.scene.environmentIntensity = this.theme.envIntensity;
     this.hemi.color.set(name === "paper" || name === "daylight" ? "#ffffff" : "#f4efe6");
     this.hemi.groundColor.set(name === "paper" || name === "daylight" ? "#b9b2a5" : "#3b3833");
-    for (const b of this.bodies.values()) (b.edges.material as LineMaterial).color.set(this.theme.edge);
+    // Wireframe edges are drawn in the sketch colour, like when they were built (audit V-1).
+    for (const b of this.bodies.values()) (b.edges.material as LineMaterial).color.set(this.view.display === "wire" ? this.theme.sketch : this.theme.edge);
     (this.shadow.material as THREE.MeshBasicMaterial).opacity = name === "paper" || name === "daylight" ? 0.22 : 0.5;
     this.gridStep = 0;
     this.buildPlanes();
@@ -417,11 +418,36 @@ export class Viewport {
 
   /* ───────────────────────── Grid & planes ───────────────────────── */
 
+  /**
+   * The design's length unit, in mm (audit U-2): the grid and grid snapping step in it. Metric designs use
+   * 1, 2, 5 x 10^n of their unit; inch and foot designs use inches, in halves down to 1/32 in below one inch.
+   */
+  private gridUnitMm = 1;
+  private gridImperial = false;
+  setGridUnits(unitMm: number, imperial: boolean) {
+    if (unitMm === this.gridUnitMm && imperial === this.gridImperial) return;
+    this.gridUnitMm = unitMm;
+    this.gridImperial = imperial;
+    this.gridStep = 0;
+    this.updateGrid();
+    this.invalidate();
+  }
+
   private updateGrid() {
     const dist = this.orbit.distance;
-    const raw = dist / 18;
-    const pow = Math.pow(10, Math.floor(Math.log10(raw)));
-    const step = raw / pow >= 5 ? pow * 5 : raw / pow >= 2 ? pow * 2 : pow;
+    const unit = this.gridImperial ? 25.4 : this.gridUnitMm;
+    const raw = dist / 18 / unit;
+    let stepU: number;
+    let majorEvery = 5;
+    if (this.gridImperial && raw < 1) {
+      // Binary fractions of an inch; the heavier lines fall on whole inches.
+      stepU = Math.max(1 / 32, Math.pow(2, Math.floor(Math.log2(raw))));
+      majorEvery = Math.max(2, Math.round(1 / stepU));
+    } else {
+      const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+      stepU = raw / pow >= 5 ? pow * 5 : raw / pow >= 2 ? pow * 2 : pow;
+    }
+    const step = stepU * unit;
     if (step === this.gridStep) return;
     this.gridStep = step;
     this.clearGroup(this.grid);
@@ -431,7 +457,7 @@ export class Viewport {
     const ext = n * step;
     for (let i = -n; i <= n; i++) {
       if (i === 0) continue;
-      const arr = i % 5 === 0 ? major : minor;
+      const arr = i % majorEvery === 0 ? major : minor;
       arr.push(-ext, i * step, 0, ext, i * step, 0, i * step, -ext, 0, i * step, ext, 0);
     }
     const mk = (pos: number[], color: string, opacity: number) => {
@@ -1128,10 +1154,10 @@ export class Viewport {
         this.fillGroup.add(fill);
       }
       const toWorld = this.frameMapper(s.frame);
-      const hit: Vec3[][] = [];
+      const hit: { pts: Vec3[]; closed: boolean }[] = [];
       for (const sh of s.shapes) {
         const pts = sh.pts.map(toWorld);
-        hit.push(pts);
+        hit.push({ pts, closed: sh.closed });
         if (pts.length < 2) continue;
         const geo = new LineSegmentsGeometry();
         geo.setPositions(this.segments(pts, sh.closed));
@@ -1435,8 +1461,9 @@ export class Viewport {
   private pickSketch(sp: Vec2): Pick | null {
     let best: { d: number; id: Id } | null = null;
     for (const s of this.sketchHit) {
-      for (const pts of s.pts) {
-        for (let i = 0; i < pts.length; i++) {
+      for (const { pts, closed } of s.pts) {
+        // An open path has no segment from its end back to its start (audit W-12).
+        for (let i = 0; i < (closed ? pts.length : pts.length - 1); i++) {
           const { d } = this.distToSegment(sp, this.worldToScreen(pts[i]!), this.worldToScreen(pts[(i + 1) % pts.length]!));
           if (d < 6 && (!best || d < best.d)) best = { d, id: s.id };
         }
@@ -1483,14 +1510,18 @@ export class Viewport {
       const p = this.worldToScreen(w);
       return p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1;
     };
-    const views = [...this.bodies.values()].filter((v) => v.visible);
+    // While a feature is edited, picks name faces and edges of the bodies before it, the same as a click (audit W-13).
+    const usePick = this.pickBodies.length > 0;
+    const views = usePick ? this.pickBodies : [...this.bodies.values()].filter((v) => v.visible);
     const meshes = views.map((v) => v.mesh);
     const tol = this.orbit.distance * 0.004;
     const visible = (w: Vec3) => {
       if (through) return true;
       const p = this.worldToScreen(w);
       this.raycaster.setFromCamera(new THREE.Vector2((p[0] / this.size.x) * 2 - 1, -((p[1] / this.size.y) * 2 - 1)), this.camera);
+      if (usePick) for (const m of meshes) m.visible = true;
       const hit = this.raycaster.intersectObjects(meshes, false)[0];
+      if (usePick) for (const m of meshes) m.visible = false;
       const dist = new THREE.Vector3(...w).sub(this.raycaster.ray.origin).dot(this.raycaster.ray.direction);
       return !hit || hit.distance >= dist - tol;
     };

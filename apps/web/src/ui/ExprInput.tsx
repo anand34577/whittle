@@ -30,6 +30,8 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
   const scrub = useRef<{ x: number; base: number; moved: boolean } | null>(null);
   // The value when editing started: what an out-of-range entry goes back to.
   const before = useRef(value);
+  /** Esc already restored the value: the blur that follows mustn't commit the typed text again. */
+  const escaped = useRef(false);
 
   useEffect(() => {
     if (!focused) setText(value);
@@ -70,6 +72,17 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
   const nudge = (dir: number, e: KeyboardEvent) => {
     if (!result.ok) return;
     const step = (e.shiftKey ? 10 : e.altKey ? 0.1 : 1) * (kind === "count" ? 1 : 1);
+    if (!isPlainNumber) {
+      // A formula stays a formula (audit W-9): the arrows change a "+ n" at its end instead of replacing it.
+      const unit = kind === "angle" ? " deg" : "";
+      const m = /^(.*?)\s*([+-])\s*(\d+(?:\.\d+)?)(\s*deg)?$/.exec(text.trim());
+      const base = m ? m[1]! : text.trim();
+      const off = (m ? (m[2] === "-" ? -1 : 1) * Number(m[3]) : 0) + dir * step;
+      const t = Math.abs(off) < 1e-9 ? base : `${base} ${off > 0 ? "+" : "-"} ${trim(Math.abs(off), 4)}${unit}`;
+      setText(t);
+      commit(t, true);
+      return;
+    }
     let display = result.value / factor + dir * step;
     if (min !== undefined) display = Math.max(min, display);
     if (max !== undefined) display = Math.min(max, display);
@@ -123,6 +136,10 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
           }}
           onBlur={() => {
             setFocused(false);
+            if (escaped.current) {
+              escaped.current = false;
+              return;
+            }
             if (!error) onChange(text, false);
             else {
               // Refused, as a dialog would: say why and keep the value it had.
@@ -155,9 +172,14 @@ export function ExprInput({ label, value, kind, onChange, hint, autoFocus, min, 
               if (s.session && s.mode.kind === "model") setTimeout(() => commitSession(true), 0);
             } else if (e.key === "Escape") {
               // First Esc undoes the typing; with nothing typed, Esc cancels the feature as it does everywhere else.
-              const typed = text !== value;
-              setText(value);
+              // Keystrokes are committed live, so "typed" means changed since the field was focused (audit W-7).
+              const restore = before.current;
+              const typed = text !== restore;
+              setText(restore);
+              if (restore !== value) onChange(restore, false);
+              escaped.current = true;
               (e.target as HTMLInputElement).blur();
+              escaped.current = false;
               const s = useApp.getState();
               if (!typed && s.session && s.mode.kind === "model") setTimeout(cancelSession, 0);
             }

@@ -705,6 +705,13 @@ export function trimGeometry(sk: Geo, id: Id, click: Vec2): string | undefined {
     const b = pointOn(sk, lo.p, lo.by);
     const i = sk.geometry!.indexOf(src);
     sk.geometry![i] = { id, type: "arc", c: src.c, a, b, ...(src.construction ? { construction: true } : {}) };
+    // An arc has no diameter dimension: keep the size as a radius (audit C-3).
+    for (const k of sk.constraints ?? []) {
+      if (k.type === "diameter" && k.refs.length === 1 && k.refs[0] === id) {
+        k.type = "radius";
+        if (k.value !== undefined) k.value = `(${k.value}) / 2`;
+      }
+    }
     dropUnused(sk, before);
     return undefined;
   }

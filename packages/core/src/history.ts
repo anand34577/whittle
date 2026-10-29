@@ -47,15 +47,30 @@ export class History<T> {
   undo(state: T): { state: T; label: string } | null {
     const entry = this.undoStack.pop();
     if (!entry) return null;
+    let next: T;
+    try {
+      next = applyPatches(state as object, entry.inverse) as T;
+    } catch (e) {
+      // Leave both stacks as they were (audit C-12).
+      this.undoStack.push(entry);
+      throw e;
+    }
     this.redoStack.push(entry);
-    return { state: applyPatches(state as object, entry.inverse) as T, label: entry.label };
+    return { state: next, label: entry.label };
   }
 
   redo(state: T): { state: T; label: string } | null {
     const entry = this.redoStack.pop();
     if (!entry) return null;
+    let next: T;
+    try {
+      next = applyPatches(state as object, entry.patches) as T;
+    } catch (e) {
+      this.redoStack.push(entry);
+      throw e;
+    }
     this.undoStack.push({ ...entry, mergeKey: undefined });
-    return { state: applyPatches(state as object, entry.patches) as T, label: entry.label };
+    return { state: next, label: entry.label };
   }
 
   get canUndo(): boolean {

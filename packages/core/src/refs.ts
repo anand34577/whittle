@@ -163,7 +163,10 @@ export function isSketchConsumed(doc: WhittleDocument, sketchId: Id): boolean {
     (f) =>
       ((f.type === "extrude" || f.type === "revolve" || f.type === "rib") && f.sketch === sketchId) ||
       (f.type === "loft" && f.sketches.includes(sketchId)) ||
-      (f.type === "sweep" && (f.profile === sketchId || f.path === sketchId)),
+      (f.type === "sweep" && (f.profile === sketchId || f.path === sketchId)) ||
+      // A path for a pattern and a curve projected or built from a sketch use it too (audit C-12).
+      (f.type === "pattern" && f.pattern === "path" && f.path === sketchId) ||
+      (f.type === "curve" && f.sketch === sketchId),
   );
 }
 
@@ -176,7 +179,10 @@ export function activeEnd(doc: WhittleDocument): number {
 export function bodyIdsBefore(doc: WhittleDocument, endIndex = activeEnd(doc)): Id[] {
   const ids: Id[] = [];
   doc.features.slice(0, endIndex).forEach((f) => {
-    if (!f.suppressed && createsBody(f, ids.length === 0)) ids.push(f.id);
+    if (f.suppressed) return;
+    if (createsBody(f, ids.length === 0)) ids.push(f.id);
+    // Combine without "keep tools" uses the tool bodies up (audit C-12).
+    if (f.type === "combine" && !f.keepTools) for (const t of f.tools) if (t !== f.target && ids.includes(t)) ids.splice(ids.indexOf(t), 1);
   });
   return ids;
 }

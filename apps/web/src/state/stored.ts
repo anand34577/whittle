@@ -17,6 +17,59 @@ export const storesOnServer = () => mode === "remote";
 
 const localKey = (key: string) => `whittle.${key.replace(/:/g, ".")}`;
 
+/*
+ * Without a server, crash-recovery drafts go to IndexedDB, not localStorage: a design with an embedded
+ * import or picture is far over localStorage's ~5 MB, and IndexedDB keeps the time each draft was written.
+ * Drafts an older version left in localStorage are still read (and removed when replaced).
+ */
+const isDraft = (key: string) => key.startsWith("draft:");
+const IDB = "whittle-data";
+const IDB_STORE = "drafts";
+interface IdbRow {
+  key: string;
+  value: unknown;
+  updatedAt: number;
+}
+
+function idb<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let req: IDBOpenDBRequest;
+    try {
+      req = indexedDB.open(IDB, 1);
+    } catch (e) {
+      return reject(e);
+    }
+    req.onupgradeneeded = () => void req.result.createObjectStore(IDB_STORE, { keyPath: "key" });
+    req.onerror = () => reject(req.error ?? new Error("Browser storage is unavailable"));
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction(IDB_STORE, mode);
+        const r = run(tx.objectStore(IDB_STORE));
+        tx.oncomplete = () => {
+          db.close();
+          resolve(r.result);
+        };
+        tx.onerror = tx.onabort = () => {
+          db.close();
+          reject(tx.error ?? new Error("Browser storage is unavailable"));
+        };
+      } catch (e) {
+        db.close();
+        reject(e);
+      }
+    };
+  });
+}
+
+function removeLocal(key: string) {
+  try {
+    localStorage.removeItem(localKey(key));
+  } catch {
+    /* storage may be unavailable */
+  }
+}
+
 export async function readStored<T>(key: string): Promise<T | null> {
   if (mode === "remote") {
     try {
@@ -27,6 +80,10 @@ export async function readStored<T>(key: string): Promise<T | null> {
     }
   }
   if (mode === "pending") return null;
+  if (isDraft(key)) {
+    const row = await idb<IdbRow | undefined>("readonly", (st) => st.get(key)).catch(() => undefined);
+    if (row) return row.value as T;
+  }
   try {
     const raw = localStorage.getItem(localKey(key));
     return raw === null ? null : (JSON.parse(raw) as T);
@@ -43,6 +100,9 @@ const superseded = new Map<string, () => void>();
 export function writeStored(key: string, value: unknown, delayMs = 0): Promise<void> {
   if (mode === "pending") return Promise.resolve();
   if (mode === "local") {
+    if (isDraft(key)) {
+      return idb("readwrite", (st) => st.put({ key, value, updatedAt: Date.now() } satisfies IdbRow)).then(() => removeLocal(key));
+    }
     try {
       localStorage.setItem(localKey(key), JSON.stringify(value));
       return Promise.resolve();
@@ -76,11 +136,8 @@ export async function deleteStored(key: string): Promise<void> {
     return;
   }
   if (mode === "local") {
-    try {
-      localStorage.removeItem(localKey(key));
-    } catch {
-      /* storage may be unavailable */
-    }
+    if (isDraft(key)) await idb("readwrite", (st) => st.delete(key)).catch(() => {});
+    removeLocal(key);
   }
 }
 
@@ -89,16 +146,30 @@ export async function listStored(prefix: string): Promise<{ key: string; updated
   if (mode === "remote") return apiJson(`/me/data?prefix=${encodeURIComponent(prefix)}`);
   if (mode === "pending") return [];
   const out: { key: string; updatedAt: number }[] = [];
+  if (isDraft(prefix)) {
+    const rows = await idb<IdbRow[]>("readonly", (st) => st.getAll()).catch(() => [] as IdbRow[]);
+    for (const r of rows) if (r.key.startsWith(prefix)) out.push({ key: r.key, updatedAt: r.updatedAt });
+  }
   try {
     const want = localKey(prefix);
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k?.startsWith(want)) out.push({ key: prefix + k.slice(want.length).replace(/^\./, ""), updatedAt: 0 });
+      if (!k?.startsWith(want)) continue;
+      const key = prefix + k.slice(want.length).replace(/^\./, "");
+      if (out.some((o) => o.key === key)) continue;
+      // localStorage keeps no time: use the draft's own `at` when it has one.
+      let updatedAt = 0;
+      try {
+        updatedAt = Date.parse((JSON.parse(localStorage.getItem(k) ?? "null") as { at?: string } | null)?.at ?? "") || 0;
+      } catch {
+        /* not JSON */
+      }
+      out.push({ key, updatedAt });
     }
   } catch {
     /* storage may be unavailable */
   }
-  return out;
+  return out.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /** Move data an earlier version kept in this browser onto the server, then forget the browser copy. */

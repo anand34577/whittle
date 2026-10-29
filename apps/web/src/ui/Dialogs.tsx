@@ -33,6 +33,7 @@ import { mutate, selectedBodyId, setPrefs, useApp } from "../state/store";
 import { promptDialog } from "../state/dialogs";
 import { TEMPLATES } from "../state/templates";
 import { LESSONS, lessonById } from "../state/lessons";
+import { NAV_PRESETS } from "../state/prefs";
 import { Icon } from "./icons";
 import { Checkbox, Select } from "./controls";
 import { ProfilePicker } from "./Settings";
@@ -188,7 +189,8 @@ export function ParamsDialog() {
           <p className="muted small">Save the current sizes under a name, then switch the whole design between them with one click.</p>
           <div className="variants__list">
             {(doc.variants ?? []).map((v) => {
-              const active = doc.parameters.every((p) => v.values[p.name] === undefined || v.values[p.name] === p.expr);
+              // Active when it sets at least one parameter and every one it sets matches (audit W-10).
+              const active = doc.parameters.some((p) => v.values[p.name] !== undefined) && doc.parameters.every((p) => v.values[p.name] === undefined || v.values[p.name] === p.expr);
               return (
                 <span key={v.id} className={`variant ${active ? "is-on" : ""}`}>
                   <button
@@ -426,9 +428,10 @@ export function ShortcutsDialog() {
     if (!c.keys || !hit(c.label, c.keys, c.keywords)) continue;
     groups.set(c.group, [...(groups.get(c.group) ?? []), c]);
   }
+  // The buttons of the navigation preset chosen in Settings, not always the default one (audit G-1).
+  const nav = NAV_PRESETS.find((n) => n.id === useApp.getState().prefs.nav) ?? NAV_PRESETS[0]!;
   const allMouse = [
-    ["Left-drag", "Orbit"],
-    ["Right-drag / middle-drag", "Pan"],
+    [`Drag (${nav.label})`, nav.blurb],
     ["Wheel", "Zoom to cursor"],
     ["Click", "Select (Shift adds)"],
     ["Alt+click", "Select what's behind (again: further back)"],
@@ -603,7 +606,7 @@ function ServerLibrary() {
   const [q, setQ] = useState("");
   const load = () =>
     apiJson<ServerDesign[]>("/designs")
-      .then(setList)
+      .then((l) => (setList(l), setError(null))) // an earlier failure doesn't stay on screen (audit UI-5)
       .catch((e: Error) => setError(e.message));
   useEffect(() => void load(), []);
   const remove = async (d: ServerDesign) => {
@@ -666,7 +669,8 @@ function RecentLibrary() {
             <button className="recent__open" disabled={!r.exists} onClick={() => void openPath(r.path)} title={r.path}>
               <Icon name="file" size={16} />
               <span className="recent__name">{r.name}</span>
-              <small className="recent__path muted">{r.exists ? r.path : "Moved or deleted"}</small>
+              {/* Left-to-right marks keep a path's leading "/" or "C:\" in place in the right-to-left (cut from the left) box, audit UI-6. */}
+              <small className="recent__path muted">{r.exists ? `\u200e${r.path}\u200e` : "Moved or deleted"}</small>
               <small className="muted">{ago(r.openedAt)}</small>
             </button>
             <button
@@ -709,7 +713,7 @@ export function Welcome() {
       className={`start-card start-card--learn ${guided ? "start-card--primary" : ""}`}
       onClick={() =>
         void newDesign("mm", "My first part").then((ok) => {
-          if (ok) useApp.setState({ coach: "first", panel: null });
+          if (ok) (untick("first"), useApp.setState({ coach: "first", panel: null }));
         })
       }
     >
@@ -754,6 +758,7 @@ export function Welcome() {
                 <b>Continue where you left off</b>
                 <small>
                   {recovered.doc.name} · {new Date(recovered.at).toLocaleString()}
+                  {recovered.unfinished && " · includes the step you were editing"}
                 </small>
               </span>
             </button>
@@ -862,10 +867,16 @@ export function VersionsDialog() {
 
 /** Steps stay ticked once done in order (closing a panel never unticks one). */
 const ticked = new Set<string>();
+/** A lesson started again starts with nothing ticked (audit G-2). */
+const untick = (id: string) => {
+  for (const k of [...ticked]) if (k.startsWith(`${id}:`)) ticked.delete(k);
+};
 
 const startLesson = (id: string) =>
   void newDesign("mm", lessonById(id)?.title).then((ok) => {
-    if (ok) useApp.setState({ coach: id, panel: null });
+    if (!ok) return;
+    untick(id);
+    useApp.setState({ coach: id, panel: null });
   });
 
 export function Coach() {

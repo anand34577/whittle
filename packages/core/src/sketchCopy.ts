@@ -5,8 +5,9 @@
  * Everything works on stored positions: bake the solution first.
  */
 import type { Id, SketchConstraint, SketchFeature, SketchGeom, Vec2 } from "./model";
-import { addConstraint, addLine, addPoint, circleCircle, geomById, geomType, lineCircle, lineLine, pointAt } from "./constraints";
+import { addConstraint, addLine, addPoint, circleCircle, dropLengths, geomById, geomType, lineCircle, lineLine, pointAt } from "./constraints";
 import { uid } from "./factory";
+import { type LengthUnit, lengthText } from "./units";
 
 type Geo = Pick<SketchFeature, "geometry" | "constraints">;
 const dist = (a: Vec2, b: Vec2) => Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -164,9 +165,14 @@ export function scaleGeometry(sk: Geo, ids: Id[], k: number, base: Vec2): string
     }
   }
   const inside = new Set<Id>([...points, ...curves.map((c) => c.id)]);
+  // Distances to the origin or an axis scale too when the scaling is about a point on it (audit C-12).
+  const near = (v: number) => Math.abs(v) < 1e-9;
+  if (near(base[0]) && near(base[1])) inside.add("origin");
+  if (near(base[1])) inside.add("xaxis");
+  if (near(base[0])) inside.add("yaxis");
   for (const c of curves) if (c.type === "circle" || c.type === "ellipse") c.r *= k;
   for (const c of sk.constraints ?? []) {
-    if ((c.type === "distance" || c.type === "radius" || c.type === "diameter") && c.value !== undefined && c.refs.every((r) => inside.has(r) || r === "origin")) c.value = `(${c.value})*${k}`;
+    if ((c.type === "distance" || c.type === "radius" || c.type === "diameter") && c.value !== undefined && c.refs.every((r) => inside.has(r))) c.value = `(${c.value})*${k}`;
   }
   return undefined;
 }
@@ -187,6 +193,8 @@ export function breakLine(sk: Geo, lineId: Id, cutterId: Id): string | undefined
   const second = uid("l");
   sk.geometry!.push({ id: second, type: "line", a: p, b: g.b, ...(g.construction ? { construction: true } : {}) });
   g.b = p;
+  // The old length and "equal" no longer describe either half (audit C-2).
+  dropLengths(sk, lineId);
   addConstraint(sk, "coincident", [p, cutterId]);
   for (const k of [...(sk.constraints ?? [])]) {
     if (k.refs.length === 1 && k.refs[0] === lineId && (k.type === "horizontal" || k.type === "vertical")) addConstraint(sk, k.type, [second]);
@@ -266,14 +274,14 @@ type Curve = { type: "line"; a: Vec2; b: Vec2 } | { type: "circle"; c: Vec2; r: 
  * positive length or formula) each new line also keeps that distance from its original, so the
  * copy follows when the original changes and the offset can be edited like any dimension.
  */
-export function offsetGeometry(sk: Geo, ids: Id[], d: number, value?: string): string | undefined {
+export function offsetGeometry(sk: Geo, ids: Id[], d: number, value?: string, units: LengthUnit = "mm"): string | undefined {
   if (Math.abs(d) < 1e-9) return "The offset distance must not be zero.";
   const sel = ids.map((i) => geomById(sk, i)).filter((g): g is SketchGeom => !!g && !g.construction);
   const circles = sel.filter((g): g is Extract<SketchGeom, { type: "circle" }> => g.type === "circle");
   const segs = sel.filter((g): g is Line | Arc => g.type === "line" || g.type === "arc");
   if (!circles.length && !segs.length) return "Select lines, arcs or circles to offset.";
   for (const c of circles) {
-    if (c.r + d <= 1e-9) return `That would shrink the circle to nothing: the most it can shrink is ${c.r.toFixed(2)} mm.`;
+    if (c.r + d <= 1e-9) return `That would shrink the circle to nothing: the most it can shrink is ${lengthText(c.r, units, 2)} ${units}.`;
   }
   const found = chains(sk, segs);
   if (typeof found === "string") return found;
@@ -297,8 +305,8 @@ export function offsetGeometry(sk: Geo, ids: Id[], d: number, value?: string): s
           const a0 = Math.atan2(pa[1] - c[1], pa[0] - c[0]);
           let sw = Math.atan2(pb[1] - c[1], pb[0] - c[0]) - a0;
           sw = ((sw % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-          const dir = s.from === s.g.a ? 1 : -1;
-          const mid = a0 + (dir === 1 ? sw / 2 : sw / 2);
+          // The middle of the arc is the same whichever end the chain enters from.
+          const mid = a0 + sw / 2;
           poly.push([c[0] + dist(c, pa) * Math.cos(mid), c[1] + dist(c, pa) * Math.sin(mid)]);
         }
       }
@@ -350,6 +358,9 @@ export function offsetGeometry(sk: Geo, ids: Id[], d: number, value?: string): s
   for (const c of circles) {
     const id = uid("c");
     sk.geometry!.push({ id, type: "circle", c: c.c, r: c.r + d });
+    // With a typed distance, the copy's size follows the original's dimension (audit C-12).
+    const dim = value ? (sk.constraints ?? []).find((k) => k.refs.length === 1 && k.refs[0] === c.id && (k.type === "radius" || k.type === "diameter") && k.value !== undefined && !k.driven) : undefined;
+    if (dim) addConstraint(sk, "radius", [id], dim.type === "radius" ? `(${dim.value}) + (${value})` : `(${dim.value}) / 2 + (${value})`);
   }
   found.forEach((ch, ci) => {
     const js = joints[ci]!;

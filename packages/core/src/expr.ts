@@ -26,6 +26,8 @@ export interface Quantity {
   bare: boolean;
   /** Built from pi or tau, so in an angle context it means radians (`pi / 2` is 90°, not 1.57°). */
   radians?: boolean;
+  /** A plain number added to pi or tau (`90 + pi`): in an angle field it can't be told whether the number is degrees or radians. */
+  mixed?: boolean;
 }
 
 const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
@@ -258,6 +260,8 @@ function angleArg(q: Quantity, ctx: EvalContext, fn: string): number {
 
 /** A bare number scaled by a plain ratio (pi, sin(30), a count) stays bare, so `10 * pi` still adopts the field's unit. */
 const keepsRadians = (a: Quantity, b: Quantity) => (a.radians || b.radians) && isDimensionless(a.dim) && isDimensionless(b.dim) ? true : undefined;
+/** `pi + 1`: one side is in radians, the other a bare number that would be read as radians too (audit C-8). */
+const mixesRadians = (a: Quantity, b: Quantity) => (a.mixed || b.mixed || (!!a.radians !== !!b.radians && (a.radians ? b.bare : a.bare)) ? true : undefined);
 const scalesBare = (a: Quantity, b: Quantity) => (a.bare || isDimensionless(a.dim)) && (b.bare || isDimensionless(b.dim)) && (a.bare || b.bare);
 
 function evalBinary(n: Extract<Node, { t: "bin" }>, ctx: EvalContext): Quantity {
@@ -266,16 +270,17 @@ function evalBinary(n: Extract<Node, { t: "bin" }>, ctx: EvalContext): Quantity 
   switch (n.op) {
     case "+":
       [a, b] = sameDims(a, b, ctx, "add");
-      return { value: a.value + b.value, dim: a.dim, bare: a.bare && b.bare, radians: keepsRadians(a, b) };
+      return { value: a.value + b.value, dim: a.dim, bare: a.bare && b.bare, radians: keepsRadians(a, b), mixed: mixesRadians(a, b) };
     case "-":
       [a, b] = sameDims(a, b, ctx, "subtract");
-      return { value: a.value - b.value, dim: a.dim, bare: a.bare && b.bare, radians: keepsRadians(a, b) };
+      return { value: a.value - b.value, dim: a.dim, bare: a.bare && b.bare, radians: keepsRadians(a, b), mixed: mixesRadians(a, b) };
     case "*":
       return {
         value: a.value * b.value,
         dim: { len: a.dim.len + b.dim.len, ang: a.dim.ang + b.dim.ang },
         bare: scalesBare(a, b),
         radians: keepsRadians(a, b),
+        mixed: a.mixed || b.mixed || undefined,
       };
     case "/":
       if (b.value === 0) throw new ExprError("Division by zero", n.pos);
@@ -284,6 +289,7 @@ function evalBinary(n: Extract<Node, { t: "bin" }>, ctx: EvalContext): Quantity 
         dim: { len: a.dim.len - b.dim.len, ang: a.dim.ang - b.dim.ang },
         bare: scalesBare(a, b),
         radians: keepsRadians(a, b),
+        mixed: a.mixed || b.mixed || undefined,
       };
     case "^":
       return power(a, b, n.pos);
@@ -434,10 +440,14 @@ export type EvalResult = { ok: true; value: number } | { ok: false; error: strin
 
 /** Evaluate an expression and convert the result to the expected kind (mm / rad / plain). */
 export function evaluate(src: string | number, kind: QuantityKind, ctx: EvalContext): EvalResult {
-  if (typeof src === "number") return { ok: true, value: src };
+  // Numbers passed directly (solved sketch positions, for example) get the same finite check as formulas (audit C-7).
+  if (typeof src === "number") return Number.isFinite(src) ? { ok: true, value: src } : { ok: false, error: "The result isn't a finite number" };
   try {
     let q = evalNode(parse(src), ctx);
     const want = KIND_DIM[kind];
+    if (q.mixed && q.radians && dimEquals(want, KIND_DIM.angle)) {
+      return { ok: false, error: 'Give the plain number a unit: "pi rad + 10 deg", or write it all in degrees ("180 + 10").' };
+    }
     if (q.bare) q = adopt(q, want, ctx);
     else if (q.radians && isDimensionless(q.dim) && dimEquals(want, KIND_DIM.angle)) q = { value: q.value, dim: want, bare: false };
     if (!dimEquals(q.dim, want)) {

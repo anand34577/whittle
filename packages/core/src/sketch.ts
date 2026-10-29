@@ -4,6 +4,7 @@
  */
 import type { Evaluator } from "./params";
 import type { SketchEntity, Vec2, Vec3 } from "./model";
+import { lengthText } from "./units";
 
 export type ResolvedEntity =
   | { id: string; type: "rect"; x: number; y: number; w: number; h: number; corner: number; angle: number; construction: boolean; mode: string }
@@ -109,7 +110,7 @@ export function resolveEntity(e: SketchEntity, ev: Evaluator): ResolvedEntity {
       if (teeth < 6 || teeth > 200) throw new Error("A gear needs between 6 and 200 teeth");
       if (module <= 0) throw new Error("Module must be greater than zero");
       const root = (module * teeth) / 2 - 1.25 * module;
-      if (bore < 0 || bore / 2 >= root * 0.95) throw new Error(`The bore must be smaller than ${(root * 1.9).toFixed(1)} mm`);
+      if (bore < 0 || bore / 2 >= root * 0.95) throw new Error(`The bore must be smaller than ${lengthText(root * 1.9, ev.units ?? "mm", 1)} ${ev.units ?? "mm"}`);
       return { ...common, type: "gear", cx: L(e.cx, "Center X"), cy: L(e.cy, "Center Y"), teeth, module, bore };
     }
   }

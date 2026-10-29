@@ -8,6 +8,9 @@ import { boxCenter, shapeBounds } from "./shared";
 import { type Shape3D, ProjectionCamera, drawProjection, makeBox, makeCompound } from "replicad";
 import type { DrawingSettings } from "./protocol";
 import { faceInfo } from "./refs";
+import { type LengthUnit, lengthText } from "@whittle/core";
+
+const UNIT_WORDS: Record<LengthUnit, string> = { mm: "millimetres", cm: "centimetres", m: "metres", in: "inches", ft: "feet" };
 
 interface View {
   key: "front" | "top" | "right" | "iso" | "section";
@@ -125,6 +128,8 @@ function dimV(y1: number, y2: number, x: number, text: string, right: boolean): 
 
 export interface DrawingOptions extends Omit<DrawingSettings, "parts"> {
   title: string;
+  /** The design's length unit: dimensions, the parts list and the title block use it (audit K-8). */
+  units?: LengthUnit;
   /** For the parts list: each body's name, volume (mm³) and material. */
   parts?: { name: string; volume: number; material?: string }[];
 }
@@ -142,6 +147,7 @@ export function buildDrawingSVG(shapes: Shape3D[], opts: DrawingOptions): string
   if (shapes.length === 0) throw new Error("There are no visible bodies to draw.");
   const [W, H] = SHEETS[opts.sheet ?? "A3"];
   const first = opts.angle === "first";
+  const unit: LengthUnit = opts.units ?? "mm";
   const all = shapes.length === 1 ? shapes[0]! : (makeCompound(shapes.map((s) => s.clone())) as Shape3D);
   const front = project(all, "front", "FRONT");
   const top = project(all, "top", "TOP");
@@ -233,10 +239,11 @@ export function buildDrawingSVG(shapes: Shape3D[], opts: DrawingOptions): string
   const [fx, fy] = at(front);
   const [tx0, ty0] = at(top);
   const [rx, ry] = at(right);
-  body += dimH(fx, fx + front.w * s, fy + front.h * s + 2, fmt(front.w));
-  body += dimV(fy, fy + front.h * s, fx - 3, fmt(front.h), false);
-  body += dimV(ty0, ty0 + top.h * s, tx0 + top.w * s + 3, fmt(top.h), true);
-  body += dimH(rx, rx + right.w * s, ry + right.h * s + 2, fmt(right.w));
+  const L = (mm: number) => lengthText(mm, unit, 2);
+  body += dimH(fx, fx + front.w * s, fy + front.h * s + 2, L(front.w));
+  body += dimV(fy, fy + front.h * s, fx - 3, L(front.h), false);
+  body += dimV(ty0, ty0 + top.h * s, tx0 + top.w * s + 3, L(top.h), true);
+  body += dimH(rx, rx + right.w * s, ry + right.h * s + 2, L(right.w));
 
   // The cutting plane on the top view: a chain line across it, lettered at both ends.
   if (section) {
@@ -255,7 +262,7 @@ export function buildDrawingSVG(shapes: Shape3D[], opts: DrawingOptions): string
     `<line x1="${W - 150}" y1="${tb}" x2="${W - 150}" y2="${H - MARGIN}" class="frame"/>` +
     `<line x1="${W - 90}" y1="${tb}" x2="${W - 90}" y2="${H - MARGIN}" class="frame"/>` +
     `<text x="${MARGIN + 4}" y="${tb + 9}" class="big">${esc(opts.title)}</text>` +
-    `<text x="${MARGIN + 4}" y="${tb + 17}" class="sm">Drawn with Whittle · ${first ? "first" : "third"}-angle projection · dimensions in millimetres</text>` +
+    `<text x="${MARGIN + 4}" y="${tb + 17}" class="sm">Drawn with Whittle · ${first ? "first" : "third"}-angle projection · dimensions in ${UNIT_WORDS[unit]}</text>` +
     `<text x="${W - 146}" y="${tb + 9}" class="sm">SCALE</text><text x="${W - 146}" y="${tb + 17}" class="big">${scaleLabel(den)}</text>` +
     `<text x="${W - 86}" y="${tb + 9}" class="sm">DATE</text><text x="${W - 86}" y="${tb + 17}" class="big">${date}</text>`;
 
@@ -266,8 +273,10 @@ export function buildDrawingSVG(shapes: Shape3D[], opts: DrawingOptions): string
     const bw = widths.reduce((a, b) => a + b, 0);
     const bx = W - MARGIN - bw;
     const by = tb - bomRows * ROW;
-    const head = ["#", "PART", "VOLUME cm³", "MATERIAL"];
-    const rows = [head, ...opts.parts.map((p, i) => [String(i + 1), p.name, fmt(p.volume / 1000), p.material ?? "-"])];
+    // Volumes in cm³ for metric designs, cubic inches for inch and foot designs.
+    const imperial = unit === "in" || unit === "ft";
+    const head = ["#", "PART", imperial ? "VOLUME in³" : "VOLUME cm³", "MATERIAL"];
+    const rows = [head, ...opts.parts.map((p, i) => [String(i + 1), p.name, fmt(p.volume / (imperial ? 16387.064 : 1000)), p.material ? (opts.materialNames?.[p.material] ?? p.material) : "-"])];
     bom += frame(bx, by, bw, bomRows * ROW);
     rows.forEach((r, i) => {
       let x = bx;

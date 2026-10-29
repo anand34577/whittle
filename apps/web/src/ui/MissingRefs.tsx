@@ -10,6 +10,12 @@ import type { Viewport } from "../viewport/Viewport";
 import { Icon } from "./icons";
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const dist = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+/** The kernel's own test for "still the same thing" (kernel refs.ts `jumpOk`): size within 4x, moved at most 3x its size. */
+const plausible = (now: number, was: number, moved: number, size: number) => {
+  const [lo, hi] = [Math.min(now, was), Math.max(now, was)];
+  return !(lo > 0 && hi / lo > 4) && moved <= 3 * size;
+};
 
 interface Ghost {
   at: Vec3;
@@ -22,13 +28,18 @@ function ghostsFor(f: Feature, regen: RegenResult | null): Ghost[] {
   const out: Ghost[] = [];
   const edges = (list: EdgeRef[], remove: (keep: EdgeRef[]) => void) => {
     for (const r of list) {
-      const found = bodies.find((b) => b.id === r.bodyId)?.edges.some((e) => Math.abs(dot(e.tangent, r.tangent)) > 0.9);
+      // Matched the way the kernel re-finds it, not "any parallel edge" (audit UI-3: on a box that is every edge).
+      const found = bodies
+        .find((b) => b.id === r.bodyId)
+        ?.edges.some((e) => e.curve === r.curve && Math.abs(dot(e.tangent, r.tangent)) > 0.999 && plausible(e.length, r.length, dist(e.mid, r.mid), Math.max(e.length, r.length)));
       if (!found) out.push({ at: r.mid, kind: "edge", drop: () => remove(list.filter((x) => x !== r)) });
     }
   };
   const faces = (list: FaceRef[], remove: (keep: FaceRef[]) => void) => {
     for (const r of list) {
-      const found = bodies.find((b) => b.id === r.bodyId)?.faces.some((x) => dot(x.normal, r.normal) > 0.9);
+      const found = bodies
+        .find((b) => b.id === r.bodyId)
+        ?.faces.some((x) => x.surface === r.surface && dot(x.normal, r.normal) > 0.999 && plausible(x.area, r.area, dist(x.center, r.center), Math.sqrt(Math.max(x.area, r.area))));
       if (!found) out.push({ at: r.center, kind: "face", drop: () => remove(list.filter((x) => x !== r)) });
     }
   };

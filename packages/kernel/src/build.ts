@@ -8,7 +8,7 @@
  * friendly message (and, where possible, a one-click fix) and later features
  * keep building on the last good state.
  */
-import { type BodyOp, type EdgeRef, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, entityOutline, expandSketch, frameAxes, planeOrigin, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
+import { type BodyOp, type EdgeRef, type LengthUnit, lengthText, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, entityOutline, expandSketch, frameAxes, planeOrigin, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
 import { Drawing, type Edge, type Face, type FaceFinder, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeSolid, Vector, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
 import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
@@ -283,6 +283,12 @@ export class Builder {
 
   /** Parse any imported files the document needs (async, so done before regen). */
   async prepareImports(doc: WhittleDocument): Promise<void> {
+    // Parsed files no step uses any more are let go, keeping a few in case an undo brings them back (audit K-5).
+    const using = new Set(doc.features.flatMap((f) => (f.type === "import" ? [importKey(f)] : [])));
+    for (const cache of [this.imports, this.importErrors] as Map<string, unknown>[]) {
+      const unused = [...cache.keys()].filter((k) => !using.has(k));
+      for (const k of unused.slice(0, Math.max(0, unused.length - 4))) cache.delete(k);
+    }
     for (const f of doc.features) {
       if (f.type !== "import") continue;
       const key = importKey(f);
@@ -314,6 +320,7 @@ export class Builder {
   private ghostFeature: Id | undefined;
 
   regen(doc: WhittleDocument, quality: "preview" | "final", pickBefore?: Id, preview?: Id): Omit<RegenResult, "seq"> {
+    unitName = doc.units;
     const t0 = performance.now();
     this.ghostFeature = preview ?? pickBefore;
     const { prev, statuses, rebuilt, end } = this.walk(doc);
@@ -452,7 +459,7 @@ export class Builder {
     for (let i = 0; i < end; i++) {
       const f = doc.features[i]!;
       // Reference images aren't geometry. The key chains every step before this one, so it is hashed to stay a fixed size.
-      const key = hashKey(prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined } : f)) + (f.type === "joint" ? compSig : ""));
+      const key = hashKey(prev.key + "|" + (f.type === "import" ? importKey(f) + f.scale + !!f.suppressed : JSON.stringify(f.type === "sketch" ? { ...f, image: undefined, name: undefined } : { ...f, name: undefined })) + (f.type === "joint" ? compSig : ""));
       const cached = this.cache[i];
       let snap: Snapshot;
       const needGhost = f.id === this.ghostFeature && !!(f as { op?: string }).op && !cached?.ghost;
@@ -733,7 +740,7 @@ export class Builder {
             const h = ev.num(f.height, "length", "Height");
             if (r <= 0 || h <= 0) throw new FeatureError("The outer radius and height must be greater than zero.");
             if (inner <= 0 || inner >= r) {
-              throw new FeatureError("The inner radius must be positive and smaller than the outer radius.", inner >= r ? { label: `Use ${fmt(r * 0.8)} mm`, field: "radius2", value: `${fmt(r * 0.8)} mm` } : undefined);
+              throw new FeatureError("The inner radius must be positive and smaller than the outer radius.", inner >= r ? { label: `Use ${lenText(r * 0.8)}`, field: "radius2", value: `${lenText(r * 0.8)}` } : undefined);
             }
             tool = makeCylinder(r, h, [px, py, pz], [0, 0, 1]).cut(makeCylinder(inner, h + 2, [px, py, pz - 1], [0, 0, 1]));
             break;
@@ -936,9 +943,9 @@ export class Builder {
           const what = f.type === "fillet" ? "fillet radius" : "chamfer distance";
           throw new FeatureError(
             fit
-              ? `A ${fmt(value)} mm ${what} is too large for these edges. The largest that fits is about ${fmt(fit)} mm.`
+              ? `A ${lenText(value)} ${what} is too large for these edges. The largest that fits is about ${lenText(fit)}.`
               : `This ${what} can't be applied to the selected edges. Try a much smaller value or fewer edges.`,
-            fit ? { label: `Use ${fmt(fit)} mm`, field, value: `${fmt(fit)} mm` } : undefined,
+            fit ? { label: `Use ${lenText(fit)}`, field, value: `${lenText(fit)}` } : undefined,
           );
         }
         return warning;
@@ -954,6 +961,7 @@ export class Builder {
         let warning: string | undefined;
         const faces: Face[] = [];
         for (const ref of f.faces) {
+          if (ref.bodyId !== bodyId) throw new FeatureError("All faces to open must belong to the body being shelled. Edit the shell and remove the others.");
           const res = resolveFace(body, ref);
           if (!res) throw new FeatureError("A face to open no longer exists. Edit the shell to re-pick it.");
           if (res.uncertain) warning = "A face moved after an upstream change. Please check the selection.";
@@ -978,8 +986,8 @@ export class Builder {
         } catch {
           const fit = performance.now() - started > 3000 ? null : largestWorking(t, walled);
           throw new FeatureError(
-            fit ? `A ${fmt(t)} mm wall is too thick for this body. About ${fmt(fit)} mm fits.` : FRIENDLY.shell!,
-            fit ? { label: `Use ${fmt(fit)} mm`, field: "thickness", value: `${fmt(fit)} mm` } : undefined,
+            fit ? `A ${lenText(t)} wall is too thick for this body. About ${lenText(fit)} fits.` : FRIENDLY.shell!,
+            fit ? { label: `Use ${lenText(fit)}`, field: "thickness", value: `${lenText(fit)}` } : undefined,
           );
         }
         return warning;
@@ -1121,7 +1129,7 @@ export class Builder {
     if (f.style !== "simple") {
       headD = ev.num(f.headDiameter, "length", "Head diameter");
       if (headD <= d) {
-        throw new FeatureError("The head diameter must be larger than the hole.", { label: `Use ${fmt(d * 1.8)} mm`, field: "headDiameter", value: `${fmt(d * 1.8)} mm` });
+        throw new FeatureError("The head diameter must be larger than the hole.", { label: `Use ${lenText(d * 1.8)}`, field: "headDiameter", value: `${lenText(d * 1.8)}` });
       }
       let sink = Math.PI / 2;
       if (f.style === "countersink" && f.sinkAngle) {
@@ -1151,8 +1159,10 @@ export class Builder {
       if (f.style === "counterbore") tool = tool.fuse(makeCylinder(headD / 2, headDepth + lift, top, down));
       if (f.style === "countersink") tool = tool.fuse(orient(frustumZ(headD / 2 + lift, d / 2, headDepth + lift), down, top));
       const before = out.faces.length;
+      const prior = out;
       out = out.cut(tool);
-      if (out.faces.length === before) missed.push(i + 1);
+      // Same face count can still be a hole (a cut through a face that was already split): check the volume too (audit K-5).
+      if (out.faces.length === before && !(measureShapeVolumeProperties(prior).volume - measureShapeVolumeProperties(out).volume > 1e-9)) missed.push(i + 1);
     }
     bodies.set(f.face.bodyId, clean(out));
     if (missed.length) {
@@ -1163,7 +1173,8 @@ export class Builder {
 }
 
 /** Normals of the named planes as replicad mirrors them (offset moves the plane along these). */
-const MIRROR_NORMALS: Record<"XY" | "XZ" | "YZ", Vec3> = { XY: [0, 0, 1], XZ: [0, 1, 0], YZ: [1, 0, 0] };
+/** The same normals as sketches and Split (audit K-7): an XZ offset of d is at y = -d everywhere. */
+const MIRROR_NORMALS: Record<"XY" | "XZ" | "YZ", Vec3> = { XY: ORIGIN_FRAMES.XY!.normal, XZ: ORIGIN_FRAMES.XZ!.normal, YZ: ORIGIN_FRAMES.YZ!.normal };
 
 /** Long enough to pass through every body from the sketch plane. */
 /** The signed distance along the sketch's normal to a flat face's plane (negative when the face is behind the sketch). */
@@ -1403,10 +1414,10 @@ function coilTool(f: CoilFeature, ev: Evaluator): Shape3D {
   const width = f.section === "circle" ? size : f.section === "triangle" ? size * 2 * tan30 : pitch / 2;
   if (width >= pitch * 0.98) {
     const fit = f.section === "circle" ? pitch * 0.9 : (pitch * 0.9) / (2 * tan30);
-    throw new FeatureError(`The section is too large for a ${fmt(pitch)} mm pitch, so the turns would overlap.`, {
-      label: `Use ${fmt(fit)} mm`,
+    throw new FeatureError(`The section is too large for a ${lenText(pitch)} pitch, so the turns would overlap.`, {
+      label: `Use ${lenText(fit)}`,
       field: "size",
-      value: `${fmt(fit)} mm`,
+      value: `${lenText(fit)}`,
     });
   }
   if (f.section === "circle" && size / 2 >= r) throw new FeatureError("The wire is thicker than the coil radius. Increase the radius.");
@@ -1686,6 +1697,9 @@ function profileFill(drawing: Drawing, frame: SketchFrame): Float32Array | undef
 }
 
 const fmt = (v: number) => String(Math.round(v * 100) / 100);
+/** The length unit of the design being built: messages and one-click fixes use it (audit C-9). */
+let unitName: LengthUnit = "mm";
+const lenText = (mm: number) => `${lengthText(mm, unitName, 2)} ${unitName}`;
 
 /**
  * Find (roughly) the largest value below `start` for which `attempt` succeeds. Each attempt is a whole failed build, so on

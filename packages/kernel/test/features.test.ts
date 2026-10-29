@@ -6,6 +6,7 @@ import opencascade from "replicad-opencascadejs";
 import { loadFont, setOC } from "replicad";
 import {
   type CombineFeature,
+  type EdgeRef,
   type Feature,
   type HoleFeature,
   type LoftFeature,
@@ -306,6 +307,22 @@ describe("closed shell", () => {
   });
 });
 
+describe("shell with a face of another body (audit W-6)", () => {
+  it("fails with a message instead of opening a look-alike face of the shelled body", () => {
+    const doc = newDocument();
+    const a = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+    const b = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+    b.position = ["100", "0", "0"];
+    const built = new Builder().regen(doc, "final");
+    const topOf = (id: string) => built.bodies.find((x) => x.id === id)!.faces.find((f) => f.surface === "PLANE" && f.normal[2] > 0.99)!;
+    push(doc, { id: uid(), type: "shell", name: "S", bodyId: a.id, faces: [{ bodyId: a.id, ...topOf(a.id) }, { bodyId: b.id, ...topOf(b.id) }], thickness: "2" } as Feature);
+    const r = new Builder().regen(doc, "final");
+    const st = r.status.at(-1)!;
+    expect(st.state).not.toBe("ok");
+    expect(JSON.stringify(st)).toMatch(/must belong to the body being shelled/);
+  });
+});
+
 describe("chamfer types", () => {
   // A 40 x 30 x 20 box; the top front edge (40 long) is cut, so the removed volume is a triangle x 40.
   const cut = (set: (c: Extract<Feature, { type: "chamfer" }>) => void) => {
@@ -341,5 +358,102 @@ describe("bounding solid", () => {
     const vol = (id: string) => r.bodies.find((b) => b.id === id)!.volume;
     expect(vol(box.id) / (22 * 22 * 32)).toBeCloseTo(1, 2);
     expect(vol(tube.id) / (Math.PI * 100 * 30)).toBeCloseTo(1, 2);
+  });
+});
+
+describe("XZ plane offsets agree between tools (audit K-7)", () => {
+  const meanY = (b: { edges: { mid: number[] }[] }) => b.edges.reduce((t, e) => t + e.mid[1]!, 0) / b.edges.length;
+  it("mirrors across y = -d, like an XZ sketch plane offset by d", () => {
+    const doc = newDocument();
+    const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+    const m = push(doc, { id: uid(), type: "mirror", name: "M", bodyId: box.id, plane: "XZ", offset: "50", merge: false } as Feature, true);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    expect(meanY(r.bodies.find((b) => b.id === m.id)!)).toBeCloseTo(-100, 3);
+  });
+  it("keeps the same shape for files saved before the change", async () => {
+    const { migrate } = await import("@whittle/core");
+    const d = migrate({ schema: 3, features: [{ id: "m", type: "mirror", plane: "XZ", offset: "50" }, { id: "t", type: "surface", op: "trim", plane: "XZ", offset: "2 mm", keep: "above" }, { id: "n", type: "mirror", plane: "XY", offset: "5" }] });
+    const [m, t, n] = d.features as unknown as Record<string, unknown>[];
+    expect(m!.offset).toBe("-(50)");
+    expect([t!.offset, t!.keep]).toEqual(["-(2 mm)", "below"]);
+    expect(n!.offset).toBe("5");
+  });
+});
+
+describe("pattern along a path (audit K-6)", () => {
+  it("spaces copies evenly by length on a path of unequal edges", () => {
+    const doc = newDocument();
+    const box = push(doc, makePrimitive(doc, "box"), true) as PrimitiveFeature;
+    // 100 mm then 20 mm: three copies sit at 0, 60 and 120 mm along it.
+    const path = sketchWith(doc, [{ id: uid("e"), type: "polyline", open: true, points: [["0", "0"], ["100", "0"], ["100", "20"]] } as SketchEntity]);
+    push(doc, { id: uid(), type: "pattern", name: "P", bodyId: box.id, pattern: "path", path: path.id, axis: "x", count: "3", spacing: "0", angle: "0", merge: false } as Feature);
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    const mids = r.bodies.flatMap((b) => b.edges.map((e) => e.mid));
+    const cx = (lo: number, hi: number) => mids.filter((m) => m[0]! > lo && m[0]! < hi);
+    // The box is 40 wide around x = 0, so the middle copy spans x = 40..80 (it was at the corner, 80..120, before).
+    expect(cx(39, 81).length).toBeGreaterThan(0);
+    expect(cx(85, 115).filter((m) => m[1]! < -10).length).toBe(0);
+  });
+});
+
+describe("re-resolving a lost edge (audit K-1)", () => {
+  it("flags the nearest look-alike as uncertain when it is far from the old edge", async () => {
+    const { makeBox } = await import("replicad");
+    const { edgeInfo, resolveEdge } = await import("../src/refs");
+    const box = makeBox([0, 0, 0], [40, 30, 20]);
+    const e = edgeInfo(box.edges[0]!);
+    // The same edge, just nudged: certain.
+    expect(resolveEdge(box, { bodyId: "b", ...e, mid: [e.mid[0] + 1e-6, e.mid[1], e.mid[2]] } as EdgeRef)!.uncertain).toBe(false);
+    // A 2 mm edge 8 mm below the box: the nearest box edge is clearly closest (the next is 28 mm away),
+    // but it is 20 times longer, so it is only a look-alike.
+    const bottom = box.edges.map(edgeInfo).find((x) => Math.abs(x.tangent[0]) > 0.99 && Math.abs(x.mid[1]) < 1e-6 && Math.abs(x.mid[2]) < 1e-6)!;
+    const far = resolveEdge(box, { bodyId: "b", ...bottom, mid: [bottom.mid[0], 0, -8], length: 2 } as EdgeRef)!;
+    expect(far.uncertain).toBe(true);
+  });
+});
+
+describe("engine aborts (audit K-2)", () => {
+  it("are not reported as an ordinary feature error", async () => {
+    const { describeError, isEngineAbort } = await import("../src/shared");
+    const f = { id: "f", type: "fillet" } as Feature;
+    expect(isEngineAbort(new WebAssembly.RuntimeError("memory access out of bounds"))).toBe(true);
+    expect(isEngineAbort(new Error("abort(OOM). Build with -sASSERTIONS for more info."))).toBe(true);
+    expect(isEngineAbort(new Error("BRep_API: command not done"))).toBe(false);
+    expect(() => describeError(f, new Error("abort(OOM)"))).toThrow();
+    expect(describeError(f, new Error("Pick an edge."))).toBe("Pick an edge.");
+  });
+});
+
+describe("an island inside a hole (audit K-4)", () => {
+  it("is kept: a plate with a ring cut into it, not a plain hole", () => {
+    const doc = newDocument();
+    const sk = sketchWith(doc, [
+      { id: uid("e"), type: "rect", x: "0", y: "0", w: "100", h: "100", anchor: "center" } as SketchEntity,
+      { id: uid("e"), type: "circle", cx: "0", cy: "0", r: "30" } as SketchEntity,
+      { id: uid("e"), type: "circle", cx: "0", cy: "0", r: "10" } as SketchEntity,
+    ]);
+    const ex = push(doc, makeExtrude(doc, sk.id), true);
+    (ex as { distance: string }).distance = "10";
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    const area = 100 * 100 - Math.PI * 30 * 30 + Math.PI * 10 * 10;
+    expect(r.bodies.reduce((t, b) => t + b.volume, 0)).toBeCloseTo(area * 10, 0);
+  });
+});
+
+describe("smooth closed outlines (audit K-3)", () => {
+  it("build the same curve the sketch draws", async () => {
+    const { polygonArea, smoothClosed } = await import("@whittle/core");
+    const pts: [number, number][] = [[0, 0], [40, 0], [50, 30], [10, 40]];
+    const doc = newDocument();
+    const sk = sketchWith(doc, [{ id: uid("e"), type: "polyline", smooth: true, points: pts.map(([x, y]) => [String(x), String(y)]) } as SketchEntity]);
+    const ex = push(doc, makeExtrude(doc, sk.id), true);
+    (ex as { distance: string }).distance = "1";
+    const r = new Builder().regen(doc, "final");
+    ok(r);
+    const drawn = Math.abs(polygonArea(smoothClosed(pts, 200)));
+    expect(Math.abs(r.bodies[0]!.volume - drawn) / drawn).toBeLessThan(1e-3);
   });
 });

@@ -2,6 +2,14 @@
 import { CONSTRAINT_LABELS, CONSTRUCT_MODES, CURVE_SOURCES, SURFACE_OPS } from "@whittle/core";
 import { CONSTRAINT_PICKS } from "./constraintOps";
 import { type AppState, findFeature } from "./store";
+import { commandById } from "./commands";
+import { NAV_PRESETS } from "./prefs";
+
+/** "F to fillet" with the key the person's layout really uses, or the toolbar name without one (audit G-1). */
+const keyTo = (id: string, what: string) => {
+  const c = commandById(id);
+  return c?.keys ? `${c.keys} to ${what}` : `${c?.label ?? what} in the toolbar to ${what}`;
+};
 
 const TOOL_HINTS: Record<string, [string, string]> = {
   rect: ["Click the first corner (or drag a rectangle)", "Click the opposite corner \u00b7 type a width, Tab for height, Enter to place"],
@@ -142,7 +150,7 @@ export function hintFor(s: AppState): string {
   }
   const p = selection[0];
   if (p?.kind === "face") return "Face selected \u00b7 S sketches on it \u00b7 Shell (Modify) hollows the body from here · Alt+click picks the face behind";
-  if (p?.kind === "edge") return `${selection.length} edge${selection.length > 1 ? "s" : ""} selected \u00b7 F to fillet \u00b7 Shift-click to add more`;
+  if (p?.kind === "edge") return `${selection.length} edge${selection.length > 1 ? "s" : ""} selected \u00b7 ${keyTo("fillet", "fillet")} \u00b7Shift-click to add more`;
   if (p?.kind === "sketch") return "Sketch selected \u00b7 E to extrude \u00b7 R to revolve \u00b7 double-click to edit";
   if (p?.kind === "region") return `${selection.length} profile${selection.length > 1 ? "s" : ""} selected \u00b7 E extrudes just ${selection.length > 1 ? "these" : "this"} \u00b7 Shift-click to add more`;
   if (p?.kind === "body") return "Body selected · M moves it · right-click for more · Del removes the feature that made it";
@@ -151,5 +159,7 @@ export function hintFor(s: AppState): string {
       ? "Press E to extrude your sketch into a solid"
       : "Start with Sketch (S): pick a plane, draw a shape, then Extrude (E). Or add a quick Box.";
   }
-  return "Click to select · drag to orbit · right-drag to pan · right-click for quick actions · Ctrl+K finds any command";
+  // The mouse buttons of the chosen navigation preset, not always the default one (audit G-1).
+  const nav = NAV_PRESETS.find((n) => n.id === s.prefs.nav)?.blurb.replace(/\.$/, "") ?? "Drag to orbit";
+  return `Click to select · ${nav} · Ctrl+K finds any command`;
 }

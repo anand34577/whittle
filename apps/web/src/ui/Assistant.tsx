@@ -177,7 +177,8 @@ function ProviderEditor({ p, onChange, onRemove }: { p: ProviderConfig; onChange
     try {
       const ids = await listModels(p);
       setFound(ids);
-      if (!ids.includes(p.model)) onChange({ ...p, model: ids[0]! });
+      // An empty list keeps the model typed in (audit UI-5).
+      if (ids.length && !ids.includes(p.model)) onChange({ ...p, model: ids[0]! });
     } catch (e) {
       setFound([]);
       setProblem(e instanceof Error ? e.message : "Couldn't list the models.");
@@ -247,12 +248,15 @@ export function AssistantSettings() {
           onChange={update}
           onRemove={() =>
             void confirmDialog({ title: `Remove ${p.label}?`, message: "Its settings and key are removed from your saved settings.", confirmLabel: "Remove", danger: true }).then(
-              (ok) =>
-                ok &&
-                saveAiSettings({
-                  providers: settings.providers.filter((x) => x.id !== p.id),
-                  active: settings.active === p.id ? (settings.providers.find((x) => x.id !== p.id)?.id ?? null) : settings.active,
-                }),
+              (ok) => {
+                if (!ok) return;
+                // The settings as they are now, not as they were before the question (audit UI-5).
+                const now = useAi.getState().settings;
+                void saveAiSettings({
+                  providers: now.providers.filter((x) => x.id !== p.id),
+                  active: now.active === p.id ? (now.providers.find((x) => x.id !== p.id)?.id ?? null) : now.active,
+                });
+              },
             )
           }
         />

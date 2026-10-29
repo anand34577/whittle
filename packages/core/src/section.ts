@@ -14,6 +14,7 @@ export function sliceMesh(b: { positions: ArrayLike<number>; indices: ArrayLike<
     return [d[0]! * xDir[0]! + d[1]! * xDir[1]! + d[2]! * xDir[2]!, d[0]! * yDir[0]! + d[1]! * yDir[1]! + d[2]! * yDir[2]!];
   };
   const eps = 1e-7;
+  const seen = new Set<string>();
   for (let t = 0; t + 2 < idx.length; t += 3) {
     const v = [idx[t]!, idx[t + 1]!, idx[t + 2]!];
     const d = v.map(dist);
@@ -28,11 +29,19 @@ export function sliceMesh(b: { positions: ArrayLike<number>; indices: ArrayLike<
         const a = v[i]! * 3;
         const c = v[j]! * 3;
         pts.push(local(pos[a]! + (pos[c]! - pos[a]!) * s, pos[a + 1]! + (pos[c + 1]! - pos[a + 1]!) * s, pos[a + 2]! + (pos[c + 2]! - pos[a + 2]!) * s));
-      } else if (Math.abs(di) <= eps && Math.abs(dj) > eps) pts.push(local(pos[v[i]! * 3]!, pos[v[i]! * 3 + 1]!, pos[v[i]! * 3 + 2]!));
+      }
+      // Every vertex on the plane counts, so a triangle edge lying in the plane gives its segment (audit C-6).
+      if (Math.abs(di) <= eps) pts.push(local(pos[v[i]! * 3]!, pos[v[i]! * 3 + 1]!, pos[v[i]! * 3 + 2]!));
     }
     // A vertex on the plane can be counted by two edges; keep distinct points.
     const uniq = pts.filter((p, i) => pts.findIndex((q) => key(q) === key(p)) === i);
-    if (uniq.length === 2) out.push([uniq[0]!, uniq[1]!]);
+    if (uniq.length !== 2) continue;
+    // An edge in the plane is shared by two triangles: keep it once.
+    const [ka, kb] = [key(uniq[0]!), key(uniq[1]!)];
+    const id = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push([uniq[0]!, uniq[1]!]);
   }
   return out;
 }

@@ -2,7 +2,7 @@
 import { type ConstructFeature, type Vec3, frameAxes } from "@whittle/core";
 import type { Edge, Face, Shape3D } from "replicad";
 import type { SketchFrame } from "./protocol";
-import { add, cross, dist, dot, edgeInfo, faceInfo, len, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
+import { add, byLength, cross, dist, dot, edgeInfo, faceInfo, len, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 
 export interface ConstructEnv {
   body(id: string): Shape3D;
@@ -143,7 +143,8 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
     }
     case "planePath": {
       const a = edge(0);
-      const t = Math.min(1, Math.max(0, env.num(f.value) / 100));
+      // "% along the edge" is measured by length, not by the curve's parameter (audit K-6).
+      const t = a.e.geomType === "LINE" || a.e.geomType === "CIRCLE" ? Math.min(1, Math.max(0, env.num(f.value) / 100)) : byLength(a.e)(env.num(f.value) / 100);
       frame = planeFrame(f.id, a.e.pointAt(t).toTuple(), norm(a.e.tangentAt(t).toTuple()));
       break;
     }

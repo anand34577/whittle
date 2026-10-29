@@ -1,7 +1,8 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
 import { useEffect, useRef, useState } from "react";
-import { CONSTRUCT_MODES, CURVE_SOURCES, SURFACE_OPS } from "@whittle/core";
+import { CONSTRUCT_MODES, CURVE_SOURCES, LENGTH_TO_MM, SURFACE_OPS, defaultLength, documentEvaluator } from "@whittle/core";
+import { volumeText } from "../state/measure";
 import type {
   BodyOp,
   ChamferFeature,
@@ -478,13 +479,15 @@ function RepeatWhat({ f }: { f: MirrorFeature | PatternFeature }) {
 }
 
 function MirrorEditor({ f }: { f: MirrorFeature }) {
+  // Read with a hook, so a plane or axis added while this is open shows up in the list (audit UI-4).
+  const docFeatures = useApp((st) => st.doc.features);
   return (
     <>
       <RepeatWhat f={f} />
       <Select
         label="Mirror plane"
         value={f.planeRef ?? f.plane}
-        options={[...ORIGIN_PLANES, ...constructsBefore(useApp.getState().doc.features, f.id, "plane").map((c) => ({ value: c.id, label: c.name, icon: "plane" as const }))]}
+        options={[...ORIGIN_PLANES, ...constructsBefore(docFeatures, f.id, "plane").map((c) => ({ value: c.id, label: c.name, icon: "plane" as const }))]}
         onChange={(v) => upd(f, "Plane", (d) => (v === "YZ" || v === "XZ" || v === "XY" ? ((d.plane = v), (d.planeRef = undefined)) : (d.planeRef = v)))}
       />
       <ExprInput
@@ -500,6 +503,8 @@ function MirrorEditor({ f }: { f: MirrorFeature }) {
 }
 
 function PatternEditor({ f }: { f: PatternFeature }) {
+  // Read with a hook, so a plane or axis added while this is open shows up in the list (audit UI-4).
+  const docFeatures = useApp((st) => st.doc.features);
   return (
     <>
       <RepeatWhat f={f} />
@@ -525,7 +530,7 @@ function PatternEditor({ f }: { f: PatternFeature }) {
             value={f.axisGeom ? "pick" : f.axisRef ?? f.axis}
             options={[
               ...ORIGIN_AXES,
-              ...constructsBefore(useApp.getState().doc.features, f.id, "axis").map((c) => ({ value: c.id, label: c.name, icon: "axis" as const })),
+              ...constructsBefore(docFeatures, f.id, "axis").map((c) => ({ value: c.id, label: c.name, icon: "axis" as const })),
               { value: "pick", label: "Edge or face on the model…", icon: "select" as const },
             ]}
             onChange={(v) =>
@@ -828,13 +833,15 @@ function CoilEditor({ f }: { f: CoilFeature }) {
 }
 
 function SplitEditor({ f }: { f: SplitFeature }) {
+  // Read with a hook, so a plane or axis added while this is open shows up in the list (audit UI-4).
+  const docFeatures = useApp((st) => st.doc.features);
   return (
     <>
       <BodySelect value={f.bodyId} allowAuto="Latest body" exclude={f.id} onChange={(v) => upd(f, "Body", (d) => void (d.bodyId = v))} />
       <Select
         label="Plane"
         value={f.planeRef ?? f.plane}
-        options={[...ORIGIN_PLANES, ...constructsBefore(useApp.getState().doc.features, f.id, "plane").map((c) => ({ value: c.id, label: c.name, icon: "plane" as const }))]}
+        options={[...ORIGIN_PLANES, ...constructsBefore(docFeatures, f.id, "plane").map((c) => ({ value: c.id, label: c.name, icon: "plane" as const }))]}
         onChange={(v) => upd(f, "Plane", (d) => (v === "YZ" || v === "XZ" || v === "XY" ? ((d.plane = v), (d.planeRef = undefined)) : (d.planeRef = v)))}
       />
       <ExprInput label="Offset" kind="length" value={f.offset} autoFocus onChange={(v) => upd(f, "Offset", (d) => void (d.offset = v))} />
@@ -1080,14 +1087,15 @@ function RibEditor({ f }: { f: RibFeature }) {
 }
 
 function ThreadEditor({ f }: { f: ThreadFeature }) {
+  const units = useApp((st) => st.doc.units);
   const set = (label: string, recipe: (d: ThreadFeature) => void) => upd(f, label, (d) => void (d.type === "thread" && recipe(d)));
   return (
     <>
       <PickLine icon="thread" text={f.face ? "Round face selected" : "Click the round face to thread (a rod or a hole)"} clearable={!!f.face} onClear={() => set("Clear face", (d) => void (d.face = null))} />
       <ExprInput label="Pitch" kind="length" value={f.pitch} autoFocus hint="Distance between turns" onChange={(v) => set("Pitch", (d) => void (d.pitch = v))} />
-      <Toggle label="Whole length" checked={!f.length} onChange={(on) => set("Length", (d) => void (d.length = on ? "" : "10"))} />
+      <Toggle label="Whole length" checked={!f.length} onChange={(on) => set("Length", (d) => void (d.length = on ? "" : defaultLength(units, 10)))} />
       {f.length && <ExprInput label="Length" kind="length" value={f.length} onChange={(v) => set("Length", (d) => void (d.length = v))} />}
-      <Toggle label="Automatic depth" checked={!f.depth} onChange={(on) => set("Depth", (d) => void (d.depth = on ? "" : "1"))} />
+      <Toggle label="Automatic depth" checked={!f.depth} onChange={(on) => set("Depth", (d) => void (d.depth = on ? "" : defaultLength(units, 1)))} />
       {f.depth && <ExprInput label="Depth" kind="length" value={f.depth} onChange={(v) => set("Depth", (d) => void (d.depth = v))} />}
       <Toggle label="Left-handed" checked={f.lefthand} onChange={(v) => set("Hand", (d) => void (d.lefthand = v))} />
     </>
@@ -1147,6 +1155,7 @@ function AlignEditor({ f }: { f: AlignFeature }) {
 }
 
 function BoundaryFillEditor({ f }: { f: BoundaryFillFeature }) {
+  const units = useApp((st) => st.doc.units);
   const bodies = useApp((s) => s.regen?.pickBodies ?? s.regen?.bodies ?? []);
   const meta = useApp((s) => s.doc.bodies);
   const cells = useApp((s) => s.regen?.status.find((x) => x.id === f.id)?.cells);
@@ -1178,7 +1187,7 @@ function BoundaryFillEditor({ f }: { f: BoundaryFillFeature }) {
         <span className="field__label">Cells to keep</span>
         <div className="checklist">
           {(cells ?? []).map((c, i) => (
-            <Checkbox key={i} className="checkrow" checked={f.cells.includes(i)} onChange={(on) => set("Cells", (d) => void (d.cells = on ? [...d.cells, i] : d.cells.filter((x) => x !== i)))} label={`Cell ${i + 1} · ${Math.round(c.volume)} mm³`} />
+            <Checkbox key={i} className="checkrow" checked={f.cells.includes(i)} onChange={(on) => set("Cells", (d) => void (d.cells = on ? [...d.cells, i] : d.cells.filter((x) => x !== i)))} label={`Cell ${i + 1} · ${volumeText(c.volume, units)}`} />
           ))}
           {!cells?.length && <p className="field__note">Choose two or more overlapping bodies.</p>}
         </div>
@@ -1202,7 +1211,10 @@ const JOINT_TYPES = [
 function Drive({ f, field, min, max, unit }: { f: JointFeature; field: "angle" | "distance"; min: number; max: number; unit: string }) {
   const timer = useRef<number | null>(null);
   const [playing, setPlaying] = useState(false);
-  const value = Number.parseFloat(f[field]);
+  // A formula drives it too (audit W-9): read its value, in degrees or the design's unit like the slider.
+  const doc = useApp((s) => s.doc);
+  const r = documentEvaluator(doc).eval(f[field], field === "angle" ? "angle" : "length");
+  const value = !r.ok ? Number.NaN : field === "angle" ? (r.value * 180) / Math.PI : r.value / LENGTH_TO_MM[doc.units];
   const write = (v: number) => updateFeature(f.id, "Drive joint", (d) => void (d.type === "joint" && (d[field] = String(Math.round(v * 100) / 100))), f.id + "drive");
   useEffect(
     () => () => {
@@ -1293,7 +1305,7 @@ function SurfaceEditor({ f }: { f: SurfaceFeature }) {
     <>
       <PickLine
         icon="plane"
-        text={picked ? (op === "stitch" || byEdges || byFaces ? `${picked} ${noun}${picked > 1 ? (noun === "body" ? "ies" : "s") : ""}`.replace("bodys", "bodies") : "Body chosen") : SURFACE_OPS[op].hint}
+        text={picked ? (op === "stitch" || byEdges || byFaces ? `${picked} ${picked > 1 ? (noun === "body" ? "bodies" : `${noun}s`) : noun}` : "Body chosen") : SURFACE_OPS[op].hint}
         clearable={picked > 0}
         onClear={() => set("Clear", (d) => ((d.edges = []), (d.faces = []), (d.bodies = []), (d.bodyId = undefined)))}
       />
@@ -1368,7 +1380,8 @@ function JointEditor({ f }: { f: JointFeature }) {
   const slides = t === "slider" || t === "cylindrical" || t === "pinslot" || t === "planar";
   const ball = t === "ball";
   const mainIsTurn = t === "revolute" || ball;
-  const limitKind = t === "revolute" ? "angle" : "length";
+  const turnsLimited = (j: string) => j === "revolute" || j === "ball";
+  const limitKind = turnsLimited(t) ? "angle" : "length";
   const set = (label: string, recipe: (d: JointFeature) => void) => upd(f, label, (d) => void (d.type === "joint" && recipe(d)));
   const axes = constructsBefore(features, f.id, "axis");
   const points = features.slice(0, features.findIndex((x) => x.id === f.id)).filter((x) => x.type === "construct" && x.mode.startsWith("point"));
@@ -1384,9 +1397,12 @@ function JointEditor({ f }: { f: JointFeature }) {
         options={JOINT_TYPES.map((j) => ({ value: j.value, label: j.label }))}
         onChange={(v) =>
           set("Joint type", (d) => {
+            // The limits keep their values unless they change meaning (an angle and a distance), audit UI-4.
+            if (turnsLimited(v) !== turnsLimited(d.joint)) {
+              d.min = turnsLimited(v) ? "-90" : "-50";
+              d.max = turnsLimited(v) ? "90" : "50";
+            }
             d.joint = v;
-            d.min = v === "revolute" ? "-90" : "-50";
-            d.max = v === "revolute" ? "90" : "50";
           })
         }
       />
@@ -1442,9 +1458,9 @@ function JointEditor({ f }: { f: JointFeature }) {
         />
       )}
       {t !== "rigid" && <Toggle label="Warn on collisions" hint="Flag the joint when the moving part runs into another body" checked={!!f.collide} onChange={(v) => set("Collisions", (d) => void (d.collide = v))} />}
-      {t !== "rigid" && !ball && (
+      {t !== "rigid" && (
         <>
-          <Toggle label="Limit the travel" checked={f.limited} onChange={(v) => set("Limits", (d) => void (d.limited = v))} />
+          <Toggle label={ball ? "Limit each turn" : "Limit the travel"} checked={f.limited} onChange={(v) => set("Limits", (d) => void (d.limited = v))} />
           {f.limited && (
             <div className="field-row">
               <ExprInput label="Min" kind={limitKind} value={f.min} onChange={(v) => set("Minimum", (d) => void (d.min = v))} />

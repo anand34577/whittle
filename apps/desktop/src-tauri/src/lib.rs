@@ -21,6 +21,8 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 /// Versions kept per file in the local history.
 const MAX_HISTORY: usize = 50;
+/** All kept copies of one design together (audit D-1: designs with embedded imports can be tens of MB each). */
+const MAX_HISTORY_BYTES: u64 = 500 * 1024 * 1024;
 const MAX_RECENT: usize = 20;
 const OPEN_EVENT: &str = "whittle://open";
 const RELEASES: &str = "https://github.com/anand34577/whittle/releases/tag/v";
@@ -63,8 +65,12 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Stable short hash of a path (FNV-1a), naming its history folder.
 fn path_key(p: &Path) -> String {
+    // Paths are case-insensitive on Windows and (by default) macOS, not on Linux, where A.whittle and
+    // a.whittle are two files with two histories (audit D-1).
+    let text = p.to_string_lossy();
+    let text = if cfg!(any(windows, target_os = "macos")) { text.to_lowercase() } else { text.into_owned() };
     let mut h: u64 = 0xcbf29ce484222325;
-    for b in p.to_string_lossy().to_lowercase().bytes() {
+    for b in text.bytes() {
         h ^= b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
@@ -259,8 +265,13 @@ fn keep_history(app: &AppHandle, p: &Path) -> Result<(), String> {
     std::fs::copy(p, dir.join(format!("{}.whittle", now_ms()))).map_err(|e| e.to_string())?;
     let mut versions = history_files(&dir);
     versions.sort_by_key(|v| std::cmp::Reverse(v.0));
-    for (_, old) in versions.into_iter().skip(MAX_HISTORY) {
-        let _ = std::fs::remove_file(old);
+    // The newest copies are kept, up to the count and the total size; the newest one always stays.
+    let mut total = 0u64;
+    for (i, (_, file)) in versions.into_iter().enumerate() {
+        total += std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+        if i > 0 && (i >= MAX_HISTORY || total > MAX_HISTORY_BYTES) {
+            let _ = std::fs::remove_file(file);
+        }
     }
     Ok(())
 }
@@ -373,7 +384,7 @@ const SLICERS: &[&str] = &["PrusaSlicer", "Bambu Studio", "OrcaSlicer", "UltiMak
 
 #[cfg(target_os = "windows")]
 fn slicer_path(name: &str) -> Option<PathBuf> {
-    let roots: Vec<PathBuf> = ["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"].iter().filter_map(|v| std::env::var_os(v)).map(PathBuf::from).collect();
+    let roots: Vec<PathBuf> = ["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"].iter().filter_map(std::env::var_os).map(PathBuf::from).collect();
     for root in &roots {
         let found = match name {
             "PrusaSlicer" => Some(root.join(r"Prusa3D\PrusaSlicer\prusa-slicer.exe")),
@@ -568,7 +579,11 @@ mod tests {
 
     #[test]
     fn path_keys_are_stable() {
-        assert_eq!(path_key(Path::new("/a/b.whittle")), path_key(Path::new("/A/B.whittle")));
+        if cfg!(any(windows, target_os = "macos")) {
+            assert_eq!(path_key(Path::new("/a/b.whittle")), path_key(Path::new("/A/B.whittle")));
+        } else {
+            assert_ne!(path_key(Path::new("/a/b.whittle")), path_key(Path::new("/A/B.whittle")));
+        }
         assert_ne!(path_key(Path::new("/a/b.whittle")), path_key(Path::new("/a/c.whittle")));
     }
 }

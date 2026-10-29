@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { makeExtrude, makeSketch, newDocument } from "@whittle/core";
 import { nextSteps, problemsOf } from "../src/state/problems";
 
-const rect = { id: "r1", type: "rect", center: ["0", "0"], width: "20", height: "10" };
+// The real rect fields (audit T-3: the fixture used center/width/height, which no code reads).
+const rect = { id: "r1", type: "rect", x: "0", y: "0", w: "20", h: "10", anchor: "center" };
 
 describe("assistance", () => {
   it("an empty design suggests ways in and has no problems", () => {
@@ -30,7 +31,7 @@ describe("assistance", () => {
     ex.suppressed = true;
     doc.features.push(sk, ex);
     doc.rollback = 1;
-    const regen = { seq: 1, bodies: [], sketches: [], planes: [], status: [{ id: sk.id, state: "error" as const, message: "Broken" }] };
+    const regen = { seq: 1, ms: 0, rebuilt: 0, bodies: [], sketches: [], planes: [], status: [{ id: sk.id, state: "error" as const, message: "Broken" }] };
     const list = problemsOf({ doc, regen, session: null });
     expect(list.map((p) => p.severity)).toEqual(["error", "warning", "info"]);
     expect(list.every((p) => p.fix)).toBe(true);

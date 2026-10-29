@@ -150,6 +150,8 @@ export interface DrawingSettings {
   /** Add a parts list (name, volume, material). */
   parts?: boolean;
   hidden?: boolean;
+  /** Material names by id, for the parts list (sent with the export, not stored). */
+  materialNames?: Record<string, string>;
 }
 
 export type ExportFormat = "step" | "stl" | "3mf" | "obj" | "glb" | "ply" | "drawing";
@@ -168,4 +170,5 @@ export type KernelResponse =
   | { type: "progress"; seq: number; done: number; total: number }
   | { type: "export"; seq: number; data: Uint8Array; mime: string; ext: string }
   | { type: "inspect"; seq: number; result: InspectResult }
-  | { type: "error"; seq: number; message: string };
+  /** `fatal`: the engine itself broke (out of memory, an abort) and must be replaced before the next request. */
+  | { type: "error"; seq: number; message: string; fatal?: boolean };

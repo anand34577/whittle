@@ -4,6 +4,7 @@ import type { SketchFrame } from "@whittle/kernel";
 import {
   type ConstraintType,
   type Id,
+  type LengthUnit,
   type SketchEntity,
   type SketchFeature,
   type SketchSolution,
@@ -140,7 +141,11 @@ function constraintMarks(sk: SketchFeature, sol: SketchSolution | undefined, uni
 
 const PLAIN = /^\s*-?\d*\.?\d+\s*$/;
 
-function moveEntity(e: SketchEntity, dx: number, dy: number): SketchEntity | null {
+/** Move a whole shape by (dx, dy) mm. Its fields are in the document unit, so the move is converted first. */
+function moveEntity(e: SketchEntity, dxMm: number, dyMm: number, units: LengthUnit): SketchEntity | null {
+  const k = LENGTH_TO_MM[units];
+  const dx = dxMm / k;
+  const dy = dyMm / k;
   const add = (v: string, d: number) => (PLAIN.test(v) ? trim(parseFloat(v) + d, 4) : null);
   const c = structuredClone(e) as SketchEntity;
   const pairs: [string, number][] =
@@ -512,6 +517,7 @@ export function ViewportView() {
           return s.mode.kind === "sketch" ? findFeature(s.doc, s.mode.sketchId, "sketch")?.entities ?? [] : [];
         },
         evaluator: () => documentEvaluator(useApp.getState().doc),
+        units: () => useApp.getState().doc.units,
         add: (e, select, sizes) => {
           if (!select && addShapeAsGeometry(e, sizes)) return;
           sketchMutate("Add shape", (s) => {
@@ -528,7 +534,7 @@ export function ViewportView() {
           if (s.mode.kind !== "sketch") return;
           const e = findFeature(s.doc, s.mode.sketchId, "sketch")?.entities.find((x) => x.id === id);
           if (!e) return;
-          const moved = moveEntity(e, dx, dy);
+          const moved = moveEntity(e, dx, dy, s.doc.units);
           if (!moved) {
             toast("info", "This shape's position comes from parameters, so it can't be dragged. Edit its values instead.");
             return;
@@ -731,6 +737,11 @@ export function ViewportView() {
     vp.setPickFilter(filter);
     vp.setPlanesVisible(mode.kind === "pickPlane");
   }, [vp, mode, session, sessionFeature, priority]);
+
+  // The grid steps in the design's own unit (audit U-2).
+  useEffect(() => {
+    vp?.setGridUnits(LENGTH_TO_MM[doc.units], doc.units === "in" || doc.units === "ft");
+  }, [vp, doc.units]);
 
   // Sketch editing frame.
   const pendingNormal = useRef(false);
@@ -972,10 +983,12 @@ export function ViewportView() {
 
   const unitFactor = LENGTH_TO_MM[doc.units];
   const applyTyped = (key: "a" | "b", text: string) => {
-    const v = parseFloat(text);
     const dim = sketchUI?.dims.find((d) => d.key === key);
     const isAngle = dim?.label === "∠";
-    controller.setTyped(key, Number.isFinite(v) ? (isAngle ? v : v * unitFactor) : undefined);
+    // The conic's ρ is a plain ratio, not a length (audit W-8). Formulas and parameters work here too (W-9).
+    const plain = dim?.label === "ρ";
+    const r = text.trim() ? documentEvaluator(useApp.getState().doc).eval(text, isAngle ? "angle" : plain ? "number" : "length") : null;
+    controller.setTyped(key, r?.ok ? (isAngle ? (r.value * 180) / Math.PI : r.value) : undefined);
   };
 
   // Snap marker & dimension positions (recomputed each render; camera changes re-render via camTick).
@@ -1239,7 +1252,7 @@ export function ViewportView() {
           const pos = vp?.sketchToScreen(d.at as Vec2, frame);
           if (!pos) return null;
           const isAngle = d.label === "∠";
-          const shown = isAngle ? trim(d.value, 1) : trim(d.value / unitFactor, 2);
+          const shown = isAngle ? trim(d.value, 1) : d.label === "ρ" ? trim(d.value, 3) : trim(d.value / unitFactor, 2);
           const editing = typing?.key === d.key;
           return (
             <div

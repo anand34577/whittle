@@ -14,3 +14,4 @@ export * from "./section";
 export * from "./dxf";
 export * from "./inertia";
 export * from "./rules";
+export * from "./designUnits";

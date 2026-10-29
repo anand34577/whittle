@@ -24,8 +24,9 @@
   --text-1: #20242a;
   --text-2: #475059;
   --text-3: #76808a;
-  --accent: #0696d7;
-  --accent-hover: #057fb8;
+  /* Dark enough for white text at 4.5:1 (audit UI-6: #0696d7 gave about 3.3:1). */
+  --accent: #0679b0;
+  --accent-hover: #056797;
   --accent-ink: #ffffff;
   --accent-soft: rgb(6 150 215 / 0.14);
   --select: #0696d7;

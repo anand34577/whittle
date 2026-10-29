@@ -33,6 +33,25 @@ describe("sketch export", () => {
   });
 });
 
+describe("open paths in sketch export (audit W-14)", () => {
+  const open: SketchEntity[] = [
+    { id: uid(), type: "polyline", open: true, points: [["0", "0"], ["10", "0"], ["10", "10"]] } as SketchEntity,
+    { id: uid(), type: "polyline", open: true, points: [["20", "0"], ["30", "0"]] } as SketchEntity,
+  ];
+  it("keeps an open path open and exports a single line", () => {
+    const { shapes, skipped } = sketchShapes(open, ev);
+    expect(skipped).toBe(0);
+    expect(shapes.map((s) => [s.loop?.length, s.open])).toEqual([[3, true], [2, true]]);
+    const svg = shapesToSvg(shapes, "t");
+    expect(svg).not.toMatch(/Z"/);
+    const dxf = shapesToDxf(shapes).split("\n");
+    expect(dxf.filter((l) => l === "LINE")).toHaveLength(1);
+    const flag = dxf.indexOf("POLYLINE");
+    expect(dxf.slice(flag, flag + 8)).toContain("70");
+    expect(dxf[dxf.indexOf("70", flag) + 1]).toBe("0");
+  });
+});
+
 describe("svg import", () => {
   it("splits subpaths where the pen jumps", () => {
     const pts: [number, number][] = [[0, 0], [1, 0], [2, 0], [10, 10], [11, 10]];
