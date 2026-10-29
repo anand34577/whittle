@@ -111,7 +111,7 @@ pub fn session_id(token: &str) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn cookie_token(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn cookie_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get_all(header::COOKIE)
         .iter()
@@ -144,6 +144,8 @@ pub async fn start_session(s: &Shared, user_id: &str) -> ApiResult<HeaderValue> 
     // Opportunistic cleanup of expired sessions and reset links.
     sqlx::query("DELETE FROM sessions WHERE expires_at < $1").bind(now).execute(&s.db).await?;
     sqlx::query("DELETE FROM password_resets WHERE expires_at < $1").bind(now).execute(&s.db).await?;
+    // The activity log keeps two years (audit S-6: it was never pruned).
+    sqlx::query("DELETE FROM audit_log WHERE at < $1").bind(now - 2 * 365 * 24 * 3600 * 1000).execute(&s.db).await?;
     Ok(session_cookie(s, &token, ttl))
 }
 
@@ -204,6 +206,14 @@ impl FromRequestParts<Shared> for ClientAddr {
         let peer = parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip().to_string());
         // Behind a reverse proxy every request comes from the proxy's own address, so (only when the operator says the
         // proxy is trusted) use the address the proxy appended last to X-Forwarded-For; earlier entries can be forged.
+        // A proxy in front that isn't trusted makes every sign-in look like it comes from one address, so failed
+        // sign-ins by anyone lock everyone out: say so once in the log (audit S-5).
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !state.config.trust_proxy && parts.headers.contains_key("x-forwarded-for") && !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            tracing::warn!(
+                "requests arrive through a proxy (X-Forwarded-For is set), but WHITTLE_TRUST_PROXY is off: sign-in limits then count every visitor as the proxy. Set WHITTLE_TRUST_PROXY=true if the proxy is yours."
+            );
+        }
         let forwarded = state
             .config
             .trust_proxy
@@ -341,9 +351,9 @@ pub struct RegisterBody {
 }
 
 /// Held while the first-account check and the insert happen, so two simultaneous first sign-ups can't both become administrator.
-static REGISTER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static REGISTER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-pub async fn register(State(s): State<Shared>, headers: HeaderMap, Json(b): Json<RegisterBody>) -> ApiResult<Response> {
+pub async fn register(State(s): State<Shared>, Json(b): Json<RegisterBody>) -> ApiResult<Response> {
     if !s.config.auth_local {
         return Err(ApiError::bad_request("Accounts are managed by single sign-on on this server"));
     }
@@ -367,7 +377,9 @@ pub async fn register(State(s): State<Shared>, headers: HeaderMap, Json(b): Json
     let user = create_local_user(&s, &b.username, Some(&b.password), b.display_name.as_deref(), email.as_deref(), first).await?;
     db::audit(&s.db, Some(&user.id), if first { "setup.admin" } else { "account.signup" }, Some(&user.username), "").await;
     if !first && s.settings.read().await.notifications.admin_on_signup {
-        let base = base_url(&s, &headers);
+        // Without WHITTLE_PUBLIC_URL the address would come from the request, which the person signing up controls
+        // (audit S-6), so the email then names no address.
+        let base = s.config.public_url.clone().unwrap_or_else(|| "this Whittle server".to_owned());
         let admins = sqlx::query("SELECT email FROM users WHERE is_admin = 1 AND disabled = 0 AND email IS NOT NULL AND id <> 'local'").fetch_all(&s.db).await?;
         for r in admins {
             let to: Option<String> = r.try_get("email")?;
@@ -418,10 +430,12 @@ pub async fn create_local_user(
 pub struct ProfileBody {
     display_name: Option<String>,
     email: Option<String>,
+    /// Needed to change the email of an account that has a password (audit S-6).
+    current_password: Option<String>,
 }
 
 /// People edit their own name and email.
-pub async fn update_me(State(s): State<Shared>, CurrentUser(u): CurrentUser, Json(b): Json<ProfileBody>) -> ApiResult<Json<User>> {
+pub async fn update_me(State(s): State<Shared>, headers: HeaderMap, CurrentUser(u): CurrentUser, Json(b): Json<ProfileBody>) -> ApiResult<Json<User>> {
     if s.config.auth_none {
         return Err(ApiError::bad_request("This server has no accounts"));
     }
@@ -434,8 +448,20 @@ pub async fn update_me(State(s): State<Shared>, CurrentUser(u): CurrentUser, Jso
     if let Some(e) = b.email.as_deref() {
         let required = s.settings.read().await.require_email();
         let email = clean_email(&s, Some(e), Some(&u.id), required).await?;
-        sqlx::query("UPDATE users SET email = $1 WHERE id = $2").bind(email).bind(&u.id).execute(&s.db).await?;
-        db::audit(&s.db, Some(&u.id), "account.email", Some(&u.username), "changed their email").await;
+        // Only a real change is recorded (audit W-12). It needs the password, because the email is where a reset
+        // link goes, and the old address is told (audit S-6).
+        let changed = email.as_deref().map(str::to_lowercase) != u.email.as_deref().map(str::to_lowercase);
+        if changed {
+            if let Some(hash) = u.password_hash.clone() {
+                if !verify_password(b.current_password.clone().unwrap_or_default(), hash).await {
+                    return Err(ApiError::new(StatusCode::FORBIDDEN, "Enter your current password to change your email"));
+                }
+            }
+            sqlx::query("UPDATE users SET email = $1 WHERE id = $2").bind(&email).bind(&u.id).execute(&s.db).await?;
+            db::audit(&s.db, Some(&u.id), "account.email", Some(&u.username), "changed their email").await;
+            let to = email.as_deref().unwrap_or("no address");
+            security_notice(&s, &headers, &u, "Your Whittle email was changed", &format!("The email address of your account was changed to {to}. If you didn't do this, contact your administrator."));
+        }
     }
     Ok(Json(db::user_by(&s.db, "id", &u.id).await?.ok_or_else(ApiError::not_found)?))
 }

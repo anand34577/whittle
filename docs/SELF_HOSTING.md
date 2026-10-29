@@ -47,7 +47,8 @@ sudo ./deploy/install.sh
 
 The installer creates a `whittle` system user, installs to `/opt/whittle`, keeps data in
 `/var/lib/whittle`, writes settings to `/etc/whittle/whittle.env`, and starts a systemd (or OpenRC)
-service. Open `http://<container-ip>:8080/` and create the first account: it becomes the administrator.
+service. Open `http://<container-ip>:8080/` and create the first account: it becomes the administrator. It asks for a
+setup token, which the server writes to its log at start-up (`journalctl -u whittle`, or `docker compose logs whittle`).
 
 **Upgrading:** run the one-line command again, or download the new release and run `sudo ./deploy/install.sh`. Settings and data are
 kept; the database upgrades itself on start.
@@ -121,10 +122,11 @@ after changes: `sudo systemctl restart whittle`.
 | `WHITTLE_SECURE_COOKIES` | on when the public URL is https | Force Secure cookies on or off. |
 | `WHITTLE_MAX_UPLOAD_MB` | `64` | Largest design that can be saved. |
 | `WHITTLE_MAX_VERSIONS` | `50` | Versions kept per design; older ones are pruned. |
+| `WHITTLE_USER_QUOTA_MB` | `0` (no limit) | Disk space each account's designs may use, all kept versions included. A save over the limit is refused with a message. Set it when sign-up is open. |
 | `WHITTLE_SESSION_DAYS` | `30` | How long a sign-in lasts. |
 | `WHITTLE_AI` | `true` | Allow the in-app AI assistant. The browser may then call any HTTPS provider and model servers on plain HTTP (this computer or the local network, e.g. `http://192.168.1.20:11434/v1`); browsers only allow plain-HTTP model servers from a page that is itself served over HTTP, or on `localhost`. `false` hides the assistant and keeps the strictest browser security policy. |
 | `WHITTLE_TRUST_PROXY` | `false` | Set to `true` only behind a reverse proxy you control that sets `X-Forwarded-For`. Sign-in and password-reset limits then count each visitor's own address; without it they all share the proxy's address, so a few failed attempts lock everyone out. Never enable it when the server is reachable directly. |
-| `WHITTLE_SETUP_TOKEN` | *(none)* | If set, whoever creates the first (administrator) account must enter this value, so a stranger who reaches a new server first can't claim it. |
+| `WHITTLE_SETUP_TOKEN` | *(made up and logged)* | Whoever creates the first (administrator) account, with a password or single sign-on, must enter this value, so a stranger who reaches a new server first can't claim it. Unset: while the server has no accounts it makes up a new token at each start and writes it to its log. `off`: no token (trusted networks only). |
 | `WHITTLE_SMTP_HOST` | | Mail server for invitations, password resets and notices (see [Email](#email-smtp)). |
 | `WHITTLE_SMTP_PORT` | by security: 587 / 465 / 25 | |
 | `WHITTLE_SMTP_SECURITY` | `starttls` | `starttls`, `tls`, `starttls-optional` or `none` (plain, unencrypted). |

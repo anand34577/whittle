@@ -61,7 +61,7 @@ export function SignIn() {
   const platform = useApp((s) => s.platform);
   const cfg = platform.kind === "server" ? platform.config : null;
   const resetToken = useMemo(() => new URLSearchParams(window.location.search).get("reset"), []);
-  const [view, setView] = useState<SignInView>(resetToken ? "reset" : cfg?.needsSetup ? "register" : "signin");
+  const [view, setView] = useState<SignInView>(resetToken ? "reset" : cfg?.needsSetup && cfg.local ? "register" : "signin");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -186,7 +186,9 @@ export function SignIn() {
         {cfg.oidc && view === "signin" && (
           <>
             {cfg.local && <div className="signin__or">or</div>}
-            <a className="btn btn--wide" href={`./api/auth/oidc/start?return=${encodeURIComponent(window.location.pathname)}`}>
+            {/* The first single sign-on account becomes the administrator, so it needs the setup token too. */}
+            {cfg.needsSetupToken && !cfg.local && <TextField label="Setup token" icon="key" value={setupToken} onChange={setSetupToken} required hint="WHITTLE_SETUP_TOKEN from the server settings" />}
+            <a className="btn btn--wide" href={`./api/auth/oidc/start?return=${encodeURIComponent(window.location.pathname)}${cfg.needsSetupToken && setupToken ? `&setup=${encodeURIComponent(setupToken.trim())}` : ""}`}>
               <Icon name="key" size={16} /> Sign in with {cfg.oidc}
             </a>
           </>
@@ -205,6 +207,7 @@ export function AccountDialog() {
   const [name, setName] = useState(u?.displayName ?? "");
   const [email, setEmail] = useState(u?.email ?? "");
   const [current, setCurrent] = useState("");
+  const [profilePassword, setProfilePassword] = useState("");
   const [next, setNext] = useState("");
   const [busy, setBusy] = useState(false);
   if (platform.kind !== "server" || !u) return null;
@@ -215,7 +218,10 @@ export function AccountDialog() {
     e.preventDefault();
     setBusy(true);
     try {
-      const user = await apiJson<ServerUser>("/auth/me", { method: "PATCH", json: { displayName: name, email } });
+      // The email only goes when it changed: changing it asks for the password (audit S-6, W-12).
+      const emailChanged = email !== (u.email ?? "");
+      const user = await apiJson<ServerUser>("/auth/me", { method: "PATCH", json: { displayName: name, ...(emailChanged ? { email, currentPassword: profilePassword } : {}) } });
+      setProfilePassword("");
       await setUser(user);
       toast("ok", "Profile saved");
     } catch (err) {
@@ -232,6 +238,8 @@ export function AccountDialog() {
       await apiJson("/auth/password", { method: "POST", json: { current, newPassword: next } });
       setCurrent("");
       setNext("");
+      // A first password changes the form (it now asks for the current one): read the account again (audit S-7).
+      await setUser(await apiJson<ServerUser>("/auth/me"));
       toast("ok", "Password changed. Other devices were signed out.");
     } catch (err) {
       toast("error", msg(err));
@@ -272,6 +280,9 @@ export function AccountDialog() {
               <h3 className="eyebrow">Profile</h3>
               <TextField label="Name" value={name} onChange={setName} autoComplete="name" required />
               <TextField label="Email" type="email" icon="mail" value={email} onChange={setEmail} autoComplete="email" required={cfg.requireEmail} />
+              {u.hasPassword && email !== (u.email ?? "") && (
+                <TextField label="Current password" type="password" autoComplete="current-password" value={profilePassword} onChange={setProfilePassword} hint="Needed to change your email" required />
+              )}
               <button className={`btn btn--small${busy ? " is-loading" : ""}`} type="submit" disabled={busy || (name === u.displayName && email === (u.email ?? ""))}>
                 Save profile
               </button>
@@ -448,6 +459,8 @@ function UserMenu({ u, all, me, cfg, reload, onSheet }: { u: AdminUser; all: Adm
     {
       label: "Set a password…",
       icon: "key",
+      // Your own password is changed in the Account dialog, which asks for the current one (audit S-7).
+      hide: self,
       run: () =>
         void promptDialog({ title: `New password for ${u.username}`, message: "They'll be signed out everywhere.", label: "Password", type: "password", confirmLabel: "Set password", validate: (v) => (v.length >= 8 ? null : "Use at least 8 characters") }).then(
           (p) => void (p && run(() => apiJson(path, { method: "PATCH", json: { password: p } }), `Password set for ${u.username}`)),
@@ -971,7 +984,9 @@ function Activity() {
           <span className={`activity__dot ${e.action.startsWith("email.") || e.action === "login.locked" ? "is-warn" : ""}`} />
           <div>
             <p>
-              <b>{e.actor ?? e.target ?? "Someone"}</b> {ACTIONS[e.action] ?? e.action} {e.target && e.target !== (e.actor ?? e.target) && <b>{e.target}</b>}
+              {/* Without an actor (a deleted account, or the command line) only a person's own actions name them (audit S-8). */}
+              <b>{e.actor ?? (/^(account|setup)\./.test(e.action) ? e.target : null) ?? "Someone"}</b> {ACTIONS[e.action] ?? e.action}{" "}
+              {e.target && e.target !== (e.actor ?? (/^(account|setup)\./.test(e.action) ? e.target : null)) && <b>{e.target}</b>}
             </p>
             <small className="muted">
               {ago(e.at)}

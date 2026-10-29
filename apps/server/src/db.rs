@@ -166,7 +166,13 @@ pub fn user_from_row(r: &AnyRow) -> Result<User, sqlx::Error> {
 
 pub async fn user_by(db: &Db, column: &str, value: &str) -> Result<Option<User>, sqlx::Error> {
     // `column` is always a literal from this crate, never user input.
-    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE {column} = $1");
+    // Usernames match without regard to case, so "Alice" and "alice" are one account (audit S-4); should an
+    // older database hold both, the exact spelling wins.
+    let sql = if column == "username" {
+        format!("SELECT {USER_COLUMNS} FROM users WHERE LOWER(username) = LOWER($1) ORDER BY CASE WHEN username = $1 THEN 0 ELSE 1 END LIMIT 1")
+    } else {
+        format!("SELECT {USER_COLUMNS} FROM users WHERE {column} = $1")
+    };
     match sqlx::query(&sql).bind(value).fetch_optional(db).await? {
         Some(r) => Ok(Some(user_from_row(&r)?)),
         None => Ok(None),

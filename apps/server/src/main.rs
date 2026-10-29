@@ -80,7 +80,8 @@ async fn run(args: Vec<String>) -> Result<(), String> {
 }
 
 async fn serve() -> Result<(), String> {
-    let config = Config::from_env()?;
+    let mut config = Config::from_env()?;
+    setup_token_for_fresh_server(&mut config).await?;
     if config.auth_none {
         tracing::warn!("WHITTLE_AUTH=none: anyone who can reach this server can open and change every design. Use only on a trusted network.");
     }
@@ -95,6 +96,30 @@ async fn serve() -> Result<(), String> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(|e| e.to_string())
+}
+
+/// On a server with no accounts yet, whoever registers first becomes the administrator. Unless a setup token was
+/// configured (or turned off with WHITTLE_SETUP_TOKEN=off), make one up and log it, so only the person who can read
+/// the server's log can claim the server (audit X-4).
+async fn setup_token_for_fresh_server(config: &mut Config) -> Result<(), String> {
+    let off = std::env::var("WHITTLE_SETUP_TOKEN").is_ok_and(|v| v.trim().eq_ignore_ascii_case("off"));
+    if off || config.auth_none || config.setup_token.is_some() {
+        return Ok(());
+    }
+    tokio::fs::create_dir_all(&config.data)
+        .await
+        .map_err(|e| format!("cannot create the data directory {}: {e}", config.data.display()))?;
+    let db = db::connect(&config.database_url).await.map_err(|e| format!("cannot open the database: {e}"))?;
+    let fresh = db::user_count(&db).await.map_err(|e| e.to_string())? == 0;
+    db.close().await;
+    if fresh {
+        let token = whittle_server::random_token(12);
+        tracing::warn!(
+            "No accounts yet. To create the administrator account, enter this setup token when you sign up: {token}               (It changes on every restart until the first account exists. Set WHITTLE_SETUP_TOKEN to choose your own.)"
+        );
+        config.setup_token = Some(token);
+    }
+    Ok(())
 }
 
 async fn shutdown_signal() {
@@ -143,6 +168,8 @@ async fn user_command(rest: &[&str]) -> Result<(), String> {
             let u = db::user_by(&state.db, "username", name).await.map_err(|e| e.to_string())?.ok_or("no such user")?;
             let email = auth::clean_email(&state, Some(address), Some(&u.id), true).await.map_err(err)?;
             sqlx::query("UPDATE users SET email = $1 WHERE id = $2").bind(email).bind(&u.id).execute(&state.db).await.map_err(|e| e.to_string())?;
+            // Changes made from the shell are in the activity log too (audit S-9).
+            db::audit(&state.db, None, "user.update", Some(&u.username), "email, command line").await;
             println!("email updated for {}", u.username);
         }
         ["passwd", name] => {
@@ -152,11 +179,23 @@ async fn user_command(rest: &[&str]) -> Result<(), String> {
             let hash = auth::hash_password(password).await.map_err(err)?;
             sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2").bind(hash).bind(&u.id).execute(&state.db).await.map_err(|e| e.to_string())?;
             sqlx::query("DELETE FROM sessions WHERE user_id = $1").bind(&u.id).execute(&state.db).await.map_err(|e| e.to_string())?;
+            db::audit(&state.db, None, "user.update", Some(&u.username), "password reset, command line").await;
             println!("password updated for {}", u.username);
         }
         ["admin", name, on @ ("on" | "off")] => {
             let u = db::user_by(&state.db, "username", name).await.map_err(|e| e.to_string())?.ok_or("no such user")?;
+            // The same rule as in the app: the last active administrator keeps their rights (audit S-9).
+            if *on == "off" && u.is_admin && !u.disabled {
+                let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0 AND id <> 'local'")
+                    .fetch_one(&state.db)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if admins <= 1 {
+                    return Err("there must be at least one active administrator: make someone else one first".into());
+                }
+            }
             sqlx::query("UPDATE users SET is_admin = $1 WHERE id = $2").bind((*on == "on") as i64).bind(&u.id).execute(&state.db).await.map_err(|e| e.to_string())?;
+            db::audit(&state.db, None, "user.update", Some(&u.username), if *on == "on" { "made administrator, command line" } else { "removed administrator, command line" }).await;
             println!("{} is {} an administrator", u.username, if *on == "on" { "now" } else { "no longer" });
         }
         ["list"] => {

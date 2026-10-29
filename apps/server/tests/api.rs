@@ -338,12 +338,20 @@ async fn emails_are_required_valid_and_unique() {
 async fn people_edit_their_profile() {
     let app = app(|_| {}).await;
     let (ada, _) = with_admin(&app).await;
+    // Changing the email needs the current password (audit S-6); the name alone doesn't.
     let r = patch_json(&app, "/api/auth/me", &ada, json!({ "displayName": "Ada L.", "email": "ada@lovelace.org" })).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = patch_json(&app, "/api/auth/me", &ada, json!({ "displayName": "Ada L.", "email": "ada@lovelace.org", "currentPassword": "correct horse" })).await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.json()["displayName"], "Ada L.");
     assert_eq!(r.json()["email"], "ada@lovelace.org");
     let r = patch_json(&app, "/api/auth/me", &ada, json!({ "email": "nope" })).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // Saving the same email again is not a change: no password needed, and nothing new in the activity log (audit W-12).
+    let r = patch_json(&app, "/api/auth/me", &ada, json!({ "displayName": "Ada", "email": "ada@lovelace.org" })).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'account.email'").fetch_one(&app.state.db).await.unwrap();
+    assert_eq!(n, 1);
 }
 
 #[tokio::test]
@@ -391,6 +399,11 @@ async fn administrators_edit_merge_link_and_transfer() {
         .await
         .unwrap();
 
+    // Personal data: the SSO account has a key Robert lacks and one he already has.
+    for (user, key, value) in [(sso_id, "ai", "{\"from\":\"sso\"}"), (sso_id, "prefs", "{\"from\":\"sso\"}"), (bob_id.as_str(), "prefs", "{\"from\":\"bob\"}")] {
+        sqlx::query("INSERT INTO user_data (user_id, key, value, updated_at) VALUES ($1, $2, $3, 1)").bind(user).bind(key).bind(value).execute(&app.state.db).await.unwrap();
+    }
+
     // Merge the SSO account into Robert's: designs move, Robert keeps his password and gains the identity.
     let r = post_json(&app, &format!("/api/admin/users/{sso_id}/merge"), Some(&ada), json!({ "into": bob_id })).await;
     assert_eq!(r.status, StatusCode::OK, "{}", String::from_utf8_lossy(&r.body));
@@ -401,6 +414,11 @@ async fn administrators_edit_merge_link_and_transfer() {
     let robert = list.as_array().unwrap().iter().find(|u| u["id"] == bob_id.as_str()).unwrap().clone();
     assert_eq!(robert["designs"], 1);
     assert!(list.as_array().unwrap().iter().all(|u| u["id"] != sso_id));
+    // Audit S-2: the missing key moved over, Robert's own value won, nothing is left under the merged id.
+    let data: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM user_data WHERE user_id = $1 ORDER BY key").bind(&bob_id).fetch_all(&app.state.db).await.unwrap();
+    assert_eq!(data, vec![("ai".to_owned(), "{\"from\":\"sso\"}".to_owned()), ("prefs".to_owned(), "{\"from\":\"bob\"}".to_owned())]);
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_data WHERE user_id = $1").bind(sso_id).fetch_one(&app.state.db).await.unwrap();
+    assert_eq!(left, 0);
 
     // Unlink single sign-on.
     let r = post_json(&app, &format!("/api/admin/users/{bob_id}/unlink-sso"), Some(&ada), json!({})).await;
@@ -415,6 +433,8 @@ async fn administrators_edit_merge_link_and_transfer() {
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     let owner: String = sqlx::query_scalar("SELECT owner_id FROM designs WHERE id = 'd1'").fetch_one(&app.state.db).await.unwrap();
     assert_eq!(owner, ada_id);
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_data WHERE user_id = $1").bind(&bob_id).fetch_one(&app.state.db).await.unwrap();
+    assert_eq!(left, 0, "a deleted account's personal data is removed (audit S-2)");
 
     // Everything above is in the audit log.
     let log = call(&app, Method::GET, "/api/admin/audit", Some(&ada), None, false, &[]).await.json();
@@ -633,4 +653,27 @@ async fn personal_data_is_kept_per_person_on_the_server() {
     assert_eq!(del.status, StatusCode::NO_CONTENT);
     let gone = call(&app, Method::GET, "/api/me/data/ai", Some(&ada), None, false, &[]).await;
     assert!(gone.json().is_null());
+}
+
+#[tokio::test]
+async fn storage_quota_per_account() {
+    // Room for two versions of one small design (audit S-3).
+    let size = whittle("Part A").len() as u64;
+    let app = app(|c| {
+        c.user_quota_bytes = size * 2 + size / 2;
+        c.max_versions = 2;
+    })
+    .await;
+    let (ada, _) = with_admin(&app).await;
+    let r = call(&app, Method::POST, "/api/designs", Some(&ada), Some(Body::from(whittle("Part A"))), false, &[]).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", String::from_utf8_lossy(&r.body));
+    let id = r.json()["id"].as_str().unwrap().to_owned();
+    let path = format!("/api/designs/{id}");
+    assert_eq!(call(&app, Method::PUT, &path, Some(&ada), Some(Body::from(whittle("Part B"))), false, &[]).await.status, StatusCode::OK);
+    // A third design doesn't fit.
+    let r = call(&app, Method::POST, "/api/designs", Some(&ada), Some(Body::from(whittle("Part C"))), false, &[]).await;
+    assert_eq!(r.status, StatusCode::INSUFFICIENT_STORAGE);
+    assert!(r.json()["error"].as_str().unwrap_or_default().contains("MB"), "{}", String::from_utf8_lossy(&r.body));
+    // Saving again still works: the oldest version is pruned, so the total stays the same.
+    assert_eq!(call(&app, Method::PUT, &path, Some(&ada), Some(Body::from(whittle("Part D"))), false, &[]).await.status, StatusCode::OK);
 }

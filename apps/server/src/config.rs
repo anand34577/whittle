@@ -32,6 +32,8 @@ pub struct Config {
     pub max_upload_bytes: usize,
     /// Versions kept per design (oldest are pruned).
     pub max_versions: i64,
+    /// Disk space each account's designs may use, all kept versions included (WHITTLE_USER_QUOTA_MB; 0 = no limit).
+    pub user_quota_bytes: u64,
     pub session_days: i64,
     /// Email defaults (WHITTLE_SMTP_*); administrators can change them in the app.
     pub smtp: crate::settings::SmtpSettings,
@@ -40,6 +42,7 @@ pub struct Config {
     /// Behind a reverse proxy you control: read the client address from X-Forwarded-For (WHITTLE_TRUST_PROXY).
     pub trust_proxy: bool,
     /// If set, the very first account (the administrator) must present it when registering (WHITTLE_SETUP_TOKEN).
+    /// When unset on a server with no accounts, `whittle-server` makes one up at start-up and logs it.
     pub setup_token: Option<String>,
 }
 
@@ -130,11 +133,13 @@ impl Config {
             secure_cookies: env_bool("WHITTLE_SECURE_COOKIES", secure_default)?,
             max_upload_bytes: env_num::<usize>("WHITTLE_MAX_UPLOAD_MB", 64)? * 1024 * 1024,
             max_versions: env_num("WHITTLE_MAX_VERSIONS", 50)?.max(1),
+            user_quota_bytes: env_num::<u64>("WHITTLE_USER_QUOTA_MB", 0)?.saturating_mul(1024 * 1024),
             session_days: env_num("WHITTLE_SESSION_DAYS", 30)?.max(1),
             smtp: crate::settings::SmtpSettings::from_env()?,
             ai: env_bool("WHITTLE_AI", true)?,
             trust_proxy: env_bool("WHITTLE_TRUST_PROXY", false)?,
-            setup_token: env("WHITTLE_SETUP_TOKEN"),
+            // "off": no token, and none is generated at start-up (see `serve`).
+            setup_token: env("WHITTLE_SETUP_TOKEN").filter(|v| !v.eq_ignore_ascii_case("off")),
         })
     }
 
@@ -154,6 +159,7 @@ impl Config {
             secure_cookies: false,
             max_upload_bytes: 64 * 1024 * 1024,
             max_versions: 50,
+            user_quota_bytes: 0,
             session_days: 30,
             smtp: crate::settings::SmtpSettings::default(),
             ai: true,
