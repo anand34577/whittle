@@ -1,5 +1,5 @@
 /** Pieces of the build shared by the feature builders (build, extra, surface): errors, sketch outlines to drawings, placement helpers. */
-import { type Evaluator, type Feature, type Id, type ResolvedEntity, type SketchFeature, type Vec3, entityOutline, polygonInside, chainSegments, crossesItself, splineBeziers, resolveEntity } from "@whittle/core";
+import { type Evaluator, type Feature, type Id, type ResolvedEntity, type SketchFeature, type Vec3, entityOutline, polygonInside, chainSegments, crossesItself, splineBeziers, resolveEntity, solidEntities } from "@whittle/core";
 import { BoundingBox, Blueprint, CompoundBlueprint, Drawing, Blueprints, Plane, type Face, type Shape3D, type Wire, getOC, draw, drawCircle, drawEllipse, drawPointsInterpolation, drawRoundedRectangle, drawText, iterTopo } from "replicad";
 import type { FeatureFix, SketchFrame } from "./protocol";
 
@@ -317,7 +317,7 @@ export interface SketchNotes {
 
 export function sketchDrawing(f: SketchFeature, ev: Evaluator, notes: SketchNotes = {}): Drawing | null {
   const resolved: ResolvedEntity[] = [];
-  for (const e of f.entities) {
+  for (const e of solidEntities(f.entities)) {
     try {
       const r = resolveEntity(e, ev);
       // Open paths guide sweeps; they never enclose material.
@@ -367,7 +367,7 @@ const REGION_LIMIT = 40;
  */
 export function sketchRegionDrawings(f: SketchFeature, ev: Evaluator): Drawing[] | null {
   const resolved: ResolvedEntity[] = [];
-  for (const e of f.entities) {
+  for (const e of solidEntities(f.entities)) {
     try {
       const r = resolveEntity(e, ev);
       if (!r.construction && !(r.type === "polyline" && r.open)) resolved.push(r);

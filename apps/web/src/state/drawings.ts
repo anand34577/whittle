@@ -4,7 +4,7 @@
  *   - import an SVG (logos, lettering, traced outlines) as editable sketch shapes
  */
 import { promptDialog } from "./dialogs";
-import { type Evaluator, type LengthUnit, type ResolvedEntity, lengthText, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, parseDxf, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
+import { type Evaluator, type LengthUnit, type ResolvedEntity, lengthText, type SketchEntity, type SketchFeature, type Vec2, documentEvaluator, drawnEntities, parseDxf, entityLoops, expandSketch, resolveEntity, trim, uid } from "@whittle/core";
 import { exportText } from "./files";
 import { getKernel } from "./kernel";
 import { simplify } from "./simplify";
@@ -135,7 +135,7 @@ export async function exportSketch(sketchId: string, format: "svg" | "dxf") {
   if (!sk) return;
   // Constraint-driven geometry exports at its solved positions.
   const sol = useApp.getState().regen?.sketches.find((x) => x.id === sk.id)?.solution;
-  const { shapes, skipped } = sketchShapes(expandSketch(sk, sol).entities, documentEvaluator(doc));
+  const { shapes, skipped } = sketchShapes(drawnEntities(expandSketch(sk, sol).entities), documentEvaluator(doc));
   if (sk.entities.some((e) => e.type === "text" && !e.construction)) {
     try {
       const r = await getKernel().inspect(doc, "text");

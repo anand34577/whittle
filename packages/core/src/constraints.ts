@@ -7,6 +7,7 @@
 import type { ConstraintType, GeomType, Id, PolyPoint, SketchConstraint, SketchEntity, SketchFeature, SketchGeom, Vec2 } from "./model";
 import { uid } from "./factory";
 import { smoothClosed, smoothOpen } from "./sketch";
+import { type LooseCurve, looseAreas, nearestGap } from "./arrangement";
 
 /** Fixed references every sketch has: the origin point and the two axes. */
 export const SKETCH_REFS: Record<string, GeomType> = { origin: "point", xaxis: "line", yaxis: "line" };
@@ -139,8 +140,10 @@ const n = (v: number) => v as unknown as string;
  * The sketch with its solved geometry turned into ordinary entities: every
  * closed loop of lines and arcs becomes an outline, other chains become open
  * paths, circles become circles and construction lines become construction
- * paths (revolve axes). Everything downstream (holes, thin walls, sweeps)
- * then works unchanged.
+ * paths (revolve axes). Lines and arcs that don't join end to end into a loop
+ * (they cross, overshoot, meet partway along another or three at a point) also
+ * give the outline of the area each connected group of them encloses.
+ * Everything downstream (holes, thin walls, sweeps) then works unchanged.
  */
 export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFeature {
   if (!sk.geometry?.length) return sk;
@@ -170,17 +173,22 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
     mid?: Vec2;
     /** A spline's fit points between its ends, in order from the first end. */
     through?: Vec2[];
+    /** Its exact shape, for finding the areas loose curves enclose. */
+    curves: LooseCurve[];
   }
   const segs: Seg[] = [];
+  // Closed outlines a loose curve may touch: where each sits in `out`, and its shape.
+  const loops: { index: number; curves: LooseCurve[] }[] = [];
   for (const g of geo) {
     const src = byId.get(g.id)!;
     if (g.type === "circle") {
+      if (!g.construction && g.r > 0) loops.push({ index: out.length, curves: [{ kind: "arc", c: g.c, r: g.r, a0: 0, sweep: TAU }] });
       out.push({ id: g.id, type: "circle", cx: n(g.c[0]), cy: n(g.c[1]), r: n(g.r), construction: g.construction || undefined });
     } else if (g.type === "ellipse") {
       out.push({ id: g.id, type: "ellipse", cx: n(g.c[0]), cy: n(g.c[1]), rx: n(g.rx), ry: n(g.ry), angle: n(g.angle), construction: g.construction || undefined });
     } else if (g.type === "line" && src.type === "line") {
       if (g.construction) out.push({ id: g.id, type: "polyline", points: [[n(g.a[0]), n(g.a[1])], [n(g.b[0]), n(g.b[1])]], open: true, construction: true });
-      else segs.push({ id: g.id, ends: [root(src.a), root(src.b)], at: [g.a, g.b] });
+      else segs.push({ id: g.id, ends: [root(src.a), root(src.b)], at: [g.a, g.b], curves: [{ kind: "line", a: g.a, b: g.b }] });
     } else if (g.type === "spline" && src.type === "spline") {
       if (g.closed || g.construction) {
         // A closed spline is a whole outline by itself; a construction one is a guide.
@@ -189,10 +197,12 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
       } else if (g.pts.length >= 2) {
         // An open spline joins lines and arcs into one outline or path.
         const last = g.pts.length - 1;
-        segs.push({ id: g.id, ends: [root(src.pts[0]!), root(src.pts[last]!)], at: [g.pts[0]!, g.pts[last]!], ...(last >= 2 ? { through: g.pts.slice(1, last) } : {}) });
+        const flat = last >= 2 ? smoothOpen(g.pts, 12) : g.pts;
+        const curves = flat.slice(1).map((b, i): LooseCurve => ({ kind: "line", a: flat[i]!, b }));
+        segs.push({ id: g.id, ends: [root(src.pts[0]!), root(src.pts[last]!)], at: [g.pts[0]!, g.pts[last]!], ...(last >= 2 ? { through: g.pts.slice(1, last) } : {}), curves });
       }
     } else if (g.type === "arc" && src.type === "arc" && !g.construction) {
-      segs.push({ id: g.id, ends: [root(src.a), root(src.b)], at: [g.a, g.b], mid: polar(g.c, g.r, g.a0 + g.sweep / 2) });
+      segs.push({ id: g.id, ends: [root(src.a), root(src.b)], at: [g.a, g.b], mid: polar(g.c, g.r, g.a0 + g.sweep / 2), curves: [{ kind: "arc", c: g.c, r: g.r, a0: g.a0, sweep: g.sweep }] });
     }
   }
 
@@ -200,38 +210,82 @@ export function expandSketch(sk: SketchFeature, sol?: SketchSolution): SketchFea
   for (const s of segs) for (const e of s.ends) at.set(e, [...(at.get(e) ?? []), s]);
   const used = new Set<Seg>();
   // Follow segments from `node` until a node that isn't a plain joint, or back to the start.
-  const walk = (node: Id, first: Seg): { pts: PolyPoint[]; closed: boolean } => {
+  const walk = (node: Id, first: Seg): { pts: PolyPoint[]; closed: boolean; segs: Seg[] } => {
     const pts: PolyPoint[] = [];
+    const path: Seg[] = [];
     let s = first;
     let cur = node;
     for (;;) {
       used.add(s);
+      path.push(s);
       const fwd = s.ends[0] === cur;
       pts.push(pt(fwd ? s.at[0] : s.at[1]));
       if (s.mid) pts.push([n(s.mid[0]), n(s.mid[1]), "arc"]);
       if (s.through) for (const p of fwd ? s.through : [...s.through].reverse()) pts.push([n(p[0]), n(p[1]), "spline"]);
       cur = fwd ? s.ends[1] : s.ends[0];
-      if (cur === node) return { pts, closed: true };
+      if (cur === node) return { pts, closed: true, segs: path };
       const next = at.get(cur) ?? [];
       const s2 = next.length === 2 ? next.find((x) => x !== s) : undefined;
       if (!s2 || used.has(s2)) {
         pts.push(pt(fwd ? s.at[1] : s.at[0]));
-        return { pts, closed: false };
+        return { pts, closed: false, segs: path };
       }
       s = s2;
     }
   };
   // Open chains start at free ends and junctions; what's left are closed loops.
+  const loose: Seg[] = [];
+  const chain = (node: Id, s: Seg) => {
+    const w = walk(node, s);
+    if (w.closed) loops.push({ index: out.length, curves: w.segs.flatMap((x) => x.curves) });
+    else loose.push(...w.segs);
+    out.push({ id: s.id, type: "polyline", points: w.pts, ...(w.closed ? {} : { open: true }) });
+  };
   for (const [node, list] of at) {
     if (list.length === 2) continue;
-    for (const s of list) if (!used.has(s)) out.push({ id: s.id, type: "polyline", points: walk(node, s).pts, open: true });
+    for (const s of list) if (!used.has(s)) chain(node, s);
   }
-  for (const s of segs) {
-    if (used.has(s)) continue;
-    const w = walk(s.ends[0], s);
-    out.push({ id: s.id, type: "polyline", points: w.pts, ...(w.closed ? {} : { open: true }) });
+  for (const s of segs) if (!used.has(s)) chain(s.ends[0], s);
+  // The open chains stay as paths (sweeps, thin walls) and the areas they enclose become outlines too. A joined
+  // outline they touch is taken into their area, so it stays for walls and export but no longer makes material itself.
+  if (loose.length) {
+    const { faces, covered } = looseAreas(
+      loose.flatMap((s) => s.curves),
+      loops.map((l) => l.curves),
+    );
+    for (const i of covered) out[loops[i]!.index] = { ...out[loops[i]!.index]!, covered: true };
+    faces.forEach((points, i) => out.push({ id: `${loose[0]!.id}~area${i + 1}`, type: "polyline", points, area: true }));
   }
   return { ...sk, entities: [...sk.entities, ...out] };
+}
+
+/**
+ * Where a sketch's lines and arcs come closest to meeting without touching (an end stopping a hair short of the
+ * curve it was meant to join), for telling the person why there's no closed shape. Null when nothing almost meets.
+ */
+export function sketchGap(sk: SketchFeature, sol?: SketchSolution): { at: Vec2; gap: number } | null {
+  const curves: LooseCurve[] = [];
+  for (const g of resolveGeometry(sk, sol)) {
+    if (g.construction) continue;
+    if (g.type === "line") curves.push({ kind: "line", a: g.a, b: g.b });
+    else if (g.type === "arc") curves.push({ kind: "arc", c: g.c, r: g.r, a0: g.a0, sweep: g.sweep });
+    else if (g.type === "circle") curves.push({ kind: "arc", c: g.c, r: g.r, a0: 0, sweep: TAU });
+    else if (g.type === "spline" && !g.closed && g.pts.length >= 2) {
+      const flat = g.pts.length >= 3 ? smoothOpen(g.pts, 12) : g.pts;
+      flat.slice(1).forEach((b, i) => curves.push({ kind: "line", a: flat[i]!, b }));
+    }
+  }
+  return nearestGap(curves);
+}
+
+/** The shapes that make material: an outline split up by loose lines gives way to the areas they enclose. */
+export function solidEntities(entities: SketchEntity[]): SketchEntity[] {
+  return entities.filter((e) => !e.covered);
+}
+
+/** The shapes as drawn, for walls along them and for export: the lines and outlines, not the areas worked out from them. */
+export function drawnEntities(entities: SketchEntity[]): SketchEntity[] {
+  return entities.filter((e) => !(e.type === "polyline" && e.area)).map((e) => (e.covered ? { ...e, covered: undefined } : e));
 }
 
 /* ───────────────────────── Constraints ───────────────────────── */
@@ -663,11 +717,32 @@ function crossings(g: Curve, geo: GeomResolved[]): { t: number; p: Vec2; by: Id 
   return out.sort((x, y) => x.t - y.t);
 }
 
-/** A new point at `p`, constrained onto curve `on`. */
-function pointOn(sk: Geo, p: Vec2, on: Id): Id {
+/** A new point at `p`, constrained onto curve `on` (each of them, where several meet there). */
+function pointOn(sk: Geo, p: Vec2, on: Id | Id[]): Id {
   const id = addPoint(sk, p);
-  addConstraint(sk, "coincident", [id, on]);
+  for (const c of typeof on === "string" ? [on] : on) addConstraint(sk, "coincident", [id, c]);
   return id;
+}
+
+/**
+ * Crossings closer together than a hair of the curve's length are one place where several curves meet (two
+ * circles crossing on a line, a line through a corner). Cutting at each of them left a sliver of a line or arc
+ * thousandths of a millimetre long, too small to see or pick, that kept the outline from closing (issue #21).
+ */
+function mergeCrossings(cuts: { t: number; p: Vec2; by: Id }[], length: number, wrap: boolean): { t: number; p: Vec2; by: Id[] }[] {
+  const near = Math.max(1e-9, length * 1e-4);
+  const out: { t: number; p: Vec2; by: Id[] }[] = [];
+  for (const c of cuts) {
+    const last = out[out.length - 1];
+    if (last && dist(last.p, c.p) <= near) {
+      if (!last.by.includes(c.by)) last.by.push(c.by);
+    } else out.push({ t: c.t, p: c.p, by: [c.by] });
+  }
+  // Round a circle, the last crossing can be the first one again.
+  if (wrap && out.length > 1 && dist(out[0]!.p, out[out.length - 1]!.p) <= near) {
+    for (const b of out.pop()!.by) if (!out[0]!.by.includes(b)) out[0]!.by.push(b);
+  }
+  return out;
 }
 
 /** Lines whose length changes lose their length and equal-length constraints. */
@@ -690,7 +765,15 @@ export function trimGeometry(sk: Geo, id: Id, click: Vec2): string | undefined {
   if (!g || !src || g.type === "point" || g.type === "spline" || g.type === "ellipse" || src.type === "point") return "Pick a line, arc or circle to trim.";
   const before = usedPoints(sk);
   const span = g.type === "line" ? 1 : g.type === "arc" ? g.sweep : TAU;
-  const cuts = crossings(g, geo).filter((c) => g.type === "circle" || (c.t > EPS && c.t < span - EPS));
+  const length = g.type === "line" ? dist(g.a, g.b) : g.r * span;
+  const near = Math.max(1e-9, length * 1e-4);
+  // A crossing at (or a hair from) one of the curve's own ends cuts nothing off.
+  const ends = g.type === "circle" ? [] : [g.a, g.b];
+  const cuts = mergeCrossings(
+    crossings(g, geo).filter((c) => g.type === "circle" || (c.t > EPS && c.t < span - EPS && ends.every((e) => dist(e, c.p) > near))),
+    length,
+    g.type === "circle",
+  );
   const tc = param(g, click);
 
   if (src.type === "circle") {
