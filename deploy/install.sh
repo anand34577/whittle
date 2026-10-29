@@ -106,6 +106,17 @@ fi
 SVC=""
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   install -m 644 "$HERE/deploy/whittle.service" /etc/systemd/system/whittle.service
+  # Outside a container, turn on the stricter sandboxing the unit leaves commented out for LXC (audit X-5).
+  if command -v systemd-detect-virt >/dev/null 2>&1 && ! systemd-detect-virt --container --quiet; then
+    mkdir -p /etc/systemd/system/whittle.service.d
+    cat > /etc/systemd/system/whittle.service.d/hardening.conf <<'UNIT'
+[Service]
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/whittle
+UNIT
+  fi
   systemctl daemon-reload
   if [ "$RESTART" = 1 ]; then systemctl restart whittle; else systemctl enable --now whittle; fi
   SVC="systemctl status whittle   |   journalctl -u whittle -f"
@@ -120,14 +131,19 @@ else
 fi
 
 PORT=$(sed -n 's/^WHITTLE_BIND=.*://p' "$CONF/whittle.env" | head -n1)
+# The health check asks the address the server listens on: a server bound to one LAN address
+# doesn't answer on 127.0.0.1 (audit X-7). Any-address binds are asked on loopback.
+BIND=$(sed -n 's/^WHITTLE_BIND=//p' "$CONF/whittle.env" | head -n1)
+HOST=${BIND%:*}
+case "$HOST" in "" | 0.0.0.0 | "[::]" | "$BIND") HOST=127.0.0.1 ;; esac
 ADDR=$(hostname -I 2>/dev/null | cut -d' ' -f1)
 
 # Wait until the server answers; after a failed upgrade, put the previous version back.
 healthy() {
   i=0
   while [ $i -lt 30 ]; do
-    if command -v curl >/dev/null 2>&1; then curl -fsS "http://127.0.0.1:${PORT:-8080}/api/health" >/dev/null 2>&1 && return 0
-    elif command -v wget >/dev/null 2>&1; then wget -qO- "http://127.0.0.1:${PORT:-8080}/api/health" >/dev/null 2>&1 && return 0
+    if command -v curl >/dev/null 2>&1; then curl -fsS "http://$HOST:${PORT:-8080}/api/health" >/dev/null 2>&1 && return 0
+    elif command -v wget >/dev/null 2>&1; then wget -qO- "http://$HOST:${PORT:-8080}/api/health" >/dev/null 2>&1 && return 0
     else return 0; fi
     i=$((i + 1)); sleep 1
   done
@@ -143,7 +159,7 @@ if [ -n "$SVC" ] && ! healthy; then
     cp -p "$PREFIX/previous/whittle-server" "$PREFIX/whittle-server"
     rm -rf "$PREFIX/web"; cp -r "$PREFIX/previous/web" "$PREFIX/web"
     restart_service
-    if healthy; then echo "Whittle $OLD is running again. Nothing was lost; the backup is in $DATA/backups." >&2
+    if healthy; then echo "Whittle $OLD is running again. If the new version had already updated the database, restore the backup made before the upgrade (in $DATA/backups)." >&2
     else echo "Whittle still doesn't start. Check: $SVC" >&2; fi
     exit 1
   fi
@@ -156,6 +172,7 @@ echo "- Checking the installation"
 echo
 echo "Whittle $("$PREFIX/whittle-server" --version | cut -d' ' -f2) is installed."
 echo "  Open      http://${ADDR:-localhost}:${PORT:-8080}/   (the first account you create becomes the administrator)"
+echo "            It asks for a setup token, which the server's log shows: ${SVC:+${SVC##*|   }}"
 echo "  Settings  $CONF/whittle.env   (restart the service after changes)"
 echo "  Data      $DATA   (back this folder up; with PostgreSQL, back up the database too)"
 [ -n "$SVC" ] && echo "  Service   $SVC"

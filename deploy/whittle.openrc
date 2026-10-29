@@ -20,4 +20,9 @@ start_pre() {
   . /etc/whittle/whittle.env
   set +a
   checkpath -f -o whittle:whittle /var/log/whittle.log
+  # Keep the log from growing without end (audit X-7): past 10 MB the previous one is kept as .1.
+  if [ "$(wc -c < /var/log/whittle.log)" -gt 10485760 ]; then
+    mv -f /var/log/whittle.log /var/log/whittle.log.1
+    checkpath -f -o whittle:whittle /var/log/whittle.log
+  fi
 }

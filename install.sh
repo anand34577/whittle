@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
     --server) MODE=server ;;
     --upgrade) ;;
     --purge) PURGE=1 ;;
-    --version) VERSION="${2#v}"; shift ;;
+    --version) [ $# -ge 2 ] || { echo "--version needs a version, like --version 0.17.1" >&2; exit 1; }; VERSION="${2#v}"; shift ;;
     --version=*) VERSION="${1#--version=}"; VERSION="${VERSION#v}" ;;
     --appimage) APPIMAGE=1 ;;
     --uninstall) UNINSTALL=1 ;;
@@ -122,6 +122,8 @@ if [ "$MODE" = server ]; then
   fetch "$url"
   tar xzf "$FILE" -C "$TMP"
   dir=$(find "$TMP" -maxdepth 1 -type d -name 'whittle-server-*' | head -n1)
+  # For testing an edited deploy/install.sh against a published build (the installers workflow does this).
+  if [ -n "${WHITTLE_DEPLOY_SCRIPT:-}" ]; then cp "$WHITTLE_DEPLOY_SCRIPT" "$dir/deploy/install.sh"; fi
   as_root sh "$dir/deploy/install.sh"
   exit 0
 fi
