@@ -506,7 +506,14 @@ Templates replace the current design with a complete, editable example:
 |---|---|
 | Mounting plate | Parameters (`width`, `depth`, `thickness`, `hole`, `inset`), rounded plate, four holes driven by formulas, a centre slot |
 | Project box | A 3D-printable enclosure: box with rounded corners, shelled to 2 mm walls, driven by length, width, height and wall parameters |
+| Hex bolt M8 | A hexagon head and a real 60° thread; change the size, pitch and length |
+| Twisted vase | A polygon twisted as it rises, then hollowed; try 5 sides or 180° |
+| Bottle | A revolved profile with shoulder and neck, shelled to a thin wall |
+| Shelf bracket | A braced L-bracket with countersunk screw holes |
+| Drawer handle | A round profile swept along a smooth path |
 | Control knob | A revolved profile with a shaft hole, built from a sketch |
+
+Pictures of every template are in the [README](../README.md); `node tests/e2e/gallery.mjs` regenerates the pictures in `docs/media`, and `tests/e2e/demos.mjs` the animated demos, from the running app.
 
 ---
 
