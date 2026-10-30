@@ -22,23 +22,84 @@ fillets and real threads, not approximate meshes. On top of it is an interface b
 the next step is always on screen, every number accepts a formula, and when something can't be built, Whittle says
 why and suggests a fix.
 
-> **Status: 0.17, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
+> **Status: 0.18, preview.** Part modelling, sketch constraints, joints between bodies and a one-sheet 2D drawing
 > work end to end. Full assemblies (mates, bills of materials), sheet metal and CAM are planned.
 
 <p align="center">
   <img src="docs/media/screenshot-box.png" alt="The Whittle workspace with a project box: toolbar, design browser, 3D view and properties" width="100%">
 </p>
 
+## See it in action
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/demo-sketch-extrude-fillet.gif" alt="Sketching a rectangle, extruding it and rounding the corners"><br><sub><b>Sketch, extrude, fillet</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-parameters.gif" alt="Changing parameters to resize a mounting plate"><br><sub><b>Change a number, the whole part follows</b></sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/demo-section.gif" alt="Sliding a section plane through a project box"><br><sub><b>Slice through a part</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-themes.gif" alt="Cycling through the eight themes"><br><sub><b>Eight themes</b></sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/media/demo-orbit.gif" alt="Orbiting a twisted vase" width="80%">
+</p>
+
+## Start from a template
+
+Eight real, editable designs open from the start screen. Change one number and the whole part follows.
+
+<p align="center">
+  <img src="docs/media/screenshot-start.png" alt="The start screen with eight templates" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshot-plate.png" alt="The mounting plate template"><br><sub><b>Mounting plate</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-box.png" alt="The project box template"><br><sub><b>Project box</b></sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshot-bolt.png" alt="The hex bolt M8 template with a real thread"><br><sub><b>Hex bolt M8 with a real thread</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-vase.png" alt="The twisted vase template"><br><sub><b>Twisted vase</b></sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshot-bottle-light.png" alt="The bottle template in the Paper theme"><br><sub><b>Bottle</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-bracket.png" alt="The shelf bracket template"><br><sub><b>Shelf bracket</b></sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshot-handle.png" alt="The drawer handle template, swept along a path"><br><sub><b>Drawer handle</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-knob.png" alt="The control knob template"><br><sub><b>Control knob</b></sub></td>
+  </tr>
+</table>
+
+## Parts, export and themes
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshot-parts.png" alt="The parts library"><br><sub><b>Parts library</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-export.png" alt="The export dialog"><br><sub><b>Export to STEP, STL or 3MF</b></sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshot-themes.png" alt="The theme picker with eight themes"><br><sub><b>Eight themes and seven accent colors</b></sub></td>
+    <td width="50%" align="center"><img height="420" src="docs/media/screenshot-phone.png" alt="Whittle on a phone"><br><sub><b>On a phone: one finger orbits, two pinch</b></sub></td>
+  </tr>
+</table>
+
 ## Why Whittle
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/media/thumb-sketch.png" alt="Sketching a plate with typed sizes and holes"></td>
-    <td width="50%"><img src="docs/media/thumb-model.png" alt="A live press/pull preview on a mounting plate"></td>
+    <td width="50%"><img src="docs/media/screenshot-sketch.png" alt="Sketching a rectangle with typed width and height"><br><sub><b>Sketch with typed sizes</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-extrude.png" alt="A live extrude preview with an on-canvas distance handle"><br><sub><b>Live preview as you extrude</b></sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/media/thumb-export.png" alt="A bottle in the light theme, ready to export"></td>
-    <td width="50%"><img src="docs/media/thumb-finishes.png" alt="A twisted vase with a clear finish"></td>
+    <td width="50%"><img src="docs/media/screenshot-parameters.png" alt="The parameters table with named values and formulas"><br><sub><b>Named parameters and formulas</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-palette.png" alt="The command palette searching for fillet"><br><sub><b>Find any command with Ctrl+K</b></sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/screenshot-section.png" alt="A section view slicing through a project box"><br><sub><b>Section views</b></sub></td>
+    <td width="50%"><img src="docs/media/screenshot-zebra.png" alt="Zebra stripes analysing the surface of a twisted vase"><br><sub><b>Surface analysis</b></sub></td>
   </tr>
 </table>
 
