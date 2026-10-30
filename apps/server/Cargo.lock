@@ -3153,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "whittle-server"
-version = "0.18.2"
+version = "0.18.3"
 dependencies = [
  "argon2",
  "axum",
