@@ -132,9 +132,23 @@ export function cancelImagePick() {
 }
 
 /** A click while picking. Returns true when the click was used. */
-export function imagePickPointer(type: "move" | "down", p: Vec2, button: number): boolean {
+export function imagePickPointer(type: "move" | "down", p0: Vec2, button: number, shift = false): boolean {
   const st = useImagePick.getState();
   if (!st.kind) return false;
+  // Holding Shift while calibrating locks the line to the nearest 15° step, so a horizontal or vertical
+  // measurement comes out straight instead of a few pixels off.
+  let p = p0;
+  const a = st.kind === "calibrate" && shift ? st.pts[0] : undefined;
+  if (a) {
+    const dx = p0[0] - a[0];
+    const dy = p0[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    if (len > 1e-9) {
+      const step = Math.PI / 12;
+      const ang = Math.round(Math.atan2(dy, dx) / step) * step;
+      p = [a[0] + Math.cos(ang) * len, a[1] + Math.sin(ang) * len];
+    }
+  }
   if (type === "move") {
     useImagePick.setState({ cursor: p });
     return true;

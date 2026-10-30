@@ -287,7 +287,7 @@
 }
 [data-theme^="daylight"] .toolbar .pill--accent {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   border-radius: 3px;
 }
 [data-theme^="daylight"] .btn--accent {
@@ -297,7 +297,7 @@
 [data-theme^="daylight"] .toolbar__finish {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 [data-theme^="daylight"] .split__more:hover {
   background: var(--bg-3);
@@ -319,11 +319,11 @@
 }
 [data-theme^="daylight"] .groupmenu__item:hover:not(:disabled) {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 [data-theme^="daylight"] .groupmenu__item:hover:not(:disabled) small,
 [data-theme^="daylight"] .groupmenu__item:hover:not(:disabled) kbd {
-  color: rgb(255 255 255 / 0.85);
+  color: color-mix(in oklab, var(--accent-ink) 85%, transparent);
 }
 
 /* ═════════════════════════ Browser ═════════════════════════ */
@@ -453,7 +453,7 @@
   height: 20px;
   border-radius: 6px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
 }
 [data-theme^="daylight"] .panel__head h2 {
@@ -630,7 +630,7 @@
 }
 [data-theme^="daylight"] .panel .btn--accent {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 [data-theme^="daylight"] .panel .btn--accent:hover:not(:disabled) {
   background: var(--accent-hover);
