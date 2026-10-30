@@ -602,13 +602,20 @@ textarea::placeholder {
   gap: 8px;
   margin-top: 8px;
 }
-.btn--danger-solid {
-  background: var(--danger);
+/* Solid red. The base .btn:hover (and daylight's .panel .btn:hover) would repaint it pale while the
+   text stays white, so every state is pinned here at higher specificity: white on a darkened danger. */
+.btn.btn--danger-solid,
+[data-theme^="daylight"] .panel .btn.btn--danger-solid {
+  background: color-mix(in oklab, var(--danger) 78%, black);
+  border-color: transparent;
   color: #fff;
   box-shadow: none;
 }
-.btn--danger-solid:hover:not(:disabled) {
-  filter: brightness(1.08);
+.btn.btn--danger-solid:hover:not(:disabled),
+[data-theme^="daylight"] .panel .btn.btn--danger-solid:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 66%, black);
+  border-color: transparent;
+  color: #fff;
 }
 
 /* ═════════════════════ Tooltip ═════════════════════ */

@@ -1,6 +1,6 @@
 [package]
 name = "whittle-server"
-version = "0.18.1"
+version = "0.18.2"
 description = "Optional self-hosted server for Whittle: serves the web app, user accounts and design storage with version history"
 license = "MPL-2.0"
 edition = "2021"

@@ -628,7 +628,7 @@ export function ViewportView() {
         else if (p && (p.kind === "face" || p.kind === "edge" || p.kind === "body")) editFeature(p.bodyId);
       },
       onSketchPointer: (e) => {
-        if ((e.type === "move" || e.type === "down") && imagePickPointer(e.type, e.p, e.button)) return;
+        if ((e.type === "move" || e.type === "down") && imagePickPointer(e.type, e.p, e.button, e.shift)) return;
         controller.pointer(e);
       },
       onCamera: () => {
@@ -1063,7 +1063,7 @@ export function ViewportView() {
         <div className="viewport__banner" role="status">
           <Icon name="image" size={16} />
           {imagePick.kind === "calibrate"
-            ? `Calibrate: click ${imagePick.pts.length ? "the second point" : "the first of two points whose distance you know"}`
+            ? `Calibrate: click ${imagePick.pts.length ? "the second point" : "the first of two points whose distance you know"}${imagePick.pts.length ? " (hold Shift to snap the angle to 15°)" : ""}`
             : imagePick.kind === "flatten"
               ? `Flatten photo: click corner ${imagePick.pts.length + 1} of 4 of the known rectangle, in order around it`
               : "Trace one area: click inside the shape (or the gap) to outline"}

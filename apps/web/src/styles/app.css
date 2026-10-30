@@ -2127,10 +2127,6 @@ button.docname__state:hover {
     opacity: 1;
   }
 }
-/* White on the theme's danger colour, darkened enough to read. */
-.btn--danger-solid {
-  background: color-mix(in oklab, var(--danger) 78%, black);
-}
 /* The system "reduce motion" setting stops the looping animations too, not only the transitions. */
 @media (prefers-reduced-motion: reduce) {
   *,
