@@ -123,9 +123,11 @@
 [data-theme="paper"][data-accent="green"] { --accent: oklch(0.56 0.15 145); --accent-ink: oklch(0.99 0.01 145); }
 
 /* ── Density ──────────────────────────────────────────────────── */
+/* Comfortable is the default from tokens.css and enhance.css. Bigger is Interface size's job, so there is no
+   "spacious": it set a 60px toolbar, shorter than the 70px default (issue #27). */
 [data-density="compact"] {
   --h-title: 36px;
-  --h-toolbar: 44px;
+  --h-toolbar: 58px;
   --h-timeline: 50px;
   --h-status: 24px;
   --w-browser: 220px;
@@ -133,17 +135,14 @@
   --sp-3: 10px;
   --sp-4: 12px;
 }
-[data-density="spacious"] {
-  --h-title: 44px;
-  --h-toolbar: 60px;
-  --h-timeline: 64px;
-  --h-status: 30px;
-  --w-browser: 264px;
-  --w-panel: 330px;
-  --sp-3: 14px;
-  --sp-4: 20px;
-  --fs-sm: 12.5px;
-  --fs-md: 13.5px;
+/* Smaller buttons, so the group names under them (Start, Create...) still fit instead of being cut off. */
+[data-density="compact"] .toolgroup {
+  padding-top: 3px;
+  padding-bottom: 2px;
+}
+[data-density="compact"] .tool {
+  height: 38px;
+  padding-block: 1px;
 }
 
 /* ── Interface size: the whole app scales (popovers and tooltips keep their size) ── */

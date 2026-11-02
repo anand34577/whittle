@@ -9,6 +9,12 @@ describe("preferences", () => {
     expect(nav("something-else")).toBe("whittle");
   });
 
+  it("moves the dropped Spacious density back to Comfortable (issue #27)", () => {
+    const density = (d: string) => normalizePrefs({ density: d } as unknown as Partial<Prefs>).density;
+    expect(density("spacious")).toBe("comfortable");
+    expect(density("compact")).toBe("compact");
+  });
+
   it("falls back to Whittle's own keys for an unknown keyboard layout", () => {
     expect(normalizePrefs({ keys: "classic" }).keys).toBe("classic");
     expect(normalizePrefs({ keys: "other" } as unknown as Partial<Prefs>).keys).toBe("whittle");

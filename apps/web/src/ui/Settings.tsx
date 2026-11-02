@@ -69,7 +69,7 @@ function Appearance() {
         <div className="field field--stack">
           <span className="field__label">Density</span>
           <div className="seg" role="radiogroup">
-            {(["compact", "comfortable", "spacious"] as Density[]).map((d) => (
+            {(["compact", "comfortable"] as Density[]).map((d) => (
               <button key={d} type="button" role="radio" aria-checked={prefs.density === d} className={`seg__btn ${prefs.density === d ? "is-on" : ""}`} onClick={() => setPrefs({ density: d })}>
                 {d[0]!.toUpperCase() + d.slice(1)}
               </button>
