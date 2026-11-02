@@ -170,6 +170,47 @@ await step("07-box-select-in-a-fillet", async () => {
   await page.keyboard.press("Escape");
 });
 
+await step("08-dimension-across-an-axis-then-fit", async () => {
+  await page.keyboard.press("s");
+  await page.locator(".tree__row", { hasText: "XY plane" }).click();
+  await page.waitForTimeout(1200);
+  box = await page.locator("canvas").first().boundingBox();
+  const screen = (p) => state((q) => window.whittle.viewportRef.current.sketchToScreen(q), p);
+  const clickSketch = async (p) => {
+    const [x, y] = await screen(p);
+    await page.mouse.move(box.x + x, box.y + y, { steps: 3 });
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+  };
+  const inch = 25.4;
+  await setTool("rect");
+  await clickSketch([-1.5 * inch, -inch]);
+  await clickSketch([1.5 * inch, inch]);
+  await page.waitForTimeout(400);
+  // The width's natural spot is straight below the bottom edge's middle: on the Y axis, for a shape centred there.
+  await setTool("dimension");
+  await clickSketch([0.75 * inch, -inch]);
+  await clickSketch([0, -2 * inch]);
+  const dlg = page.getByRole("dialog", { name: "Distance" });
+  await dlg.waitFor({ timeout: 5000 });
+  await dlg.locator("input").fill("24");
+  await dlg.locator("input").press("Enter");
+  await built();
+  const width = await state(() => {
+    const s = window.whittle.useApp.getState();
+    const sk = s.doc.features.filter((f) => f.type === "sketch").at(-1);
+    const xs = Object.values(s.regen.sketches.find((x) => x.id === sk.id).solution.points).map((p) => p[0]);
+    return Math.max(...xs) - Math.min(...xs);
+  });
+  expect(Math.abs(width - 24 * inch) < 1e-6, "the click below the edge placed its length, not an angle to the axis", width / inch);
+  // Now far wider than the screen: Fit brings the whole sketch back, though there is no body yet.
+  await page.keyboard.press("Shift+H");
+  await page.waitForTimeout(900);
+  const ends = await Promise.all([screen([-12 * inch, 0]), screen([12 * inch, 0])]);
+  expect(ends.every(([x, y]) => x > 0 && x < box.width && y > 0 && y < box.height), "Fit shows the whole sketch", { ends, box });
+});
+
 if (errors.length) {
   console.error("console errors:\n" + errors.join("\n"));
   process.exit(1);

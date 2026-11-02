@@ -1822,6 +1822,15 @@ export class Viewport {
     return box;
   }
 
+  /** What Fit and Home frame: the bodies and the sketches on show, so a first sketch, or one grown off screen, fits too. */
+  private frameBox(): THREE.Box3 {
+    const box = new THREE.Box3();
+    for (const v of this.bodies.values()) if (v.visible && v.mesh.geometry.boundingBox) box.union(v.mesh.geometry.boundingBox);
+    const sketches = new THREE.Box3().setFromObject(this.sketchGroup);
+    if (!sketches.isEmpty()) box.union(sketches);
+    return box.isEmpty() ? this.sceneBox() : box;
+  }
+
   /** `margin` 1.22 leaves room for the view dock along the bottom and the cube in the corner (model views). */
   private fitDistance(radius: number, margin = 1.22) {
     const vfov = THREE.MathUtils.degToRad(this.persp.fov);
@@ -1830,7 +1839,7 @@ export class Viewport {
   }
 
   viewTo(view: CubeView | "home" | "fit") {
-    const sphere = this.sceneBox().getBoundingSphere(new THREE.Sphere());
+    const sphere = this.frameBox().getBoundingSphere(new THREE.Sphere());
     const to = new Turntable();
     to.target.copy(sphere.center);
     to.distance = this.fitDistance(sphere.radius);
@@ -1857,7 +1866,7 @@ export class Viewport {
 
   /** Look along any direction from the model's center (the orientation cube's edges and corners). */
   viewDirection(dir: [number, number, number]) {
-    const sphere = this.sceneBox().getBoundingSphere(new THREE.Sphere());
+    const sphere = this.frameBox().getBoundingSphere(new THREE.Sphere());
     const to = new Turntable();
     to.target.copy(sphere.center);
     to.distance = this.fitDistance(sphere.radius);
@@ -1891,7 +1900,7 @@ export class Viewport {
   /** Look straight at a sketch plane. */
   viewNormal(frame: SketchFrame) {
     const to = new Turntable();
-    const sphere = this.sceneBox().getBoundingSphere(new THREE.Sphere());
+    const sphere = this.frameBox().getBoundingSphere(new THREE.Sphere());
     const r = Math.max(60, sphere.radius);
     // Center on the model where it meets the plane, not the plane's origin: a part drawn up from the origin stays in view.
     const o = new THREE.Vector3(...frame.origin);

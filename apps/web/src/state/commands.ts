@@ -613,6 +613,8 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
   if (e.key === "Delete" || e.key === "Backspace") return "delete";
   if (e.key === "?") return "shortcuts";
   const classic = s.prefs.keys === "classic";
+  // Fit works in a sketch too: a shape dimensioned bigger than the screen needs it most.
+  if (e.shiftKey && k === "h") return "view-fit";
   if (s.mode.kind === "sketch") {
     if (classic && !e.shiftKey) {
       if (k === "t") return "tool-trim";
@@ -625,7 +627,6 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
     const map: Record<string, string> = { l: "tool-line", a: "tool-path", r: "tool-rect", c: "tool-circle", e: "tool-ellipse", p: "tool-polygon", o: "tool-slot", t: "tool-text", g: "tool-gear", v: "tool-select", x: "construction", d: "tool-dimension" };
     return map[k] ?? null;
   }
-  if (e.shiftKey && k === "h") return "view-fit";
   if (classic) {
     if (e.key === "Home") return "view-home";
     const cmap: Record<string, string> = { s: "sketch", e: "extrude", r: "revolve", f: "fillet", h: "hole", m: "move", j: "joint", i: "measure", p: "parts", q: "press-pull" };
