@@ -20,7 +20,7 @@ import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeeping
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
 
-import { type AnySketch, clean, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
+import { type AnySketch, clean, cutSolids, fuseSolids, intersectSolids, isValidShape, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
 export * from "./shared";
 
 interface SketchBuilt {
@@ -103,8 +103,10 @@ export function lastBody(bodies: Map<Id, Shape3D>): Id | undefined {
 function fuseTree(shapes: Shape3D[]): Shape3D {
   if (shapes.length === 1) return shapes[0]!;
   const mid = shapes.length >> 1;
-  return fuseTree(shapes.slice(0, mid)).fuse(fuseTree(shapes.slice(mid)));
+  return fuseSolids(fuseTree(shapes.slice(0, mid)), fuseTree(shapes.slice(mid)));
 }
+
+export { isValidShape };
 
 /** Volume of a solid, or 0 for shapes that have none (surfaces). */
 function safeVolume(s: Shape3D): number {
@@ -115,16 +117,6 @@ function safeVolume(s: Shape3D): number {
   }
 }
 
-/** True when OpenCascade's own checker accepts the shape (a malformed solid makes later booleans fail or lie). */
-export function isValidShape(shape: Shape3D): boolean {
-  const oc = getOC();
-  const a = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
-  try {
-    return a.IsValid();
-  } finally {
-    a.delete();
-  }
-}
 
 /**
  * Combines a tool with the bodies. OpenCascade flags some sound shapes (a circle exactly tangent to an edge), so a doubtful
@@ -160,7 +152,7 @@ function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, t
   if (target && !bodies.has(target)) throw new FeatureError("The target body no longer exists. Pick another body.");
   if (op === "join") {
     const id = target ?? lastBody(bodies)!;
-    bodies.set(id, clean(bodies.get(id)!.fuse(tool)));
+    bodies.set(id, clean(fuseSolids(bodies.get(id)!, tool)));
     return;
   }
   const ids = target ? [target] : [...bodies.keys()];
@@ -171,7 +163,12 @@ function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, t
     if (!bboxOverlap(body, tool)) continue;
     touched++;
     const before = op === "cut" ? safeVolume(body) : 0;
-    const out = clean(op === "cut" ? body.cut(tool) : body.intersect(tool));
+    const out = clean(op === "cut" ? cutSolids(body, tool) : intersectSolids(body, tool));
+    if (op === "intersect" && !hasSolid(out)) {
+      // Boxes that overlap while the shapes only touch: nothing is left. Keep the body and say why.
+      touched--;
+      continue;
+    }
     bodies.set(id, out);
     // A cut that only grazes a face leaves the volume as it was.
     if (op !== "cut" || Math.abs(safeVolume(out) - before) > Math.max(1e-6, before * 1e-9)) changed++;
@@ -412,8 +409,8 @@ export class Builder {
           // A feature that makes a new body has no body to repeat into.
           throw new FeatureError(`${name} makes a new body. Repeat features that join to or cut a body, or pattern the body itself.`);
         }
-        const added = clean(nowShape.cut(was));
-        const removed = clean(was.cut(nowShape));
+        const added = clean(cutSolids(nowShape, was));
+        const removed = clean(cutSolids(was, nowShape));
         const addedV = safeVolume(added);
         const removedV = safeVolume(removed);
         if (addedV < 1e-9 && removedV < 1e-9) continue;
@@ -422,13 +419,13 @@ export class Builder {
         if (!acc) throw new FeatureError(`The body that ${name} changed no longer exists.`);
         const adds = addedV >= 1e-9 ? copiesOf(added) : [];
         const rems = removedV >= 1e-9 ? copiesOf(removed) : [];
-        if (rems.length === 0) acc = acc.fuse(fuseTree(adds));
-        else if (adds.length === 0) acc = acc.cut(fuseTree(rems));
+        if (rems.length === 0) acc = fuseSolids(acc, fuseTree(adds));
+        else if (adds.length === 0) acc = cutSolids(acc, fuseTree(rems));
         else {
           // Both added and removed: keep each copy's order (a copy's cut may reach an earlier copy's addition).
           for (let k = 0; k < Math.max(adds.length, rems.length); k++) {
-            if (adds[k]) acc = acc.fuse(adds[k]!);
-            if (rems[k]) acc = acc.cut(rems[k]!);
+            if (adds[k]) acc = fuseSolids(acc, adds[k]!);
+            if (rems[k]) acc = cutSolids(acc, rems[k]!);
           }
         }
         bodies.set(bodyId, clean(acc));
@@ -1007,7 +1004,7 @@ export class Builder {
         const src = bodies.get(id)!;
         const copy = mirrorOf(src);
         if (f.merge) {
-          bodies.set(id, clean(src.fuse(copy)));
+          bodies.set(id, clean(fuseSolids(src, copy)));
         } else bodies.set(f.id, copy);
         return;
       }
@@ -1054,7 +1051,7 @@ export class Builder {
         const src = bodies.get(id!)!;
         const copies = copiesOf(src);
         if (f.merge) {
-          const merged = clean(src.fuse(fuseTree(copies)));
+          const merged = clean(fuseSolids(src, fuseTree(copies)));
           // OpenCascade can return an empty shape when many copies overlap wall on wall; say so rather than lose the body.
           if (safeVolume(src) > 0 && !(safeVolume(merged) > 0)) {
             throw new FeatureError("The copies overlap too much to merge into one body. Space them further apart, or turn off Merge to keep them as separate bodies.");
@@ -1089,8 +1086,10 @@ export class Builder {
         for (const t of tools) {
           const tool = bodies.get(t);
           if (!tool) throw new FeatureError("A tool body no longer exists. Re-pick the tools.");
-          acc = f.op === "join" ? acc.fuse(tool) : f.op === "cut" ? acc.cut(tool) : acc.intersect(tool);
+          acc = f.op === "join" ? fuseSolids(acc, tool) : f.op === "cut" ? cutSolids(acc, tool) : intersectSolids(acc, tool);
         }
+        // Bodies that only touch (or sit apart) share no volume: say so, rather than report a "damaged" empty body.
+        if (f.op === "intersect" && !hasSolid(acc)) throw new FeatureError("These bodies don't overlap, so Intersect would leave nothing. Move them so they overlap, or use Join to put them together.");
         bodies.set(target, clean(acc));
         if (!f.keepTools) for (const t of tools) bodies.delete(t);
         return;

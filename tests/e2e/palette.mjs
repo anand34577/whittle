@@ -1,6 +1,6 @@
 /**
  * End-to-end test of the sketch palette (grid snap, slice), the overall slot, the
- * concentric constraint, the circular pattern and the extrude start offset.
+ * concentric constraint, the circular pattern, the extrude start offset, and saving with Ctrl+S mid-typing.
  *   node tests/e2e/palette.mjs [url] [screenshotDir]
  */
 import { chromium } from "playwright-core";
@@ -196,6 +196,22 @@ await step("05-extrude-start-offset", async () => {
   await waitBuilt();
   const after = await state(() => window.whittle.useApp.getState().doc.features.filter((f) => f.type === "extrude").at(-1)?.startOffset);
   expect(after === "12", "start offset stored", after);
+});
+
+await step("06-save-while-renaming", async () => {
+  // Rename, then Ctrl+S straight away: the name field keeps keys to itself, and in a browser Ctrl+S saved the web page.
+  await page.evaluate(() => delete window.showSaveFilePicker); // the plain download, which a headless browser can catch
+  const name = page.getByLabel("Design name");
+  await name.click();
+  await name.fill("Bracket");
+  const dl = page.waitForEvent("download", { timeout: 15000 });
+  await page.keyboard.press("Control+s");
+  const file = (await dl).suggestedFilename();
+  expect(file === "Bracket.whittle", "saved under the new name", file);
+  await page.getByLabel("Design name").click();
+  await page.keyboard.press("Control+,");
+  await page.getByRole("radio", { name: "Compact" }).waitFor();
+  await page.keyboard.press("Escape");
 });
 
 if (errors.length) {

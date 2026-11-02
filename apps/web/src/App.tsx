@@ -25,6 +25,24 @@ function isTyping(e: KeyboardEvent) {
   return !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
 }
 
+/**
+ * Save, Open and Settings work from anywhere, mid-typing too: in a browser Ctrl+S would otherwise save the web page.
+ * Runs before the key reaches a field, since many fields keep their keys to themselves.
+ */
+function onFileKey(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || !/^[so,]$/i.test(e.key)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const p = useApp.getState().platform;
+  if (p.kind === "server" && p.config.auth === "required" && !p.user) return; // sign-in screen is up
+  if (document.querySelector(".scrim--dialog")) return;
+  // Leave the field first, so what was typed (a new name, a value) is in before saving.
+  if (isTyping(e)) (e.target as HTMLElement).blur();
+  const s = useApp.getState();
+  const c = commandById(commandForKey(e, s) ?? "");
+  if (c && isAvailable(c, s)) c.run();
+}
+
 function onKey(e: KeyboardEvent) {
   const s = useApp.getState();
   const p = s.platform;
@@ -170,6 +188,7 @@ export function App() {
     };
     window.addEventListener("unhandledrejection", onRejection);
     window.addEventListener("error", onError);
+    window.addEventListener("keydown", onFileKey, true);
     window.addEventListener("keydown", onKey);
     // The browser's own context menu never appears inside the app (text fields keep theirs).
     const noMenu = (e: MouseEvent) => {
@@ -188,6 +207,7 @@ export function App() {
     return () => {
       window.removeEventListener("unhandledrejection", onRejection);
       window.removeEventListener("error", onError);
+      window.removeEventListener("keydown", onFileKey, true);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("contextmenu", noMenu);
       window.removeEventListener("dragover", prevent);

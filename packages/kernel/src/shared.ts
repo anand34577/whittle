@@ -1,6 +1,6 @@
 /** Pieces of the build shared by the feature builders (build, extra, surface): errors, sketch outlines to drawings, placement helpers. */
 import { type Evaluator, type Feature, type Id, type ResolvedEntity, type SketchFeature, type Vec3, entityOutline, polygonInside, chainSegments, crossesItself, splineBeziers, resolveEntity, solidEntities } from "@whittle/core";
-import { BoundingBox, Blueprint, CompoundBlueprint, Drawing, Blueprints, Plane, type Face, type Shape3D, type Wire, getOC, draw, drawCircle, drawEllipse, drawPointsInterpolation, drawRoundedRectangle, drawText, iterTopo } from "replicad";
+import { BoundingBox, Blueprint, CompoundBlueprint, Drawing, Blueprints, Plane, type Face, type Shape3D, type Wire, cast, getOC, measureShapeVolumeProperties, draw, drawCircle, drawEllipse, drawPointsInterpolation, drawRoundedRectangle, drawText, iterTopo } from "replicad";
 import type { FeatureFix, SketchFrame } from "./protocol";
 
 
@@ -478,11 +478,73 @@ export function sketchPath(f: SketchFeature, frame: SketchFrame, ev: Evaluator):
   return w;
 }
 
-/** Merge coplanar faces / collinear edges left over by booleans. */
+/** True when OpenCascade's own checker accepts the shape (a malformed solid makes later booleans fail or lie). */
+export function isValidShape(shape: Shape3D): boolean {
+  const oc = getOC();
+  const a = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
+  try {
+    return a.IsValid();
+  } finally {
+    a.delete();
+  }
+}
+
+/** Volume of a shape, or 0 for one that has none (a surface) or can't be measured. */
+function volumeOf(s: Shape3D): number {
+  try {
+    return measureShapeVolumeProperties(s).volume;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Merge coplanar faces / collinear edges left over by booleans. Merging never changes a solid's volume, but merging
+ * the matching curved faces of two mirrored halves can tear the solid open and lose a chunk of it, a break the
+ * checker doesn't always catch (issue #29): then the unmerged shape is kept.
+ */
 export function clean(s: Shape3D): Shape3D {
   try {
-    return s.simplify();
+    // The merge edits the edges it's given in place, so it works on a copy: a failed merge must leave `s` intact.
+    const out = deepCopy(s).simplify();
+    const [before, after] = [volumeOf(s), volumeOf(out)];
+    return Math.abs(after - before) <= 1e-6 * Math.max(1, Math.abs(before)) ? out : s;
   } catch {
     return s;
   }
 }
+
+/** A copy of a shape that shares no edges or faces with it. */
+function deepCopy(s: Shape3D): Shape3D {
+  const oc = getOC();
+  const same = new oc.gp_Trsf();
+  const op = new oc.BRepBuilderAPI_Transform(s.wrapped, same, true, false);
+  try {
+    return cast(op.Shape()) as Shape3D;
+  } finally {
+    op.delete();
+    same.delete();
+  }
+}
+
+/**
+ * Booleans between bodies. Replicad's own fuse and cut merge faces as their last step, and on solids that meet face
+ * to face (mirrored halves, issue #29) that merge tears the result open and loses part of it. These run the boolean
+ * alone; callers `clean` the result, which merges faces only when that keeps the volume.
+ */
+function boolean(kind: "fuse" | "cut" | "common", a: Shape3D, b: Shape3D): Shape3D {
+  const oc = getOC();
+  const op = kind === "fuse" ? new oc.BRepAlgoAPI_Fuse(a.wrapped, b.wrapped) : kind === "cut" ? new oc.BRepAlgoAPI_Cut(a.wrapped, b.wrapped) : new oc.BRepAlgoAPI_Common(a.wrapped, b.wrapped);
+  try {
+    if (!op.IsDone()) return kind === "fuse" ? a.fuse(b) : kind === "cut" ? a.cut(b) : a.intersect(b);
+    // A lone solid comes back wrapped in a compound: unwrap it, so it reads (and is checked) as the solid it is.
+    const solids = [...iterTopo(op.Shape() as never, "solid")];
+    return cast(solids.length === 1 ? (solids[0] as never) : op.Shape()) as Shape3D;
+  } finally {
+    op.delete();
+  }
+}
+
+export const fuseSolids = (a: Shape3D, b: Shape3D) => boolean("fuse", a, b);
+export const cutSolids = (a: Shape3D, b: Shape3D) => boolean("cut", a, b);
+export const intersectSolids = (a: Shape3D, b: Shape3D) => boolean("common", a, b);

@@ -768,6 +768,15 @@ export function dimPlaceClick(hit: Id | null, p: Vec2, at: [number, number]): bo
     const g = geomById(o.sk, r);
     return g?.type === "line" ? [r, g.a, g.b] : g?.type === "arc" ? [r, g.a, g.b, g.c] : g?.type === "circle" ? [r, g.c] : [r];
   }));
+  // A line's length is placed straight across from its middle, which for a shape centred on the origin is right on an
+  // axis square to the line. Pairing with that axis would only ask for 90°, so the click places the length.
+  if (hit === "xaxis" || hit === "yaxis") {
+    const g = pl.refs.length === 1 ? resolveGeometry(o.sk, o.sol).find((x) => x.id === pl.refs[0]) : undefined;
+    if (g?.type === "line") {
+      const along = hit === "xaxis" ? g.b[0] - g.a[0] : g.b[1] - g.a[1];
+      if (Math.abs(along) < 0.01 * Math.hypot(g.b[0] - g.a[0], g.b[1] - g.a[1])) hit = null; // within about half a degree
+    }
+  }
   if (hit && !own.has(hit)) {
     useDimPlacing.setState({ placing: null });
     return false;

@@ -8,7 +8,7 @@ import type { DrawingSettings } from "@whittle/kernel";
 export type ThemeId = "daylight" | "daylightdark" | "graphite" | "paper" | "midnight" | "blueprint" | "studio" | "contrast";
 export type ThemePref = ThemeId | "system";
 export type Accent = "orange" | "blue" | "green" | "violet" | "rose" | "teal" | "amber";
-export type Density = "compact" | "comfortable" | "spacious";
+export type Density = "compact" | "comfortable";
 /** Who is using Whittle: tunes defaults, hints and which tools are up front. */
 export type Profile = "beginner" | "maker" | "engineer" | "designer" | "educator";
 export type NavPreset = "whittle" | "middle-pan" | "middle-orbit" | "middle-orbit-shift" | "right-orbit" | "trackpad";
@@ -156,7 +156,8 @@ export function normalizePrefs(p: Partial<Prefs>): Prefs {
   if (out.keys !== "classic") out.keys = "whittle";
   // Damaged or older stored values fall back too: an unknown unit would make every new design's lengths unreadable.
   if (!ACCENTS.some((a) => a.id === out.accent)) out.accent = DEFAULT_PREFS.accent;
-  if (!["compact", "comfortable", "spacious"].includes(out.density)) out.density = DEFAULT_PREFS.density;
+  // "spacious" was dropped (issue #27): anything but compact is the default.
+  if (out.density !== "compact") out.density = DEFAULT_PREFS.density;
   if (!["mm", "cm", "m", "in", "ft"].includes(out.units)) out.units = DEFAULT_PREFS.units;
   if (out.profile !== null && !PROFILES.some((x) => x.id === out.profile)) out.profile = null;
   if (out.drawing && typeof out.drawing !== "object") out.drawing = undefined;
