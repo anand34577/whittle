@@ -392,6 +392,23 @@ describe("trim and extend", () => {
     expect(sk.geometry!.some((g) => g.id === lone)).toBe(false);
   });
 
+  it("drops a trimmed line's midpoint, so the circle centred on it stays put (issue #28)", () => {
+    const { sk } = setup();
+    // A diameter line through a circle, the circle's centre held at the line's middle.
+    const c = addCircle(sk, [20, 20], 10);
+    const centre = (sk.geometry!.find((g) => g.id === c) as { c: string }).c;
+    const d = addLine(sk, [10, 20], [30, 20]);
+    ok(addConstraint(sk, "midpoint", [centre, d]));
+    addLine(sk, [25, 0], [25, 40]);
+    expect(trimGeometry(sk, d, [28, 20])).toBeUndefined();
+    expect(sk.constraints!.some((k) => k.type === "midpoint")).toBe(false);
+    const sol = solveSketch(sk, createEvaluator([], "mm"))!;
+    expect(sol.state).not.toBe("error");
+    expect(sol.points[centre]![0]).toBeCloseTo(20, 6);
+    expect(sol.points[centre]![1]).toBeCloseTo(20, 6);
+    expect(ends(sk, d)).toEqual([[10, 20], [25, 20]]);
+  });
+
   it("extends a line and an arc to the next curve", () => {
     const { sk } = setup();
     const l = addLine(sk, [-10, 0], [-5, 0]);

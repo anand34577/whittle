@@ -745,9 +745,12 @@ function mergeCrossings(cuts: { t: number; p: Vec2; by: Id }[], length: number, 
   return out;
 }
 
-/** Lines whose length changes lose their length and equal-length constraints. */
+/**
+ * Lines whose length changes lose their length, equal-length and midpoint constraints. A kept midpoint dragged
+ * whatever sat on the old middle (a circle's centre, say) to the new one, bending the sketch (issue #28).
+ */
 export function dropLengths(sk: Geo, id: Id) {
-  sk.constraints = (sk.constraints ?? []).filter((c) => !(c.refs.includes(id) && (c.type === "equal" || (c.type === "distance" && c.refs.length === 1))));
+  sk.constraints = (sk.constraints ?? []).filter((c) => !(c.refs.includes(id) && (c.type === "equal" || c.type === "midpoint" || (c.type === "distance" && c.refs.length === 1))));
 }
 
 /**
