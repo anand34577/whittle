@@ -1809,7 +1809,9 @@ export class Viewport {
     from.phi = this.orbit.phi;
     const dt = to.theta - from.theta;
     to.theta = from.theta + Math.atan2(Math.sin(dt), Math.cos(dt)); // shortest way round
-    this.anim = { from, to, t0: performance.now(), dur: matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : dur };
+    // The system setting, or Settings > Reduce motion (which promises instant camera moves).
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.motion === "reduced";
+    this.anim = { from, to, t0: performance.now(), dur: still ? 1 : dur };
     this.invalidate();
   }
 
