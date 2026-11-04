@@ -26,7 +26,7 @@ why and suggests a fix.
 > work end to end. Full assemblies (mates, bills of materials), sheet metal and CAM are planned.
 
 <p align="center">
-  <img src="docs/media/screenshot-box.png" alt="The Whittle workspace with a project box: toolbar, design browser, 3D view and properties" width="100%">
+  <img src="docs/media/demo-box.gif" alt="The Whittle workspace with a project box: toolbar, design browser, 3D view and properties" width="100%">
 </p>
 
 ## See it in action
@@ -56,20 +56,20 @@ Eight real, editable designs open from the start screen. Change one number and t
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/media/screenshot-plate.png" alt="The mounting plate template"><br><sub><b>Mounting plate</b></sub></td>
-    <td width="50%"><img src="docs/media/screenshot-box.png" alt="The project box template"><br><sub><b>Project box</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-plate.gif" alt="The mounting plate template"><br><sub><b>Mounting plate</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-box.gif" alt="The project box template"><br><sub><b>Project box</b></sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/media/screenshot-bolt.png" alt="The hex bolt M8 template with a real thread"><br><sub><b>Hex bolt M8 with a real thread</b></sub></td>
-    <td width="50%"><img src="docs/media/screenshot-vase.png" alt="The twisted vase template"><br><sub><b>Twisted vase</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-bolt.gif" alt="The hex bolt M8 template with a real thread"><br><sub><b>Hex bolt M8 with a real thread</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-vase.gif" alt="The twisted vase template"><br><sub><b>Twisted vase</b></sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/media/screenshot-bottle-light.png" alt="The bottle template in the Paper theme"><br><sub><b>Bottle</b></sub></td>
-    <td width="50%"><img src="docs/media/screenshot-bracket.png" alt="The shelf bracket template"><br><sub><b>Shelf bracket</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-bottle.gif" alt="The bottle template in the Paper theme"><br><sub><b>Bottle</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-bracket.gif" alt="The shelf bracket template"><br><sub><b>Shelf bracket</b></sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/media/screenshot-handle.png" alt="The drawer handle template, swept along a path"><br><sub><b>Drawer handle</b></sub></td>
-    <td width="50%"><img src="docs/media/screenshot-knob.png" alt="The control knob template"><br><sub><b>Control knob</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-handle.gif" alt="The drawer handle template, swept along a path"><br><sub><b>Drawer handle</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-knob.gif" alt="The control knob template"><br><sub><b>Control knob</b></sub></td>
   </tr>
 </table>
 
@@ -91,15 +91,15 @@ Eight real, editable designs open from the start screen. Change one number and t
 <table>
   <tr>
     <td width="50%"><img src="docs/media/screenshot-sketch.png" alt="Sketching a rectangle with typed width and height"><br><sub><b>Sketch with typed sizes</b></sub></td>
-    <td width="50%"><img src="docs/media/screenshot-extrude.png" alt="A live extrude preview with an on-canvas distance handle"><br><sub><b>Live preview as you extrude</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-extrude.gif" alt="A live extrude preview with an on-canvas distance handle"><br><sub><b>Live preview as you extrude</b></sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/media/screenshot-parameters.png" alt="The parameters table with named values and formulas"><br><sub><b>Named parameters and formulas</b></sub></td>
-    <td width="50%"><img src="docs/media/screenshot-palette.png" alt="The command palette searching for fillet"><br><sub><b>Find any command with Ctrl+K</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-palette.gif" alt="The command palette searching for fillet"><br><sub><b>Find any command with Ctrl+K</b></sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/media/screenshot-section.png" alt="A section view slicing through a project box"><br><sub><b>Section views</b></sub></td>
-    <td width="50%"><img src="docs/media/screenshot-zebra.png" alt="Zebra stripes analysing the surface of a twisted vase"><br><sub><b>Surface analysis</b></sub></td>
+    <td width="50%"><img src="docs/media/demo-zebra.gif" alt="Zebra stripes analysing the surface of a twisted vase"><br><sub><b>Surface analysis</b></sub></td>
   </tr>
 </table>
 
