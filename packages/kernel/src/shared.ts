@@ -446,6 +446,48 @@ export function shapeBounds(s: Shape3D | Face): [Vec3, Vec3] {
   }
 }
 
+/**
+ * Fix the vertex normals OpenCascade gets wrong where a surface comes to a point: the pole of a revolved face (on the
+ * revolve axis), whose normal there can come back reversed, and the coarse triangles fanned round such a point, which
+ * can come back wound inside out. Either way the patch shades dark (issue #32). A triangle that faces against most of
+ * its corners' normals is turned round; then a corner whose normal still faces away from a triangle using it takes
+ * the average facing of its triangles instead.
+ */
+export function fixNormals(m: { vertices: ArrayLike<number>; normals: number[] | Float32Array; triangles: number[] | Uint32Array }): void {
+  const { vertices: v, normals: n, triangles: t } = m;
+  /** The triangle's facing, as long as twice its area (bigger triangles weigh more in the average). */
+  const facingOf = (a: number, b: number, c: number): Vec3 => {
+    const [ux, uy, uz] = [v[b]! - v[a]!, v[b + 1]! - v[a + 1]!, v[b + 2]! - v[a + 2]!];
+    const [wx, wy, wz] = [v[c]! - v[a]!, v[c + 1]! - v[a + 1]!, v[c + 2]! - v[a + 2]!];
+    return [uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx];
+  };
+  const against = (p: number, [gx, gy, gz]: Vec3, len: number) => n[p]! * gx + n[p + 1]! * gy + n[p + 2]! * gz < -1e-3 * len;
+  for (let i = 0; i < t.length; i += 3) {
+    const [a, b, c] = [t[i]! * 3, t[i + 1]! * 3, t[i + 2]! * 3];
+    const g = facingOf(a, b, c);
+    const len = Math.hypot(...g);
+    if (len >= 1e-18 && [a, b, c].filter((p) => against(p, g, len)).length >= 2) [t[i + 1], t[i + 2]] = [t[i + 2]!, t[i + 1]!];
+  }
+  const facing = new Float64Array(n.length);
+  const bad = new Uint8Array(n.length / 3);
+  for (let i = 0; i < t.length; i += 3) {
+    const [a, b, c] = [t[i]! * 3, t[i + 1]! * 3, t[i + 2]! * 3];
+    const g = facingOf(a, b, c);
+    const len = Math.hypot(...g);
+    if (len < 1e-18) continue;
+    for (const p of [a, b, c]) {
+      for (let k = 0; k < 3; k++) facing[p + k] = facing[p + k]! + g[k]!;
+      if (against(p, g, len)) bad[p / 3] = 1;
+    }
+  }
+  for (let k = 0; k < bad.length; k++) {
+    if (!bad[k]) continue;
+    const p = k * 3;
+    const len = Math.hypot(facing[p]!, facing[p + 1]!, facing[p + 2]!);
+    if (len > 0) [n[p], n[p + 1], n[p + 2]] = [facing[p]! / len, facing[p + 1]! / len, facing[p + 2]! / len];
+  }
+}
+
 export function boxCenter(s: Shape3D): Vec3 {
   const [a, b] = shapeBounds(s);
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
@@ -531,17 +573,41 @@ function deepCopy(s: Shape3D): Shape3D {
  * Booleans between bodies. Replicad's own fuse and cut merge faces as their last step, and on solids that meet face
  * to face (mirrored halves, issue #29) that merge tears the result open and loses part of it. These run the boolean
  * alone; callers `clean` the result, which merges faces only when that keeps the volume.
+ *
+ * They run "fuzzy": faces closer than a few microns count as touching. Points typed or solved in a sketch carry tiny
+ * rounding errors (20.0000036 for 20), so two halves meant to meet on a mirror plane miss each other by microns, and a
+ * plain boolean keeps hair-thin sliver faces there that mesh as cracks and stray shading (issue #33).
  */
-function boolean(kind: "fuse" | "cut" | "common", a: Shape3D, b: Shape3D): Shape3D {
+function boolean(kind: "fuse" | "cut" | "common", a: Shape3D, b: Shape3D, fuzzy = true): Shape3D {
   const oc = getOC();
-  const op = kind === "fuse" ? new oc.BRepAlgoAPI_Fuse(a.wrapped, b.wrapped) : kind === "cut" ? new oc.BRepAlgoAPI_Cut(a.wrapped, b.wrapped) : new oc.BRepAlgoAPI_Common(a.wrapped, b.wrapped);
+  const op = kind === "fuse" ? new oc.BRepAlgoAPI_Fuse() : kind === "cut" ? new oc.BRepAlgoAPI_Cut() : new oc.BRepAlgoAPI_Common();
+  const [args, tools] = [new oc.NCollection_List_TopoDS_Shape(), new oc.NCollection_List_TopoDS_Shape()];
   try {
-    if (!op.IsDone()) return kind === "fuse" ? a.fuse(b) : kind === "cut" ? a.cut(b) : a.intersect(b);
+    args.Append(a.wrapped);
+    tools.Append(b.wrapped);
+    op.SetArguments(args);
+    op.SetTools(tools);
+    if (fuzzy) op.SetFuzzyValue(fuzzOf(a, b));
+    op.Build();
+    if (!op.IsDone()) return fuzzy ? boolean(kind, a, b, false) : kind === "fuse" ? a.fuse(b) : kind === "cut" ? a.cut(b) : a.intersect(b);
     // A lone solid comes back wrapped in a compound: unwrap it, so it reads (and is checked) as the solid it is.
     const solids = [...iterTopo(op.Shape() as never, "solid")];
     return cast(solids.length === 1 ? (solids[0] as never) : op.Shape()) as Shape3D;
   } finally {
     op.delete();
+    args.delete();
+    tools.delete();
+  }
+}
+
+/** How close counts as touching: 10 microns, or a ten-millionth of a very large part's size. */
+function fuzzOf(a: Shape3D, b: Shape3D): number {
+  try {
+    const [[a0, a1], [b0, b1]] = [shapeBounds(a), shapeBounds(b)];
+    const size = Math.max(...[0, 1, 2].map((i) => Math.max(a1[i]!, b1[i]!) - Math.min(a0[i]!, b0[i]!)));
+    return Math.max(1e-5, size * 1e-7);
+  } catch {
+    return 1e-5;
   }
 }
 

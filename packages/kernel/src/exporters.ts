@@ -1,6 +1,6 @@
 import type { Id, WhittleDocument } from "@whittle/core";
 import { strToU8, zipSync } from "fflate";
-import { shapeBounds } from "./shared";
+import { fixNormals, shapeBounds } from "./shared";
 import { type Shape3D, exportSTEP, makeCompound, measureShapeVolumeProperties } from "replicad";
 import { buildDrawingSVG } from "./drawing";
 import type { DrawingSettings, ExportFormat, MeshQuality } from "./protocol";
@@ -161,6 +161,7 @@ function buildGLB(doc: WhittleDocument, entries: [Id, Shape3D][], meshOptions: M
   };
   entries.forEach(([id, shape], k) => {
     const m = shape.mesh(meshOptions(shape));
+    fixNormals(m);
     // Z-up millimetres -> Y-up metres.
     const pos = new Float32Array(m.vertices.length);
     const min = [Infinity, Infinity, Infinity];

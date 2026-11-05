@@ -1,9 +1,10 @@
-/** Joining a body with its own mirror image, where the two halves meet face to face on the mirror plane (issue #29). */
+/** Joining a body with its own mirror image, where the two halves meet face to face on the mirror plane (issues #29, #32, #33). */
 import { createRequire } from "node:module";
 import { beforeAll, describe, expect, it } from "vitest";
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
-import { type CombineFeature, type Feature, type MirrorFeature, type PatternFeature, type RevolveFeature, type SketchFeature, type WhittleDocument, makeCombine, makeMirror, makePattern, makePrimitive, makeRevolve, makeSketch, newDocument, uid } from "@whittle/core";
+import { type BodyResult } from "../src/protocol";
+import { type CombineFeature, type Feature, type MirrorFeature, type MoveFeature, type PatternFeature, type RevolveFeature, type SketchFeature, type WhittleDocument, makeCombine, makeMirror, makeMove, makePattern, makePrimitive, makeRevolve, makeSketch, newDocument, uid } from "@whittle/core";
 import { Builder } from "../src/build";
 
 beforeAll(async () => {
@@ -22,7 +23,9 @@ function push<T extends Feature>(doc: WhittleDocument, f: T, body = false): T {
 type P = [number, number];
 const R = 30; // outer circle at the origin
 const r = 14; // the two notches, centred at (20, ±20)
-const notch = (sy: number): P => [20, 20 * sy];
+/** How far the upper notch sits off (20, 20): a sketch solved by hand lands a few microns out (issue #33). */
+let skew = 0;
+const notch = (sy: number): P => [20, 20 * sy + (sy > 0 ? skew : 0)];
 const fmt = (p: P): [string, string] => [p[0].toFixed(6), p[1].toFixed(6)];
 const at = (c: P, rad: number, t: number): P => [c[0] + rad * Math.cos(t), c[1] + rad * Math.sin(t)];
 const angle = (c: P, p: P) => Math.atan2(p[1] - c[1], p[0] - c[0]);
@@ -110,6 +113,31 @@ describe("joining mirrored halves", () => {
     expect(build(p.doc).bodies[0]!.volume).toBeCloseTo(2 * half, 3);
   });
 
+  it("joins halves that miss each other by microns without slivers, cracks or dark patches", () => {
+    skew = 3.6e-6;
+    try {
+      for (const quality of ["preview", "final"] as const) {
+        // The mirror image turned a quarter turn, so the notches line up again: as in the file attached to issue #33.
+        const { doc, rv, mi } = halves(false);
+        push(doc, { ...(makeMove(doc, mi.id) as MoveFeature), axis: "z", angle: "90" });
+        const apart = new Builder().regen(doc, quality).bodies;
+        for (const b of apart) expect(meshFlaws(b)).toEqual({ cracks: 0, reversed: 0 });
+
+        push(doc, makeCombine(doc, rv.id, [mi.id]) as CombineFeature);
+        const r = new Builder().regen(doc, quality);
+        expect(r.status.filter((s) => s.state !== "ok")).toHaveLength(0);
+        const [joined] = r.bodies;
+        expect(r.bodies).toHaveLength(1);
+        // No hair-thin leftovers of the two flat faces on the mirror plane.
+        expect(joined!.faces.every((f) => f.area > 1e-3)).toBe(true);
+        expect(joined!.volume).toBeCloseTo(2 * apart[0]!.volume, 2);
+        expect(meshFlaws(joined!)).toEqual({ cracks: 0, reversed: 0 });
+      }
+    } finally {
+      skew = 0;
+    }
+  });
+
   it("says the bodies don't overlap when Intersect would leave nothing", () => {
     const { doc, rv, mi } = halves(false);
     push(doc, { ...(makeCombine(doc, rv.id, [mi.id]) as CombineFeature), op: "intersect" });
@@ -119,3 +147,27 @@ describe("joining mirrored halves", () => {
     expect(last.message).toMatch(/don't overlap/);
   });
 });
+
+/**
+ * Flaws a viewer would show: triangle sides that no other triangle shares (cracks; the poles of revolved faces, where a
+ * fan of triangles meets at one point, are fine), and vertex normals pointing against their triangle (dark patches).
+ */
+function meshFlaws(b: BodyResult) {
+  const { positions: v, normals: n, indices: t } = b;
+  const key = (i: number) => `${Math.round(v[i * 3]! * 1e4)},${Math.round(v[i * 3 + 1]! * 1e4)},${Math.round(v[i * 3 + 2]! * 1e4)}`;
+  const sides = new Map<string, number>();
+  let reversed = 0;
+  for (let i = 0; i < t.length; i += 3) {
+    const [a, b2, c] = [t[i]!, t[i + 1]!, t[i + 2]!];
+    const u = [0, 1, 2].map((k) => v[b2 * 3 + k]! - v[a * 3 + k]!);
+    const w = [0, 1, 2].map((k) => v[c * 3 + k]! - v[a * 3 + k]!);
+    const g = [u[1]! * w[2]! - u[2]! * w[1]!, u[2]! * w[0]! - u[0]! * w[2]!, u[0]! * w[1]! - u[1]! * w[0]!];
+    const len = Math.hypot(g[0]!, g[1]!, g[2]!);
+    for (const p of [a, b2, c]) if (n[p * 3]! * g[0]! + n[p * 3 + 1]! * g[1]! + n[p * 3 + 2]! * g[2]! < -1e-3 * len) reversed++;
+    for (const [p, q] of [[a, b2], [b2, c], [c, a]] as const) {
+      const [kp, kq] = [key(p), key(q)];
+      if (kp !== kq) sides.set(kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`, (sides.get(kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`) ?? 0) + 1);
+    }
+  }
+  return { cracks: [...sides.values()].filter((k) => k === 1).length, reversed };
+}
