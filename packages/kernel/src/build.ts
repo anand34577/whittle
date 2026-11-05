@@ -20,7 +20,7 @@ import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeeping
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
 
-import { type AnySketch, clean, cutSolids, fuseSolids, intersectSolids, isValidShape, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
+import { type AnySketch, clean, cutSolids, fixNormals, fuseSolids, intersectSolids, isValidShape, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
 export * from "./shared";
 
 interface SketchBuilt {
@@ -1823,6 +1823,7 @@ function meshBody(id: Id, shape: Shape3D, quality: "preview" | "final"): BodyRes
   const tolerance = Math.max(0.005, diag * (quality === "final" ? 0.0004 : 0.0015));
   const angularTolerance = quality === "final" ? 0.15 : 0.3;
   const m = shape.mesh({ tolerance, angularTolerance });
+  fixNormals(m);
   const e = shape.meshEdges({ tolerance, angularTolerance });
   const faces = shape.faces;
   const edges = shape.edges;
