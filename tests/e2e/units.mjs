@@ -63,7 +63,10 @@ await step("01-inch-design", async () => {
   await page.goto(url);
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
   await page.getByRole("button", { name: /Engineer & professional/ }).click();
-  await page.getByRole("dialog", { name: "Welcome to Whittle" }).getByRole("button", { name: /Inches/ }).click();
+  const welcome = page.getByRole("dialog", { name: "Welcome to Whittle" });
+  // One New design button, with the unit beside it.
+  await welcome.getByRole("group", { name: "Units for the new design" }).getByRole("button", { name: "in", exact: true }).click();
+  await welcome.getByRole("button", { name: /New design/ }).first().click();
   await built();
   expect((await state(() => window.whittle.useApp.getState().doc.units)) === "in", "an inch design", null);
 });

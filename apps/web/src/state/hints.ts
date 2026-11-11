@@ -4,6 +4,7 @@ import { CONSTRAINT_PICKS } from "./constraintOps";
 import { type AppState, findFeature } from "./store";
 import { commandById } from "./commands";
 import { NAV_PRESETS } from "./prefs";
+import { lessonProgress } from "./lessons";
 
 /** "F to fillet" with the key the person's layout really uses, or the toolbar name without one (audit G-1). */
 const keyTo = (id: string, what: string) => {
@@ -57,6 +58,12 @@ const TOOL_HINTS: Record<string, [string, string]> = {
 export function hintFor(s: AppState): string {
   const { mode, session, doc, selection, regen } = s;
   if (!s.kernelReady) return s.kernelError ? "The geometry engine couldn't start: " + s.kernelError : "Starting the geometry engine\u2026";
+  // While a lesson runs and nothing else is going on, the hint line says the same as the lesson card (audit S-1).
+  if (s.coach && mode.kind === "model" && !session && !selection.length) {
+    const p = lessonProgress(s);
+    const step = p && p.current >= 0 ? p.lesson.steps[p.current] : undefined;
+    if (step) return `Lesson · ${step.title}: ${step.body}`;
+  }
   if (mode.kind === "pickPlane") return "Click an origin plane or a flat face to sketch on · Esc to cancel";
   if (mode.kind === "measure") {
     return s.measure.length === 0
@@ -68,6 +75,9 @@ export function hintFor(s: AppState): string {
   if (mode.kind === "sketch") {
     if (mode.tool === "select") {
       if (s.pendingConstraint) return `${CONSTRAINT_LABELS[s.pendingConstraint]}: ${CONSTRAINT_PICKS[s.pendingConstraint]} · it keeps going for the next ones · Esc stops`;
+      // The origin and axes are references: they can be constrained to, not moved or removed (audit U-7).
+      if (s.sketchSel.length && s.sketchSel.every((id) => id === "origin" || id === "xaxis" || id === "yaxis"))
+        return `${s.sketchSel.length > 1 ? "Axes" : s.sketchSel[0] === "origin" ? "The origin" : s.sketchSel[0] === "xaxis" ? "The horizontal axis" : "The vertical axis"} selected · Shift+click a line or point to relate it to ${s.sketchSel.length > 1 ? "them" : "it"}`;
       if (s.sketchSel.length) return "Pick a constraint on the right · Shift+click adds to the selection · drag to move · Del removes";
       return s.selectedEntity
         ? "Edit sizes on the right \u00b7 drag to move \u00b7 X makes it construction \u00b7 Del removes it"
@@ -160,6 +170,8 @@ export function hintFor(s: AppState): string {
       : "Start with Sketch (S): pick a plane, draw a shape, then Extrude (E). Or add a quick Box.";
   }
   // The mouse buttons of the chosen navigation preset, not always the default one (audit G-1).
-  const nav = NAV_PRESETS.find((n) => n.id === s.prefs.nav)?.blurb.replace(/\.$/, "") ?? "Drag to orbit";
+  // A touch screen gets touch words, not mouse buttons (audit V-6).
+  const touch = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+  const nav = touch ? "Drag to orbit, two fingers to pan, pinch to zoom" : (NAV_PRESETS.find((n) => n.id === s.prefs.nav)?.blurb.replace(/\.$/, "") ?? "Drag to orbit");
   return `Click to select · ${nav} · Ctrl+K finds any command`;
 }

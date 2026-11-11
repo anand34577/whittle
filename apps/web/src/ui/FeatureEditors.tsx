@@ -1,7 +1,7 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
 import { useEffect, useRef, useState } from "react";
-import { CONSTRUCT_MODES, CURVE_SOURCES, LENGTH_TO_MM, SURFACE_OPS, defaultLength, documentEvaluator } from "@whittle/core";
+import { CONSTRUCT_MODES, CURVE_SOURCES, LENGTH_TO_MM, SURFACE_OPS, defaultLength, documentEvaluator, sketchCountText } from "@whittle/core";
 import { volumeText } from "../state/measure";
 import type {
   BodyOp,
@@ -43,6 +43,8 @@ import type {
   OffsetFaceFeature,
 } from "@whittle/core";
 import { setBodyOp, setPrefs, setView, updateFeature, useApp } from "../state/store";
+import { simpleToolbar } from "../state/prefs";
+import { faceLocal } from "../state/actions";
 import { ExprInput, Segmented, Toggle } from "./ExprInput";
 import { Checkbox, Disclosure, Select } from "./controls";
 import { HoleStandard } from "./HoleStandards";
@@ -114,7 +116,7 @@ function SketchSelect({ f, value, onChange, label, placeholder = "Choose a sketc
       value={sketches.some((s) => s.id === value) ? value : ""}
       placeholder={placeholder}
       onChange={onChange}
-      options={sketches.map((s) => ({ value: s.id, label: s.name, icon: "sketch" as const, hint: `${s.entities.length} shape${s.entities.length === 1 ? "" : "s"}` }))}
+      options={sketches.map((s) => ({ value: s.id, label: s.name, icon: "sketch" as const, hint: sketchCountText(s) }))}
     />
   );
 }
@@ -155,6 +157,20 @@ function OpField({ f }: { f: ExtrudeFeature | RevolveFeature | PrimitiveFeature 
   );
 }
 
+/**
+ * The less-used settings of a step: folded under "More options" for people on the short toolbar, shown as they are
+ * for everyone else (audit S-3). Open from the start when one of them is already in use.
+ */
+function MoreOptions({ inUse, children }: { inUse: boolean; children: React.ReactNode }) {
+  const simple = useApp((s) => simpleToolbar(s.prefs));
+  if (!simple) return <>{children}</>;
+  return (
+    <Disclosure summary="More options" defaultOpen={inUse}>
+      {children}
+    </Disclosure>
+  );
+}
+
 function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
   const advanced = !!(f.taper || f.twist);
   return (
@@ -164,6 +180,8 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
       {f.extent !== "through" && f.extent !== "face" && (
         <ExprInput label="Distance" kind="length" value={f.distance} autoFocus onChange={(v) => upd(f, "Distance", (d) => void (d.distance = v))} />
       )}
+      <OpField f={f} />
+      <MoreOptions inUse={f.extent !== "one" || f.flip || f.startFace !== undefined || !!(f.startOffset && f.startOffset !== "0") || !!f.thin || advanced}>
       <Segmented
         label="Direction"
         value={f.extent}
@@ -188,7 +206,6 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
         <ExprInput label="Other side" kind="length" value={f.distance2 ?? "0"} min={0} onChange={(v) => upd(f, "Second distance", (d) => void (d.distance2 = v))} />
       )}
       {f.extent !== "symmetric" && f.extent !== "face" && <Toggle label="Flip direction" checked={f.flip} onChange={(v) => upd(f, "Flip", (d) => void (d.flip = v))} />}
-      <OpField f={f} />
       <Disclosure summary="Start" defaultOpen={f.startFace !== undefined || !!(f.startOffset && f.startOffset !== "0")}>
         <Toggle
           label="Start from a face"
@@ -250,6 +267,7 @@ function ExtrudeEditor({ f }: { f: ExtrudeFeature }) {
           onChange={(v) => upd(f, "Twist", (d) => void (d.twist = v === "0" ? undefined : v))}
         />
       </Disclosure>
+      </MoreOptions>
     </>
   );
 }
@@ -313,16 +331,20 @@ function EdgeEditor({ f }: { f: FilletFeature | ChamferFeature }) {
           </button>
         )}
       </div>
-      <Toggle label="Select tangent edges together" hint="Clicking an edge also takes the edges that continue smoothly from it, such as a whole rounded outline" checked={prefs.tangentChain} onChange={(v) => setPrefs({ tangentChain: v })} />
       {f.type === "fillet" ? (
         <>
-          <Toggle label="Full round" hint="Round a narrow flat face into a half-round: pick one long edge along it and the other side follows" checked={!!f.fullRound} onChange={(on) => upd(f, "Full round", (d) => void ((d as FilletFeature).fullRound = on || undefined))} />
+          {/* The radius first: the one number this step is about (audit S-3). */}
           {!f.fullRound && <ExprInput label={f.radius2 ? "Start radius" : "Radius"} kind="length" value={f.radius} autoFocus min={0} onChange={(v) => upd(f, "Radius", (d) => void ((d as FilletFeature).radius = v))} />}
-          {!f.fullRound && <Toggle label="Variable radius" hint="The radius changes along each edge, from the start radius to the end radius" checked={!!f.radius2} onChange={(on) => upd(f, "Variable", (d) => void ((d as FilletFeature).radius2 = on ? String(Number.parseFloat(f.radius) * 2 || 2) : undefined))} />}
           {!f.fullRound && f.radius2 && <ExprInput label="End radius" kind="length" value={f.radius2} min={0} onChange={(v) => upd(f, "End radius", (d) => void ((d as FilletFeature).radius2 = v))} />}
+          <MoreOptions inUse={!!f.fullRound || !!f.radius2}>
+            <Toggle label="Select tangent edges together" hint="Clicking an edge also takes the edges that continue smoothly from it, such as a whole rounded outline" checked={prefs.tangentChain} onChange={(v) => setPrefs({ tangentChain: v })} />
+            <Toggle label="Full round" hint="Round a narrow flat face into a half-round: pick one long edge along it and the other side follows" checked={!!f.fullRound} onChange={(on) => upd(f, "Full round", (d) => void ((d as FilletFeature).fullRound = on || undefined))} />
+            {!f.fullRound && <Toggle label="Variable radius" hint="The radius changes along each edge, from the start radius to the end radius" checked={!!f.radius2} onChange={(on) => upd(f, "Variable", (d) => void ((d as FilletFeature).radius2 = on ? String(Number.parseFloat(f.radius) * 2 || 2) : undefined))} />}
+          </MoreOptions>
         </>
       ) : (
         <>
+          <Toggle label="Select tangent edges together" hint="Clicking an edge also takes the edges that continue smoothly from it, such as a whole rounded outline" checked={prefs.tangentChain} onChange={(v) => setPrefs({ tangentChain: v })} />
           <Segmented
             label="Type"
             value={f.mode ?? "equal"}
@@ -618,11 +640,25 @@ function HoleEditor({ f }: { f: HoleFeature }) {
           {f.style === "countersink" && <ExprInput label="Angle" kind="angle" value={f.sinkAngle ?? "90"} min={1} max={179} hint="90° metric, 82° imperial" onChange={(v) => upd(f, "Countersink angle", (d) => void (d.sinkAngle = v))} />}
         </div>
       )}
+      {f.points.length > 0 && <p className="muted small">Positions are measured from the design's origin, seen straight onto this face. A click near the middle of the face snaps to its centre.</p>}
       {f.points.map((p, i) => (
         <div className="field-row field-row--removable" key={i}>
-          <ExprInput label={`#${i + 1} X`} kind="length" value={p[0]} onChange={(v) => upd(f, "Hole position", (d) => void (d.points[i]![0] = v))} />
-          <ExprInput label="Y" kind="length" value={p[1]} onChange={(v) => upd(f, "Hole position", (d) => void (d.points[i]![1] = v))} />
-          <button className="iconbtn iconbtn--small" title="Remove this hole" onClick={() => upd(f, "Remove hole", (d) => void d.points.splice(i, 1))}>
+          <ExprInput label={`Hole ${i + 1} across`} kind="length" value={p[0]} onChange={(v) => upd(f, "Hole position", (d) => void (d.points[i]![0] = v))} />
+          <ExprInput label="up" kind="length" value={p[1]} onChange={(v) => upd(f, "Hole position", (d) => void (d.points[i]![1] = v))} />
+          {f.face && (
+            <button
+              className="iconbtn iconbtn--small"
+              title="Move this hole to the centre of the face"
+              aria-label={`Centre hole ${i + 1} on the face`}
+              onClick={() => {
+                const c = faceLocal(f.face!, f.face!.center);
+                upd(f, "Centre hole", (d) => void (d.points[i] = [c[0], c[1]]));
+              }}
+            >
+              <Icon name="origin" size={14} />
+            </button>
+          )}
+          <button className="iconbtn iconbtn--small" title="Remove this hole" aria-label={`Remove hole ${i + 1}`} onClick={() => upd(f, "Remove hole", (d) => void d.points.splice(i, 1))}>
             <Icon name="close" size={14} />
           </button>
         </div>

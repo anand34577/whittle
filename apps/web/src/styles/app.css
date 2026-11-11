@@ -71,7 +71,7 @@ code {
 
 kbd {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1;
   color: var(--text-2);
   border: 1px solid var(--line);
@@ -84,7 +84,7 @@ kbd {
 
 .eyebrow {
   margin: 0 0 var(--sp-2);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -483,7 +483,7 @@ button.docname__state:hover {
   gap: 4px;
   width: 100%;
   padding: 6px var(--sp-3) 6px var(--sp-2);
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1718,7 +1718,7 @@ button.docname__state:hover {
   padding: 4px 0;
 }
 .ptable__row--head {
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1744,7 +1744,7 @@ button.docname__state:hover {
   border-radius: 999px;
   border: 1px solid var(--line);
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
 }
 .ptable__result.is-error {
@@ -2016,7 +2016,7 @@ button.docname__state:hover {
   height: 18px;
   border-radius: 50%;
   border: 1px solid var(--line-strong);
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
 }
 .is-current .coach__dot {
@@ -2135,4 +2135,154 @@ button.docname__state:hover {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* The lesson card has its own corner: the view dock and messages move over so nothing hides under it (audit B-5). */
+@media (min-width: 1101px) {
+  .app.has-coach .viewport .dock {
+    margin-left: 152px;
+    max-width: calc(100% - 330px);
+  }
+  .app.has-coach .toasts {
+    margin-left: 152px;
+  }
+}
+@media (max-width: 1100px) {
+  /* Narrow: the card sits across the bottom of the view, above the dock. */
+  .coach {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    bottom: calc(var(--h-status) + var(--h-timeline) + 70px);
+    max-height: 40vh;
+    overflow: auto;
+  }
+}
+
+/* Start screen: one New design with its unit beside it, and the profile as an optional row (audit S-4). */
+.start-card--split {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+.start-card--split .start-card__main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.start-card--split .start-card__main span {
+  display: flex;
+  flex-direction: column;
+}
+.unitswitch {
+  display: inline-flex;
+  margin-right: 10px;
+  border-radius: var(--r-2);
+  background: var(--bg-3);
+  padding: 2px;
+}
+.unitswitch button {
+  min-width: 34px;
+  min-height: 28px;
+  border: 0;
+  border-radius: calc(var(--r-2) - 1px);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+.unitswitch button.is-on {
+  background: var(--bg-1);
+  color: var(--text);
+  box-shadow: var(--shadow, 0 1px 2px rgb(0 0 0 / 0.12));
+}
+.profilerow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: -4px 0 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* A menu item that can't run says why under its name (audit U-15). */
+.menu__text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+.menu__text small {
+  max-width: 230px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: normal;
+}
+.menu button kbd {
+  margin-left: auto;
+}
+
+.palette__empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 10px;
+}
+
+/* A parameter edited in place in the browser (audit U-3). */
+.tree__value--edit {
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: var(--r-2);
+  background: none;
+  border: 1px solid transparent;
+  color: inherit;
+  font: inherit;
+  cursor: text;
+}
+.tree__value--edit:hover {
+  border-color: var(--line);
+  background: var(--bg-2);
+}
+.tree__row--edit {
+  gap: 8px;
+}
+.tree__input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+}
+input[data-pending] {
+  border-style: dashed;
+}
+.ptable__used {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* The sketch's status keeps its place while it is worked out again (audit B-7). */
+.constraints__state {
+  min-height: 3.2em;
+  transition: opacity var(--dur-fast);
+}
+.constraints__state.is-stale {
+  opacity: 0.55;
+}
+.note--info {
+  background: var(--bg-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.note--info svg {
+  color: var(--text-2);
 }

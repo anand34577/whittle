@@ -1,7 +1,7 @@
 /**
  * End-to-end test of constraint-ready shapes: the rectangle and circle tools
  * (corner, centre, 3-point, 2-point) draw geometry the solver holds, a corner
- * can be filleted and chamfered, "Make constrainable" converts a plain shape,
+ * can be filleted and chamfered, "Split into lines and arcs" converts a plain shape,
  * and a rectangle drawn narrow and with a wobbly first click still works.
  *   node tests/e2e/shapes.mjs [url] [screenshotDir]
  */
@@ -147,7 +147,7 @@ await step("07-make-constrainable", async () => {
   expect(before.entities.length === 1, "plain rectangle when the preference is off", before.entities);
   await setTool("select");
   await state((id) => window.whittle.useApp.setState({ selectedEntity: id }), before.entities[0].id);
-  await page.getByRole("button", { name: /Make constrainable/ }).first().click();
+  await page.getByRole("button", { name: /Split into lines and arcs/ }).first().click();
   await waitBuilt();
   const after = await sketchInfo();
   expect(after.entities.length === 0 && count(after, "line") === before.geometry.filter((g) => g.type === "line").length + 4, "converted to lines", after);

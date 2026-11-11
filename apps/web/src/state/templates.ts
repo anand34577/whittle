@@ -52,9 +52,10 @@ function mountingPlate(): WhittleDocument {
       cx: `${sx < 0 ? "-" : ""}(width / 2 - inset)`,
       cy: `${sy < 0 ? "-" : ""}(depth / 2 - inset)`,
       r: "hole / 2",
+      mode: "subtract",
     });
   }
-  sk.entities.push({ id: uid(), type: "slot", cx: "0", cy: "0", length: "width / 3", width: "8", angle: "0" });
+  sk.entities.push({ id: uid(), type: "slot", cx: "0", cy: "0", length: "width / 3", width: "8", angle: "0", mode: "subtract" });
   doc.features.push(sk);
   const ex = makeExtrude(doc, sk.id) as ExtrudeFeature;
   ex.distance = "thickness";

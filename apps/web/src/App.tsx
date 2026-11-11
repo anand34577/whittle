@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { commandById, commandForKey, isAvailable } from "./state/commands";
 import { openDroppedFile, startAutosave, startDesktop, startLaunchQueue } from "./state/files";
 import { aiAvailable, apiHooks, detectPlatform } from "./state/platform";
@@ -13,12 +13,14 @@ import { AccountDialog, SignIn, UsersDialog } from "./ui/Account";
 import { Coach, ExportDialog, ParamsDialog, ShortcutsDialog, VersionsDialog, Welcome } from "./ui/Dialogs";
 import { DialogHost, TooltipLayer } from "./ui/DialogHost";
 import { SettingsDialog } from "./ui/Settings";
-import { AssistantPanel } from "./ui/Assistant";
 import { applyPrefs, resolveTheme } from "./state/prefs";
-import { PartsDialog } from "./ui/PartsDialog";
 import { PropertiesPanel } from "./ui/PropertiesPanel";
 import { Timeline } from "./ui/Timeline";
 import { ViewportView, sketchKeys } from "./ui/ViewportView";
+
+// Screens most visits never open load when first needed, not with the app (audit P-2).
+const AssistantPanel = lazy(() => import("./ui/Assistant").then((m) => ({ default: m.AssistantPanel })));
+const PartsDialog = lazy(() => import("./ui/PartsDialog").then((m) => ({ default: m.PartsDialog })));
 
 function isTyping(e: KeyboardEvent) {
   const t = e.target as HTMLElement | null;
@@ -218,6 +220,7 @@ export function App() {
   const editing = !!session || mode.kind === "sketch";
   const browserOpen = useApp((s) => s.browserOpen);
   const sideOpen = useApp((s) => s.panelOpen);
+  const coach = useApp((s) => !!s.coach);
 
   // On narrow windows the properties drawer opens by itself when a feature or sketch needs it, so the editor is never
   // hidden, and closes again when the editing ends, so it doesn't sit over the model.
@@ -233,7 +236,7 @@ export function App() {
   }, []);
 
   return (
-    <div className={`app ${editing ? "has-session" : ""} ${prefs.hints ? "" : "no-hints"} ${browserOpen ? "browser-open" : "browser-closed"} ${sideOpen ? "panel-open" : "panel-closed"}`}>
+    <div className={`app ${editing ? "has-session" : ""} ${prefs.hints ? "" : "no-hints"} ${browserOpen ? "browser-open" : "browser-closed"} ${sideOpen ? "panel-open" : "panel-closed"} ${coach ? "has-coach" : ""}`}>
       {(browserOpen || (sideOpen && !editing)) && <div className="app__drawer-scrim" onClick={() => useApp.setState({ browserOpen: false, panelOpen: false })} />}
       <TitleBar />
       <Toolbar />
@@ -250,8 +253,10 @@ export function App() {
       {panel === "export" && <ExportDialog />}
       {panel === "welcome" && platformReady && !signedOut && <Welcome />}
       {panel === "versions" && <VersionsDialog />}
-      {panel === "account" && <AccountDialog />}
-      {panel === "users" && <UsersDialog />}
+      <Suspense fallback={null}>
+        {panel === "account" && <AccountDialog />}
+        {panel === "users" && <UsersDialog />}
+          </Suspense>
       {signedOut && <SignIn />}
       {panel === "shortcuts" && <ShortcutsDialog />}
       {panel === "parts" && <PartsDialog />}

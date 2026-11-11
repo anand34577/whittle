@@ -20,7 +20,7 @@ import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeeping
 import { solveSketch } from "./solver";
 import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
 
-import { type AnySketch, clean, cutSolids, fixNormals, fuseSolids, intersectSolids, isValidShape, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
+import { type AnySketch, clean, cutSolids, fixNormals, fuseSolids, intersectSolids, isValidShape, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, drawingPieces, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
 export * from "./shared";
 
 interface SketchBuilt {
@@ -59,6 +59,8 @@ interface Snapshot {
 }
 
 /** Filled by applyOp, so the editor can show what the feature adds, cuts or keeps. */
+/** A note the step being built leaves for the Problems list (see FeatureStatus.note). */
+const noteSink: { text: string | undefined } = { text: undefined };
 const ghostSink: { tool: Shape3D | null; op: BodyOp | null } = { tool: null, op: null };
 
 /** The straight edge across the narrowest flat face that edge `e` borders, parallel to it, and the gap between them. */
@@ -494,13 +496,14 @@ export class Builder {
     }
     ghostSink.tool = null;
     ghostSink.op = null;
+    noteSink.text = undefined;
     try {
       const warning = this.apply(f, bodies, sketches, ev);
       return {
         key,
         bodies,
         sketches,
-        status: { id: f.id, state: warning ? "warning" : "ok", message: warning, ms: performance.now() - t },
+        status: { id: f.id, state: warning ? "warning" : "ok", message: warning, note: noteSink.text, ms: performance.now() - t },
         ghost: f.id === this.ghostFeature ? ghostSink.tool ?? undefined : undefined,
         ghostOp: f.id === this.ghostFeature ? ghostSink.op ?? undefined : undefined,
       };
@@ -667,6 +670,18 @@ export class Builder {
             tool = clean(sketch.revolve(dir, { origin, angle: d }) as Shape3D);
           }
           if (startBack > 1e-9 && Math.abs(d) < 360 - 1e-9) tool = tool.rotate(-startBack * Math.sign(d || 1), origin, dir);
+        }
+        // One new body in several separate pieces is often a shape that slipped outside the outline (a hole that is now
+        // outside, or a stray shape added to the sketch), but not always (a traced logo): a note, not a warning.
+        // Text and picked areas are left alone (audit U-1, U-9).
+        if (!surf && !picked && thin <= 0 && f.op === "new" && profile && !sk.source?.entities.some((e) => e.type === "text")) {
+          // Pieces whose bounds meet (an island in a hole, two squares touching at a corner) are meant together.
+          const boxes = drawingPieces(profile).map((p) => p.boundingBox);
+          const group = boxes.map((_, i) => i);
+          const root = (i: number): number => (group[i] === i ? i : (group[i] = root(group[i]!)));
+          boxes.forEach((a, i) => boxes.forEach((b, j) => void (j > i && !a.isOut(b) && (group[root(j)] = root(i)))));
+          const n = new Set(boxes.map((_, i) => root(i))).size;
+          if (n > 1) noteSink.text = `This makes ${n} separate pieces in one body. A shape meant as a hole must sit inside the outline; to keep only some areas, click them in the view.`;
         }
         return applyOp(bodies, f.id, surf ? "new" : f.op, f.target, tool) ?? regionWarning;
       }
@@ -1792,7 +1807,8 @@ function largestWorking(start: number, attempt: (v: number) => unknown, budgetMs
   const spent = () => performance.now() - t0 > budgetMs;
   let lo: number | null = null;
   let hi = start;
-  for (const k of [0.9, 0.75, 0.5, 0.25, 0.1]) {
+  // Far enough down that a size typed ten or more times too large still finds one that fits (audit U-13).
+  for (const k of [0.9, 0.75, 0.5, 0.25, 0.1, 0.05, 0.025, 0.01]) {
     if (spent()) return null;
     try {
       attempt(start * k);

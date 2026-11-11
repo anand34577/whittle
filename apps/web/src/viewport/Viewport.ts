@@ -470,7 +470,9 @@ export class Viewport {
       return l;
     };
     this.grid.add(mk(minor, this.theme.gridMinor, 0.9), mk(major, this.theme.gridMajor, 1));
-    this.grid.add(mk([-ext, 0, 0, ext, 0, 0], this.theme.axisX, 1), mk([0, -ext, 0, 0, ext, 0], this.theme.axisY, 1));
+    this.gridAxes = [mk([-ext, 0, 0, ext, 0, 0], this.theme.axisX, 1), mk([0, -ext, 0, 0, ext, 0], this.theme.axisY, 1)];
+    this.grid.add(...this.gridAxes);
+    this.colorGridAxes();
     this.clearGroup(this.axisZ);
     // A short stub up from the origin: enough to show which way is up without running through the model.
     this.axisZ.add(mk([0, 0, 0, 0, 0, step * 5], this.theme.axisZ, 1));
@@ -481,7 +483,25 @@ export class Viewport {
     this.axisZ.visible = this.view.grid && !frame && ![...this.bodies.values()].some((b) => b.visible);
   }
 
+  private gridAxes: THREE.LineSegments[] = [];
+
+  /**
+   * The grid's two axis lines take the colour of the world axis they lie along: on the front plane the upright one
+   * is Z, so it is blue like Z in the 3D view, not green (audit B-11).
+   */
+  private colorGridAxes(frame = this.sketchFrame) {
+    const t = this.theme;
+    const world = [t.axisX, t.axisY, t.axisZ];
+    const dirs: [number, number, number][] = frame ? [frame.xDir, frame.yDir] : [[1, 0, 0], [0, 1, 0]];
+    this.gridAxes.forEach((l, i) => {
+      const d = dirs[i]!.map(Math.abs);
+      const k = d.indexOf(Math.max(...d));
+      (l.material as THREE.LineBasicMaterial).color.set(world[k]!);
+    });
+  }
+
   private setGridFrame(frame: SketchFrame | null) {
+    this.colorGridAxes(frame);
     const m = new THREE.Matrix4();
     if (frame) {
       m.makeBasis(new THREE.Vector3(...frame.xDir), new THREE.Vector3(...frame.yDir), new THREE.Vector3(...frame.normal));
@@ -518,6 +538,29 @@ export class Viewport {
       label.position.set(s * 0.32, s * 0.42, 0);
       mesh.add(label);
       this.planes.add(mesh);
+    }
+    this.applyPreferredPlane();
+  }
+
+  /** The origin plane a lesson asks for: lit up, the others faded, and it wins where planes overlap (audit B-2). */
+  private preferredPlane: OriginPlane | null = null;
+
+  setPreferredPlane(p: OriginPlane | null) {
+    if (this.preferredPlane === p) return;
+    this.preferredPlane = p;
+    this.applyPreferredPlane();
+    this.invalidate();
+  }
+
+  private applyPreferredPlane() {
+    const p = this.preferredPlane;
+    for (const mesh of this.planes.children as THREE.Mesh[]) {
+      const on = !p || mesh.userData.plane === p;
+      (mesh.material as THREE.MeshBasicMaterial).opacity = !p ? 0.1 : on ? 0.24 : 0.03;
+      for (const c of mesh.children) {
+        const m = (c as THREE.Mesh).material as THREE.Material | undefined;
+        if (m) m.opacity = on ? (c instanceof THREE.Sprite ? 1 : p ? 0.95 : 0.55) : 0.2;
+      }
     }
   }
 
@@ -1164,7 +1207,8 @@ export class Viewport {
         const t = this.theme;
         const toned = sh.tone === "bad" ? t.conflict : sh.tone === "defined" ? t.defined : undefined;
         const color = sh.selected ? t.select : sh.hovered ? t.hover : sh.tone === "bad" ? t.conflict : sh.construction ? t.construction : toned ?? (s.active ? t.sketchActive : t.sketch);
-        const line = new LineSegments2(geo, this.lineMat(color, s.active ? (sh.selected ? 2.6 : 1.9) : 1.3, { dashed: sh.construction, depthTest: !s.active }));
+        // Selected and hovered shapes stand out by weight as well as colour, also over a shaded area (audit U-8).
+        const line = new LineSegments2(geo, this.lineMat(color, s.active ? (sh.selected ? 3.6 : sh.hovered ? 2.8 : 1.9) : 1.3, { dashed: sh.construction, depthTest: !s.active }));
         if (sh.construction) line.computeLineDistances();
         line.renderOrder = s.active ? 8 : 2;
         line.raycast = () => {};
@@ -1365,7 +1409,8 @@ export class Viewport {
       if (s) return s;
     }
     if (this.filter.planes && this.planes.visible) {
-      const ph = this.raycaster.intersectObjects([...this.planes.children, ...this.cplanes.children], false)[0];
+      const hits = this.raycaster.intersectObjects([...this.planes.children, ...this.cplanes.children], false);
+      const ph = hits.find((h) => this.preferredPlane && h.object.userData.plane === this.preferredPlane) ?? hits[0];
       if (ph?.object.userData.cplane) return { kind: "cplane", id: ph.object.userData.cplane as Id };
       if (ph) return { kind: "plane", plane: ph.object.userData.plane as OriginPlane };
     }
@@ -1898,10 +1943,10 @@ export class Viewport {
   }
 
   /** Look straight at a sketch plane. */
-  viewNormal(frame: SketchFrame) {
+  viewNormal(frame: SketchFrame, fit?: { radius: number; center: Vec3 }) {
     const to = new Turntable();
-    const sphere = this.frameBox().getBoundingSphere(new THREE.Sphere());
-    const r = Math.max(60, sphere.radius);
+    const sphere = fit ? new THREE.Sphere(new THREE.Vector3(...fit.center), fit.radius) : this.frameBox().getBoundingSphere(new THREE.Sphere());
+    const r = fit ? Math.max(4, fit.radius) : Math.max(60, sphere.radius);
     // Center on the model where it meets the plane, not the plane's origin: a part drawn up from the origin stays in view.
     const o = new THREE.Vector3(...frame.origin);
     const n = new THREE.Vector3(...frame.normal).normalize();

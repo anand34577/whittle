@@ -23,7 +23,7 @@
   --line-strong: #a7aeb6;
   --text-1: #20242a;
   --text-2: #475059;
-  --text-3: #76808a;
+  --text-3: #59626c;
   /* Dark enough for white text at 4.5:1 (audit UI-6: #0696d7 gave about 3.3:1). */
   --accent: #0679b0;
   --accent-hover: #056797;
@@ -59,10 +59,10 @@
   --line-strong: #666d76;
   --text-1: #eceef0;
   --text-2: #bcc2c9;
-  --text-3: #8e96a0;
+  --text-3: #abb2ba;
   --accent: #0696d7;
   --accent-hover: #2aaae6;
-  --accent-ink: #ffffff;
+  --accent-ink: #04131c;
   --accent-soft: rgb(6 150 215 / 0.2);
   --select: #3fb4f0;
   --select-soft: rgb(63 180 240 / 0.18);
@@ -79,14 +79,18 @@
 }
 
 /* The default accent in the Daylight themes is blue. */
+/* (It used to set #0696d7 again here, undoing the darker blue above: white text on it was 3.3:1, audit V-2.) */
 [data-theme^="daylight"][data-accent="orange"] {
-  --accent: #0696d7;
-  --accent-hover: #057fb8;
+  --accent: #066ea1;
+  --accent-hover: #055c87;
   --accent-ink: #ffffff;
   --accent-soft: rgb(6 150 215 / 0.16);
 }
+/* On the dark variant the bright blue stays (it reads on dark panels) and button text turns dark to match. */
 [data-theme="daylightdark"][data-accent="orange"] {
+  --accent: #0696d7;
   --accent-hover: #2aaae6;
+  --accent-ink: #04131c;
 }
 
 /* ═════════════════════════ Layout ═════════════════════════ */
@@ -153,7 +157,7 @@
   text-align: left;
 }
 [data-theme^="daylight"] .docname__state {
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 [data-theme^="daylight"] .titlebar__right {
   margin-left: auto;
@@ -195,7 +199,7 @@
   position: relative;
   height: 26px;
   padding: 0 18px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -250,7 +254,7 @@
 }
 [data-theme^="daylight"] .toolgroup__label,
 [data-theme^="daylight"] .groupmenu__btn {
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   letter-spacing: 0.02em;
   text-transform: none;
@@ -283,7 +287,7 @@
   color: var(--accent);
 }
 [data-theme^="daylight"] .tool__label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 [data-theme^="daylight"] .toolbar .pill--accent {
   background: var(--accent);
@@ -312,7 +316,7 @@
   box-shadow: var(--shadow-pop);
 }
 [data-theme^="daylight"] .groupmenu__head {
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   color: var(--text-3);
   background: var(--bg-inset);
@@ -339,7 +343,7 @@
   z-index: 2;
   display: block;
   padding: 7px 12px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -359,12 +363,12 @@
   background: var(--bg-3);
   border-radius: 9px;
   padding: 0 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   color: var(--text-2);
 }
 [data-theme^="daylight"] .tree__row {
   border-radius: 0;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 [data-theme^="daylight"] .tree__row:hover {
   background: var(--bg-3);
@@ -461,7 +465,7 @@
   font-weight: 600;
 }
 [data-theme^="daylight"] .panel__head p {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
 }
 [data-theme^="daylight"] .panel__body {
@@ -497,7 +501,7 @@
   padding: 6px 14px;
   background: var(--bg-3);
   border-block: 1px solid var(--line);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.04em;
   text-transform: none;
   font-weight: 600;
@@ -617,7 +621,7 @@
   border-color: var(--line-soft);
 }
 [data-theme^="daylight"] .nextstep b {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 
 /* Buttons and notes inside the panel. */

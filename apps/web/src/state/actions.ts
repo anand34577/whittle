@@ -721,7 +721,10 @@ export function handlePick(p: Pick | null, additive: boolean) {
     if (f.face && !sameFace(f.face, ref) && f.points.length > 0) {
       return toast("info", "All holes in one Hole feature share a face. Finish this one (Enter) to drill on another face.");
     }
-    const pt = faceLocal(ref, p.at);
+    // A click near the middle of the face lands exactly on its centre (audit U-14).
+    const near = d3(p.at, ref.center) < Math.max(1, 0.06 * Math.sqrt(ref.area ?? 0));
+    const pt = faceLocal(ref, near ? ref.center : p.at);
+    if (near) toast("info", "Placed on the centre of the face.");
     mutate("Place hole", (d) => {
       const x = d.features.find((y) => y.id === f.id);
       if (!x || x.type !== "hole") return;

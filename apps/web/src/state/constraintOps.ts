@@ -717,7 +717,7 @@ export function makeConstrainable(id: Id | null = useApp.getState().selectedEnti
   let msg: string | undefined;
   try {
     const r = resolveEntity(e, documentEvaluator(useApp.getState().doc));
-    geoMutate("Make constrainable", (sk) => {
+    geoMutate("Split into lines and arcs", (sk) => {
       msg = addEntityGeometry(sk, r, useApp.getState().doc.units);
       if (!msg) sk.entities = sk.entities.filter((x) => x.id !== e.id);
     });
@@ -1208,7 +1208,7 @@ export function breakSelection() {
 /** AutoConstrain the open sketch; anything the solver finds redundant is taken out again (see drawMutate). */
 export function autoConstrainSketch() {
   const o = openSketch();
-  if (!o?.sk.geometry?.length) return toast("info", "AutoConstrain works on constrainable geometry. Select a shape and choose Make constrainable first.");
+  if (!o?.sk.geometry?.length) return toast("info", "AutoConstrain works on constrainable geometry. Select a shape and choose Split into lines and arcs first (or just add a dimension to it: that splits it for you).");
   let r = { coincident: 0, aligned: 0 };
   drawMutate("AutoConstrain", (sk) => void (r = autoConstrain(sk)));
   const n = r.coincident + r.aligned;

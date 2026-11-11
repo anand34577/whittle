@@ -40,7 +40,7 @@ await step("01-first-run-profile", async () => {
   await page.addInitScript(() => localStorage.setItem("whittle.debug", "1")); // the test hook is off unless asked for
   await page.goto(url);
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).waitFor();
-  await page.getByText("What brings you to Whittle?").waitFor();
+  await page.getByRole("group", { name: "Tune Whittle for" }).waitFor();
   await page.getByRole("button", { name: /Engineer & professional/ }).click();
   await page.getByRole("dialog", { name: "Welcome to Whittle" }).getByRole("button", { name: /New design/ }).first().click();
   await waitBuilt();
@@ -52,6 +52,7 @@ await step("01-first-run-profile", async () => {
 await step("02-settings-themes", async () => {
   await page.keyboard.press("Control+,");
   await page.getByRole("dialog", { name: "Settings" }).waitFor();
+  await page.getByRole("button", { name: "More themes" }).click();
   for (const t of ["Midnight", "Blueprint", "Studio", "High contrast", "Paper"]) {
     await page.getByRole("radio", { name: t }).click();
     const theme = await page.evaluate(() => document.documentElement.dataset.theme);

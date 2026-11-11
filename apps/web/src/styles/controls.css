@@ -31,7 +31,7 @@
 }
 .listbox__group {
   padding: 8px 8px 4px;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1173,7 +1173,7 @@ textarea::placeholder {
 .badge {
   padding: 1px 7px;
   border-radius: 10px;
-  font-size: 10.5px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   background: var(--bg-3);
   color: var(--text-2);

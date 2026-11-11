@@ -3,7 +3,9 @@ import { useState } from "react";
 import { activeEnd, documentEvaluator, formatQuantity, isSketchConsumed } from "@whittle/core";
 import { createSketchOn, saveNamedView, showNamedView } from "../state/actions";
 import { editFeature, mutate, useApp } from "../state/store";
+import { renameBody, renameStep } from "../state/steps";
 import { Icon } from "./icons";
+import { DeferredInput } from "./DeferredInput";
 
 function Section({ title, count, children, defaultOpen = true, forceOpen = false }: { title: string; count?: number; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
   const [userOpen, setOpen] = useState(defaultOpen);
@@ -22,6 +24,7 @@ function Section({ title, count, children, defaultOpen = true, forceOpen = false
 
 export function Browser() {
   const doc = useApp((s) => s.doc);
+  const [editing, setEditing] = useState<string | null>(null);
   const regen = useApp((s) => s.regen);
   const selection = useApp((s) => s.selection);
   const mode = useApp((s) => s.mode);
@@ -43,18 +46,35 @@ export function Browser() {
         </button>
       </header>
       <div className="tree">
-        <Section title="Parameters" count={doc.parameters.length} defaultOpen={doc.parameters.length > 0}>
-          {[...doc.parameters].sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite)).map((p) => {
-            const v = ev.params.get(p.name);
-            return (
-              <button key={p.id} className="tree__row" onClick={() => useApp.setState({ panel: "params" })} title={p.comment ?? p.expr}>
-                {p.favorite ? <Icon name="starOn" size={12} /> : <span className="tree__glyph mono">fx</span>}
+        {/* Opens by itself once a design has parameters (a template, say): the numbers are the point (audit U-4). */}
+        <Section key={doc.parameters.length > 0 ? "params" : "no-params"} title="Parameters" count={doc.parameters.length} defaultOpen={doc.parameters.length > 0}>
+          {[...doc.parameters].sort((a, b) => Number(!!b.favorite) - Number(!!a.favorite)).map((p) =>
+            // Click the value to change it right here, with the model in view (audit U-3).
+            editing === p.id ? (
+              <div key={p.id} className="tree__row tree__row--edit">
                 <span className="tree__name mono">{p.name}</span>
-                <span className={`tree__value mono ${v?.ok ? "" : "is-error"}`}>{v?.ok ? formatQuantity(v.value, p.kind, doc.units) : "error"}</span>
-              </button>
-            );
-          })}
-          <button className="tree__row tree__row--add" onClick={() => useApp.setState({ panel: "params" })}>
+                <DeferredInput
+                  className="input input--small mono tree__input"
+                  value={p.expr}
+                  autoFocus
+                  aria-label={`Value of ${p.name}`}
+                  onCommit={(expr) => mutate(`${p.name} ${p.expr} → ${expr}`, (d) => void (d.parameters.find((x) => x.id === p.id)!.expr = expr), "param" + p.id + "expr")}
+                  onDone={() => setEditing(null)}
+                />
+              </div>
+            ) : (
+              <div key={p.id} className="tree__row">
+                <button className="tree__main" onClick={() => (useApp.setState({ focusParam: p.id, panel: "params" }))} title={`${p.comment ? p.comment + " · " : ""}Click the value to change it · the name opens the full list`}>
+                  {p.favorite ? <Icon name="starOn" size={12} /> : <span className="tree__glyph mono">fx</span>}
+                  <span className="tree__name mono">{p.name}</span>
+                </button>
+                <button className={`tree__value tree__value--edit mono ${ev.params.get(p.name)?.ok ? "" : "is-error"}`} onClick={() => setEditing(p.id)} title={`${p.expr} · click to change`}>
+                  {ev.params.get(p.name)?.ok ? formatQuantity(ev.params.get(p.name)!.value, p.kind, doc.units) : "error"}
+                </button>
+              </div>
+            ),
+          )}
+          <button className="tree__row tree__row--add" onClick={() => useApp.setState({ focusParam: null, panel: "params" })}>
             <Icon name="plus" size={14} />
             <span className="tree__name">Add parameter</span>
           </button>
@@ -123,7 +143,7 @@ export function Browser() {
             const visible = meta?.visible !== false;
             return (
               <div key={b.id} className={`tree__row ${isSel((p) => (p.kind === "body" || p.kind === "face" || p.kind === "edge") && p.bodyId === b.id) ? "is-selected" : ""}`}>
-                <button className="tree__main" onClick={() => useApp.setState({ selection: [{ kind: "body", bodyId: b.id }] })} onDoubleClick={() => editFeature(b.id)}>
+                <button className="tree__main" onClick={() => useApp.setState({ selection: [{ kind: "body", bodyId: b.id }] })} onDoubleClick={() => editFeature(b.id)} onKeyDown={(e) => e.key === "F2" && (e.preventDefault(), void renameBody(b.id))} title="Double-click to edit its step · F2 to rename">
                   <span className="tree__swatch" style={{ background: meta?.color ?? "#ccc" }} />
                   <span className={`tree__name ${visible ? "" : "is-muted"}`}>{meta?.name ?? "Body"}</span>
                   {(meta?.component || meta?.grounded) && <span className="tree__action">{[meta?.component, meta?.grounded ? "grounded" : ""].filter(Boolean).join(" · ")}</span>}
@@ -150,7 +170,7 @@ export function Browser() {
           {sketches.length === 0 && <p className="tree__empty">No sketches yet</p>}
           {sketches.map((s) => (
             <div key={s.id} className={`tree__row ${isSel((p) => p.kind === "sketch" && p.sketchId === s.id) ? "is-selected" : ""}`}>
-              <button className="tree__main" onClick={() => useApp.setState({ selection: [{ kind: "sketch", sketchId: s.id }] })} onDoubleClick={() => editFeature(s.id)}>
+              <button className="tree__main" onClick={() => useApp.setState({ selection: [{ kind: "sketch", sketchId: s.id }] })} onDoubleClick={() => editFeature(s.id)} onKeyDown={(e) => e.key === "F2" && (e.preventDefault(), void renameStep(s.id))} title="Double-click to edit · F2 to rename">
                 <Icon name="sketch" size={16} />
                 <span className={`tree__name ${isSketchConsumed(doc, s.id) ? "is-muted" : ""}`}>{s.name}</span>
               </button>

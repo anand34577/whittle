@@ -220,12 +220,13 @@ await step("12-radial-menu", async () => {
   await page.keyboard.press("Escape");
   const { cx, cy } = await vp();
   await page.mouse.click(cx + 300, cy - 230, { button: "right" });
-  await page.locator(".radial__item").first().waitFor();
+  // Newcomer profiles get a plain list, the others the wheel: either way the actions are there.
+  await page.locator(".radial__item, .ctxlist [role=menuitem]").first().waitFor();
   await page.waitForTimeout(300);
 });
 
 await step("13-box-and-combine", async () => {
-  await page.locator(".radial__item", { hasText: "Box" }).click();
+  await page.locator(".radial__item, .ctxlist [role=menuitem]", { hasText: "Box" }).click();
   await waitBuilt();
   await page.keyboard.press("Enter");
   await waitBuilt();
@@ -269,8 +270,11 @@ await step("16-timeline-reorder", async () => {
   const before = await order();
   const iSketch = await state(() => window.whittle.useApp.getState().doc.features.findIndex((f) => f.type === "sketch"));
   await page.locator(".timeline .step").nth(iSketch).click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Move later" }).click();
+  // The breaking move isn't offered: it is greyed, with the reason beside it.
+  const later = page.getByRole("menuitem", { name: /Move later/ });
+  if (!(await later.isDisabled())) throw new Error("a breaking move was offered");
   await page.getByText(/has to come after/).first().waitFor();
+  await page.keyboard.press("Escape");
   if ((await order()).join() !== before.join()) throw new Error("a breaking move was applied");
   // ...but an independent step can move freely.
   const iFree = await state(() => {

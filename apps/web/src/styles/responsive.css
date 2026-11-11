@@ -269,3 +269,33 @@
     grid-column: 1 / -1;
   }
 }
+
+/* ═══════════ Narrow windows (audit V-6) ═══════════ */
+.statusbar__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The toolbar scrolls sideways without a scrollbar under it; a fade at the edge says there is more. */
+.toolbar__scroll {
+  scrollbar-width: none;
+}
+.toolbar__scroll::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 1100px) {
+  .toolbar__scroll {
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+  .viewport .dock {
+    mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+  }
+}
+@media (max-width: 640px) {
+  /* On a phone the status line is the hint; build time and counts are one tap away in the Problems list. */
+  .statusbar .status-dot,
+  .statusbar .busyline,
+  .statusbar__meta > .mono {
+    display: none;
+  }
+}

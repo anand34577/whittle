@@ -6,11 +6,12 @@ import { hintFor } from "../state/hints";
 import { problemsOf } from "../state/problems";
 import { retryKernel } from "../state/kernel";
 import { noteClick, noteRun, recentCommands } from "../state/learn";
+import { score } from "../state/search";
 import { Activity, ActivityStrip } from "./Activity";
 import { Spinner } from "./feedback";
-import { history, mutate, setTheme, toast, useApp } from "../state/store";
+import { editFeature, history, mutate, setPrefs, setTheme, toast, useApp } from "../state/store";
 import { AccountButton } from "./Account";
-import { type Profile, THEMES } from "../state/prefs";
+import { type Profile, THEMES, simpleToolbar } from "../state/prefs";
 import { Popover } from "./controls";
 import { Icon } from "./icons";
 
@@ -155,9 +156,10 @@ function HelpMenu() {
 /* ───────────────────────────── Toolbar ───────────────────────────── */
 
 function ToolButton({ c, active, big }: { c: Command; active?: boolean; big?: boolean }) {
-  const state = useApp();
-  const why = whyUnavailable(c, state);
-  active ||= c.on?.(state);
+  // Only what this button shows: a whole-state subscription redrew every button on every pointer move (audit P-1).
+  const why = useApp((s) => whyUnavailable(c, s));
+  const on = useApp((s) => !!c.on?.(s));
+  active ||= on;
   return (
     <button
       className={`tool ${active ? "is-active" : ""} ${big ? "tool--big" : ""}`}
@@ -208,14 +210,14 @@ const lastVariant: Record<string, string> = {};
  * arrow beside it lists the others. One button per kind of shape keeps the bar short without hiding anything.
  */
 function SplitTool({ family, ids, activeId }: { family: string; ids: string[]; activeId?: string }) {
-  const state = useApp();
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
   const [, redraw] = useState(0);
   const current = activeId && ids.includes(activeId) ? activeId : ids.includes(lastVariant[family] ?? "") ? lastVariant[family]! : ids[0]!;
   const c = commandById(current);
-  const why = whyUnavailable(c, state);
-  const active = (!!activeId && ids.includes(activeId)) || ids.some((id) => commandById(id).on?.(state));
+  const why = useApp((s) => whyUnavailable(c, s));
+  const anyOn = useApp((s) => ids.some((id) => commandById(id).on?.(s)));
+  const active = (!!activeId && ids.includes(activeId)) || anyOn;
   const run = (cmd: Command) => {
     lastVariant[family] = cmd.id;
     setOpen(false);
@@ -257,12 +259,12 @@ function SplitTool({ family, ids, activeId }: { family: string; ids: string[]; a
 
 /** Small icon-only buttons in two rows: every sketch constraint at a glance. */
 function ConstraintGrid({ ids }: { ids: string[] }) {
-  const state = useApp();
+  const onKey = useApp((s) => ids.map((id) => (commandById(id).on?.(s) ? "1" : "0")).join(""));
   return (
     <div className="cgrid">
-      {ids.map((id) => {
+      {ids.map((id, i) => {
         const c = commandById(id);
-        const on = !!c.on?.(state);
+        const on = onKey[i] === "1";
         return (
           <button key={id} className={`cgrid__btn ${on ? "is-active" : ""}`} onClick={c.run} aria-pressed={on} aria-label={c.label} title={`${c.label}\n${c.hint ?? ""}`} data-tour={id}>
             <Icon name={c.icon ?? "link"} size={16} />
@@ -388,13 +390,17 @@ const wheelX = (e: React.WheelEvent<HTMLElement>) => {
 /** The ribbon: workspace tabs over the tool groups of the chosen tab (a sketch shows its own contextual tab). */
 export function Toolbar() {
   const mode = useApp((s) => s.mode);
-  const tab = useApp((s) => s.ribbonTab);
+  const simple = useApp((s) => simpleToolbar(s.prefs));
+  // A design that already has surfaces keeps the Surface tab, whatever the profile.
+  const hasSurfaces = useApp((s) => s.doc.features.some((f) => f.type.startsWith("surface") || ("surface" in f && !!(f as { surface?: boolean }).surface)));
+  const chosen = useApp((s) => s.ribbonTab);
   const sketching = mode.kind === "sketch";
   const tabs: { id: "solid" | "surface" | "tools"; label: string }[] = [
     { id: "solid", label: "Solid" },
-    { id: "surface", label: "Surface" },
-    { id: "tools", label: "Tools" },
+    ...(!simple || hasSurfaces ? [{ id: "surface" as const, label: "Surface" }] : []),
+    ...(!simple ? [{ id: "tools" as const, label: "Tools" }] : []),
   ];
+  const tab = tabs.some((t) => t.id === chosen) ? chosen : "solid";
   return (
     <div className="ribbon">
       <div className="ribbon__tabs" role="tablist" aria-label="Workspace">
@@ -409,6 +415,15 @@ export function Toolbar() {
             </button>
           ))
         )}
+        {!sketching && (
+          <button
+            className="ribbon__alltools link"
+            onClick={() => setPrefs({ allTools: simple })}
+            title={simple ? "Show every tool group and the Surface and Tools tabs" : "Back to the essentials (everything stays in Ctrl+K and the group menus)"}
+          >
+            {simple ? "Show all tools" : "Fewer tools"}
+          </button>
+        )}
       </div>
       <RibbonBody tab={tab} />
     </div>
@@ -417,6 +432,7 @@ export function Toolbar() {
 
 function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
   const mode = useApp((s) => s.mode);
+  const simple = useApp((s) => simpleToolbar(s.prefs));
   const profile = useApp((s) => s.prefs.profile);
   const labels = useApp((s) => s.prefs.toolLabels);
   const { create, modify } = toolsFor(profile);
@@ -484,7 +500,7 @@ function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
         <>
           <Group label="Create" ids={create.primary} more={create.more} />
           <Group label="Modify" ids={modify.primary} more={modify.more} />
-          <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />
+          {!simple && <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />}
           <Group label="Inspect" ids={["measure", "section"]} more={["#Measure", "measure", "section", "check-geometry", "interference", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra", "#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
         </>
       )}
@@ -514,14 +530,23 @@ function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
 /* ───────────────────────────── Status bar ───────────────────────────── */
 
 export function StatusBar() {
-  const state = useApp();
-  const hint = hintFor(state);
+  const hint = useApp(hintFor);
+  const state = {
+    regen: useApp((s) => s.regen),
+    kernelError: useApp((s) => s.kernelError),
+    kernelReady: useApp((s) => s.kernelReady),
+    regenBusy: useApp((s) => s.regenBusy),
+    regenProgress: useApp((s) => s.regenProgress),
+    doc: { units: useApp((s) => s.doc.units) },
+  };
   const r = state.regen;
   return (
     <footer className="statusbar">
       <span className="statusbar__hint" aria-live="polite">
         <Icon name="sparkStep" size={14} />
-        {hint}
+        <span className="statusbar__text" title={hint}>
+          {hint}
+        </span>
       </span>
       <ActivityStrip />
       <Activity />
@@ -563,7 +588,7 @@ const SEVERITY_ICON = { error: "error", warning: "warning", info: "info" } as co
 
 /** IDE-style problem counts in the status bar; click for the list, each with where it is and a fix. */
 function ProblemsButton() {
-  const state = useApp();
+  const state = { doc: useApp((s) => s.doc), regen: useApp((s) => s.regen), session: useApp((s) => s.session) };
   // Worked out again only when the design, its build or the open step change, not on every hover (audit UI-1).
   const list = useMemo(() => problemsOf({ doc: state.doc, regen: state.regen, session: state.session }), [state.doc, state.regen, state.session]);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
@@ -673,27 +698,6 @@ export function Toasts() {
 
 /* ───────────────────────────── Command palette ───────────────────────────── */
 
-/** Whole words beat word starts, which beat letters inside a word ("round" finds Fillet before Ground). */
-/** `recent`: the recent-command list, read once per search rather than once per command (audit UI-1). */
-function score(c: Command, q: string, recentList: string[] = recentCommands()): number {
-  if (!q) return 1;
-  const label = c.label.toLowerCase();
-  const labelWords = label.split(/[^a-z0-9]+/);
-  const keyWords = `${c.keywords ?? ""} ${c.group}`.toLowerCase().split(/[^a-z0-9]+/);
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  let s = 0;
-  for (const w of words) {
-    if (label.startsWith(w)) s += 8;
-    else if (labelWords.some((x) => x.startsWith(w))) s += 6;
-    else if (keyWords.includes(w)) s += 5;
-    else if (keyWords.some((x) => x.startsWith(w))) s += 3;
-    else if (label.includes(w) || keyWords.some((x) => x.includes(w))) s += 1;
-    else return 0;
-  }
-  const recent = recentList.indexOf(c.id);
-  return s + (recent >= 0 ? 1.5 - recent * 0.15 : 0);
-}
-
 export function CommandPalette() {
   const state = useApp();
   const [q, setQ] = useState("");
@@ -703,7 +707,14 @@ export function CommandPalette() {
   const recent = q ? [] : recentCommands();
   const rank = (id: string) => (recent.includes(id) ? recent.indexOf(id) : recent.length);
   const recentAll = recentCommands();
-  const list = COMMANDS.map((c) => ({ c, s: score(c, q, recentAll), why: q ? whyUnavailable(c, state) : null }))
+  // Steps and parameters are found by name too, so "plate" or "width" goes straight to them.
+  const extra: Command[] = q.trim()
+    ? [
+        ...state.doc.features.map((f) => ({ id: `step:${f.id}`, label: f.name, group: "Step", icon: "edit" as const, keywords: f.type, hint: "Edit this step", run: () => editFeature(f.id) })),
+        ...state.doc.parameters.map((p) => ({ id: `param:${p.id}`, label: p.name, group: "Parameter", icon: "params" as const, keywords: p.comment ?? "", hint: `${p.expr} · change it in Parameters`, run: () => useApp.setState({ focusParam: p.id, panel: "params" }) })),
+      ]
+    : [];
+  const list = [...COMMANDS, ...extra].map((c) => ({ c, s: score(c, q, recentAll), why: q ? whyUnavailable(c, state) : null }))
     .filter((x) => x.s > 0 && (q ? true : isAvailable(x.c, state)))
     .sort((a, b) => Number(!!a.why) - Number(!!b.why) || rank(a.c.id) - rank(b.c.id) || b.s - a.s)
     .slice(0, 12);
@@ -741,7 +752,21 @@ export function CommandPalette() {
           />
         </div>
         <ul className="palette__list" ref={listRef} role="listbox">
-          {list.length === 0 && <li className="palette__empty">No matching command</li>}
+          {list.length === 0 && (
+            <li className="palette__empty">
+              Nothing matches “{q}”.
+              <span className="palette__empty-actions">
+                {aiAvailable(state.platform) && (
+                  <button className="btn btn--small" onClick={() => (close(), useApp.setState({ assistant: true }))}>
+                    <Icon name="assistant" size={14} /> Ask the assistant
+                  </button>
+                )}
+                <button className="btn btn--small" onClick={() => setQ("")}>
+                  Browse all tools
+                </button>
+              </span>
+            </li>
+          )}
           {list.map((x, k) => {
             const c = x.c;
             return (

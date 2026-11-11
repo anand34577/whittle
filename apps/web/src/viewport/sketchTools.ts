@@ -839,8 +839,19 @@ export class SketchController {
 
   /* ───────────────────────── Events ───────────────────────── */
 
+  /** Pick distance in sketch units: generous enough that a near miss still takes the nearest thing (audit U-8). */
+  private pickTol() {
+    return 10 * this.env.pixelSize();
+  }
+
+  /** A drawn shape beats the origin and axes it happens to cross: it is what the click was aimed at (audit U-7). */
+  private drawnFirst(g: Id | null, p: Vec2): Id | null {
+    if ((g === "xaxis" || g === "yaxis" || g === "origin") && this.entityAt(p)) return null;
+    return g;
+  }
+
   private entityAt(p: Vec2): Id | null {
-    const tol = 7 * this.env.pixelSize();
+    const tol = this.pickTol();
     let best: { d: number; id: Id } | null = null;
     for (const r of this.resolvedCache.length ? this.resolvedCache : this.resolved()) {
       const pts = entityOutline(r, 48);
@@ -861,12 +872,14 @@ export class SketchController {
 
   /** Constraint-driven geometry under the pointer: points first, then curves (and the origin and axes). */
   private geomAt(p: Vec2, curvesOnly = false): Id | null {
-    const tol = 7 * this.env.pixelSize();
+    const tol = this.pickTol();
+    // Points win over the lines they end, so they keep a tighter reach: a wider one would steal clicks meant for a line.
+    const pointTol = 7 * this.env.pixelSize();
     const geo = this.env.geometry();
     const near = (q: Vec2) => Math.hypot(q[0] - p[0], q[1] - p[1]);
     if (!curvesOnly) {
-      let best: { d: number; id: Id } | null = near([0, 0]) < tol ? { d: near([0, 0]), id: "origin" } : null;
-      for (const g of geo) if (g.type === "point" && near(g.p) < (best?.d ?? tol)) best = { d: near(g.p), id: g.id };
+      let best: { d: number; id: Id } | null = near([0, 0]) < pointTol ? { d: near([0, 0]), id: "origin" } : null;
+      for (const g of geo) if (g.type === "point" && near(g.p) < (best?.d ?? pointTol)) best = { d: near(g.p), id: g.id };
       if (best) return best.id;
     }
     let best: { d: number; id: Id } | null = null;
@@ -1196,10 +1209,10 @@ export class SketchController {
         this.box.b = e.p;
       } else {
         this.resolvedCache = [];
-        this.hoverEntity = this.geomAt(e.p) ?? this.entityAt(e.p);
+        this.hoverEntity = this.drawnFirst(this.geomAt(e.p), e.p) ?? this.entityAt(e.p);
       }
     } else if (e.type === "down") {
-      const g = this.geomAt(e.p);
+      const g = this.drawnFirst(this.geomAt(e.p), e.p);
       if (g) {
         const sel = this.env.selectedGeom();
         // Pressing on something already selected keeps the selection, so several items drag together.
