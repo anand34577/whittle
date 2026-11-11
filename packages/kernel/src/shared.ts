@@ -342,6 +342,10 @@ export function sketchDrawing(f: SketchFeature, ev: Evaluator, notes: SketchNote
     return depth[i]! % 2 === 1;
   });
   if (!isHole.includes(false)) throw new FeatureError("Every shape in this sketch is a hole. Add an outer shape.");
+  // A shape set to Hole that no longer meets any solid shape cuts nothing; say so rather than quietly dropping it (audit U-1).
+  const meets = (a: [number, number][], b: [number, number][]) => a.some((p) => polygonInside([p], b)) || b.some((p) => polygonInside([p], a));
+  const stray = resolved.filter((r, i) => r.mode === "subtract" && !resolved.some((_, j) => !isHole[j] && meets(outlines[i]!, outlines[j]!))).length;
+  if (stray) notes.warning ??= `${stray === 1 ? "A hole lies" : `${stray} holes lie`} outside the outline and ${stray === 1 ? "cuts" : "cut"} nothing. Make the outline larger or move the ${stray === 1 ? "hole" : "holes"} back inside it.`;
   // Shapes whose bounding boxes don't meet can't affect each other, so each cluster is combined on its own (the
   // boolean cost grows steeply with the number of shapes in one go) and the clusters are then placed side by side.
   const parts = clusters(outlines).map((idx) => clusterDrawing(resolved, outlines, isHole, idx, notes, depth)).filter((d): d is Drawing => d !== null);

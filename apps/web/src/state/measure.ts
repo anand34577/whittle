@@ -26,13 +26,15 @@ const addS = (a: Vec3, b: Vec3, s: number): Vec3 => [a[0] + b[0] * s, a[1] + b[1
 /** Volume in a unit people use for that system: in³ / ft³ for imperial, cm³ otherwise. */
 export function volumeText(mm3: number, unit: LengthUnit, digits = display.digits + 1): string {
   if (unit === "in" || unit === "ft") return `${trim(mm3 / LENGTH_TO_MM[unit] ** 3, digits)} ${unit}³`;
+  // A millimetre design reads in mm³ until the number gets long, then in cm³: the same rule everywhere (audit S-7).
+  if (unit === "mm" && Math.abs(mm3) < 1e5) return `${trim(mm3, Math.max(0, digits - 2))} mm³`;
   return `${trim(mm3 / 1000, digits)} cm³`;
 }
 
-/** Area in the design's unit (cm² for mm designs, as before). */
+/** Area in the design's unit; a millimetre design switches to cm² once the number gets long. */
 export function areaText(mm2: number, unit: LengthUnit, digits = display.digits): string {
-  const u = unit === "mm" ? "cm" : unit;
-  return `${trim(mm2 / LENGTH_TO_MM[u] ** 2, digits)} ${u}²`;
+  const u = unit === "mm" ? (Math.abs(mm2) < 1e5 ? "mm" : "cm") : unit;
+  return `${trim(mm2 / LENGTH_TO_MM[u] ** 2, u === "mm" ? Math.max(0, digits - 1) : digits)} ${u}²`;
 }
 
 function pointOf(p: Pick, bodies: BodyResult[]): Vec3 | null {

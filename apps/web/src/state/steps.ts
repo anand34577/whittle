@@ -5,7 +5,7 @@
 import type { Draft } from "immer";
 import { FEATURE_LABELS, type Feature, type Id, activeEnd, nextName, uid } from "@whittle/core";
 import { promptDialog } from "./dialogs";
-import { mutate, toast, useApp } from "./store";
+import { mutate, toast, updateFeature, useApp } from "./store";
 
 /** Steps picked in the timeline (Shift/Ctrl+click adds); kept here so commands and keys can use them. */
 export const timelinePick: { ids: Id[] } = { ids: [] };
@@ -58,4 +58,31 @@ export async function folderSteps() {
     d.folders.push({ id: uid("fo"), name: name.trim(), features: ids, open: false });
   });
   timelinePick.ids = [];
+}
+
+/** Rename a timeline step (F2, the step menu, or "rename" in the command search). */
+export async function renameStep(id: Id) {
+  const f = useApp.getState().doc.features.find((x) => x.id === id);
+  if (!f) return;
+  const name = (await promptDialog({ title: `Rename ${f.name}`, label: "Name", initial: f.name, confirmLabel: "Rename" }))?.trim();
+  if (name && name !== f.name) updateFeature(id, `Rename ${f.name} to ${name}`, (d) => void (d.name = name));
+}
+
+/** Rename a body as it shows in the browser and in exports. */
+export async function renameBody(id: Id) {
+  const b = useApp.getState().doc.bodies[id];
+  if (!b) return;
+  const name = (await promptDialog({ title: `Rename ${b.name}`, label: "Name", initial: b.name, confirmLabel: "Rename" }))?.trim();
+  if (name && name !== b.name) mutate(`Rename ${b.name} to ${name}`, (d) => void (d.bodies[id]!.name = name));
+}
+
+/** Rename what is selected: a body, else the step behind the selection or the picked step. */
+export function renameSelection() {
+  const s = useApp.getState();
+  const p = s.selection[0];
+  const bodyId = p && "bodyId" in p ? p.bodyId : undefined;
+  if (bodyId && s.doc.bodies[bodyId]) return void renameBody(bodyId);
+  const id = targets()[0];
+  if (id) return void renameStep(id);
+  toast("info", "Select a body, or a step in the timeline, to rename it.");
 }

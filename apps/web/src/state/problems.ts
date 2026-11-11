@@ -28,6 +28,7 @@ export function problemsOf(s: Pick<AppState, "doc" | "regen" | "session">): Prob
 
   for (const st of regen?.status ?? []) {
     if (st.id === s.session?.featureId) continue; // the open feature says it in its own panel
+    if (st.note && st.state === "ok") out.push({ key: `note-${st.id}`, severity: "info", title: `${name(st.id)}: worth a look`, detail: st.note, featureId: st.id, fix: { label: "Edit", run: () => editFeature(st.id) } });
     if (st.state !== "error" && st.state !== "warning") continue;
     const fix = st.fix;
     out.push({

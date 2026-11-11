@@ -28,10 +28,13 @@ import {
 import { handlePick, matchEdge, matchFace, samePick } from "../state/actions";
 import { regionAt } from "../state/regions";
 import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addMidpointLine, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, dimPlaceCancel, dimPlaceClick, dimPlaceMove, placingConstraint, useDimPlacing, offsetAt, offsetCancel, offsetDrag, offsetPlace, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
-import { type Command, commandById, isAvailable } from "../state/commands";
+import { type Command, commandById, isAvailable, whyUnavailable } from "../state/commands";
 import { thumbnailHook } from "../state/files";
 import { measure, measurePicks, quickInfo } from "../state/measure";
 import { nextSteps } from "../state/problems";
+import { lessonPlane } from "../state/lessons";
+import { useAi } from "../state/ai";
+import { simpleToolbar } from "../state/prefs";
 import { getKernel } from "../state/kernel";
 import { cancelImagePick, imagePickPointer, placeImage, useImagePick } from "../state/refImage";
 import { type Pick, editFeature, findFeature, requestView, setSketchTool, setSketchView, setView, sketchMutate, toast, useApp } from "../state/store";
@@ -175,11 +178,11 @@ function radialFor(p: Pick | null): string[] {
   if (!p) return ["sketch", "box", "cylinder", "parts", "extrude", "import", "view-fit", "measure"];
   switch (p.kind) {
     case "face":
-      return ["sketch", "press-pull", "hole", "fillet", "shell", "measure", "hide", "isolate"];
+      return ["sketch", "press-pull", "hole", "fillet", "shell", "measure", "hide", "isolate", "rename", "body-appearance"];
     case "edge":
-      return ["fillet", "chamfer", "measure", "move", "hide", "isolate"];
+      return ["fillet", "chamfer", "measure", "move", "hide", "isolate", "rename"];
     case "body":
-      return ["move", "mirror", "pattern", "combine", "hide", "isolate", "delete", "measure"];
+      return ["move", "mirror", "pattern", "combine", "hide", "isolate", "measure", "rename", "body-appearance", "delete"];
     case "sketch":
       return ["extrude", "revolve", "loft", "export-sketch-svg", "export-sketch-dxf", "delete"];
     default:
@@ -189,8 +192,14 @@ function radialFor(p: Pick | null): string[] {
 
 function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
   const state = useApp();
-  const items = ids.map(commandById).filter((c): c is Command => !!c && isAvailable(c, state));
   const close = () => useApp.setState({ radial: null });
+  // Newcomers get a plain list at the pointer; the wheel suits people who learn its positions (audit U-18).
+  // (In a sketch the wheel is a quick tool picker and stays.)
+  if (simpleToolbar(state.prefs) && state.mode.kind !== "sketch") return <ContextList x={x} y={y} ids={ids} close={close} />;
+  // Each command keeps its own place on the wheel for a kind of selection, whether or not it can run right now:
+  // positions you learn don't shift.
+  const slots = ids.map((id) => commandById(id));
+  const items = slots.filter((c): c is Command => !!c);
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && close();
     window.addEventListener("keydown", k, true);
@@ -215,7 +224,8 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
         <Icon name="close" size={14} />
       </button>
       {items.map((c, i) => {
-        const a = -Math.PI / 2 + (i / items.length) * Math.PI * 2;
+        const a = -Math.PI / 2 + (i / slots.length) * Math.PI * 2;
+        const can = isAvailable(c, state);
         const cos = Math.cos(a);
         // Hang each item away from the center: the right ones start at the ring, the left ones end there.
         const hang = Math.abs(cos) < 0.2 ? -50 : cos > 0 ? 0 : -100;
@@ -224,9 +234,11 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
             key={c.id}
             role="menuitem"
             className={`radial__item ${c.on?.(state) ? "is-on" : ""}`}
+            disabled={!can}
+            title={can ? c.hint : (whyUnavailable(c, state) ?? undefined)}
             style={{ transform: `translate(calc(${cos * R}px + ${hang}%), ${Math.sin(a) * R}px)`, animationDelay: `${i * 14}ms` }}
             onClick={() => {
-              if (performance.now() < touchGuard.until) return;
+              if (!can || performance.now() < touchGuard.until) return;
               close();
               c.run();
             }}
@@ -237,6 +249,42 @@ function RadialMenu({ x, y, ids }: { x: number; y: number; ids: string[] }) {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** The right-click menu as a plain list at the pointer: everything that applies, with its key. */
+function ContextList({ x, y, ids, close }: { x: number; y: number; ids: string[]; close: () => void }) {
+  const state = useApp();
+  const items = ids.map(commandById).filter((c): c is Command => !!c && isAvailable(c, state));
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const away = (e: PointerEvent) => !(e.target as HTMLElement).closest?.(".ctxlist") && close();
+    window.addEventListener("keydown", k, true);
+    window.addEventListener("pointerdown", away, true);
+    return () => (window.removeEventListener("keydown", k, true), window.removeEventListener("pointerdown", away, true));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const host = document.querySelector(".viewport");
+  const left = host ? Math.min(x, host.clientWidth - 240) : x;
+  const top = host ? Math.min(y, host.clientHeight - 36 * items.length - 16) : y;
+  return (
+    <div className="menu ctxlist" style={{ left, top }} role="menu" aria-label="Actions">
+      {items.map((c) => (
+        <button
+          key={c.id}
+          role="menuitem"
+          className={c.id === "delete" ? "danger" : ""}
+          onClick={() => {
+            if (performance.now() < touchGuard.until) return;
+            close();
+            c.run();
+          }}
+        >
+          <Icon name={c.icon ?? "more"} size={16} />
+          <span className="menu__text">{c.label}</span>
+          {c.keys && <kbd>{c.keys}</kbd>}
+        </button>
+      ))}
     </div>
   );
 }
@@ -443,6 +491,7 @@ function StartCard() {
   const state = useApp();
   const ways = nextSteps(state).map((x) => ({ ...x, c: commandById(x.id) })).filter((x) => x.c && isAvailable(x.c, state));
   const ai = commandById("assistant");
+  const hasProvider = useAi((s) => s.settings.providers.length > 0);
   return (
     <div className="startcard" role="region" aria-label="Start your design">
       <h2>Start your part</h2>
@@ -457,7 +506,8 @@ function StartCard() {
         ))}
       </div>
       <p className="startcard__more">
-        {ai && isAvailable(ai, state) && (
+        {/* Offered only once a provider is set up; until then it is in Help and Settings (audit U-19). */}
+        {ai && isAvailable(ai, state) && hasProvider && (
           <>
             <button className="link" onClick={() => ai.run()}>
               Describe it to the AI assistant
@@ -477,6 +527,10 @@ export function ViewportView() {
   const [sketchUI, setSketchUI] = useState<SketchUIState | null>(null);
   const [, setCamTick] = useState(0);
   const [typing, setTyping] = useState<{ key: "a" | "b"; text: string } | null>(null);
+  const typingRef = useRef(typing);
+  typingRef.current = typing;
+  /** The latest ways to apply a typed size and find the other size field, for key handlers set up once. */
+  const typed = useRef({ apply: (_k: "a" | "b", _t: string) => {}, other: (_k: "a" | "b"): "a" | "b" | null => null });
   const cameraListeners = useMemo(() => new Set<() => void>(), []);
   const tick = useMemo(() => ({ subscribe: (fn: () => void) => (cameraListeners.add(fn), () => void cameraListeners.delete(fn)) }), [cameraListeners]);
 
@@ -493,6 +547,7 @@ export function ViewportView() {
   const selectedEntity = useApp((s) => s.selectedEntity);
   const sketchSel = useApp((s) => s.sketchSel);
   const sketchView = useApp((s) => s.sketchView);
+  const hoverGeom = useApp((s) => s.hoverGeom);
   const priority = useApp((s) => s.pickPriority);
   const viewRequest = useApp((s) => s.viewRequest);
   const regenBusy = useApp((s) => s.regenBusy);
@@ -738,10 +793,24 @@ export function ViewportView() {
     vp.setPlanesVisible(mode.kind === "pickPlane");
   }, [vp, mode, session, sessionFeature, priority]);
 
+  // A lesson that asks for one plane lights that plane while picking (audit B-2).
+  const coach = useApp((s) => s.coach);
+  useEffect(() => {
+    vp?.setPreferredPlane(mode.kind === "pickPlane" ? lessonPlane(useApp.getState()) : null);
+  }, [vp, mode, coach, doc]);
+
   // The grid steps in the design's own unit (audit U-2).
   useEffect(() => {
     vp?.setGridUnits(LENGTH_TO_MM[doc.units], doc.units === "in" || doc.units === "ft");
   }, [vp, doc.units]);
+
+  // A sketch on a model face is framed on that face, not on the whole model, so a small face isn't a strip in an
+  // empty grid (audit B-6).
+  const faceFit = () => {
+    const sk = mode.kind === "sketch" ? findFeature(useApp.getState().doc, mode.sketchId, "sketch") : undefined;
+    const face = sk?.plane.kind === "face" ? sk.plane.face : undefined;
+    return face?.area && !sk!.entities.length && !sk!.geometry?.length ? { radius: Math.sqrt(face.area) * 0.75, center: face.center } : undefined;
+  };
 
   // Sketch editing frame.
   const pendingNormal = useRef(false);
@@ -750,7 +819,7 @@ export function ViewportView() {
     vp.setSketchFrame(frame);
     if (frame && pendingNormal.current) {
       pendingNormal.current = false;
-      vp.viewNormal(frame);
+      vp.viewNormal(frame, faceFit());
     }
   }, [vp, frame?.id, frame?.origin.join(), frame?.normal.join()]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -759,6 +828,20 @@ export function ViewportView() {
     else controller.reset();
     setTyping(null);
   }, [controller, mode]);
+
+  // The 3D view from before a sketch opened comes back when it closes, so finishing a sketch doesn't leave the
+  // model seen flat from above (audit U-10). A view the person chose while sketching is theirs to keep.
+  const before = useRef<ReturnType<Viewport["getCamera"]> | null>(null);
+  const sketchOpen = mode.kind === "sketch" ? mode.sketchId : null;
+  useEffect(() => {
+    if (!vp) return;
+    if (sketchOpen) {
+      before.current ??= vp.getCamera();
+      return;
+    }
+    if (before.current && mode.kind === "model") vp.setCamera(before.current);
+    before.current = null;
+  }, [vp, sketchOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Slice: while sketching, cut the model away at the sketch plane. Restores the view it replaced when it stops.
   const slice = useApp((s) => s.sketchView.slice);
@@ -775,7 +858,7 @@ export function ViewportView() {
   useEffect(() => {
     if (!vp || !viewRequest) return;
     if (viewRequest.kind === "normal") {
-      if (frame) vp.viewNormal(frame);
+      if (frame) vp.viewNormal(frame, faceFit());
       else pendingNormal.current = true;
     } else vp.viewTo(viewRequest.kind);
   }, [vp, viewRequest]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -827,7 +910,7 @@ export function ViewportView() {
       for (const g of resolveGeometry(f, sol)) {
         const tone = !active ? undefined : bad.has(g.id) ? "bad" : defined.has(g.id) ? "defined" : "free";
         const isSel = active ? sketchSel.includes(g.id) : selected || inLoft;
-        const isHover = active ? g.id === sketchUI?.hoverEntity : hovered;
+        const isHover = active ? g.id === sketchUI?.hoverEntity || hoverGeom.includes(g.id) : hovered;
         if (g.type === "point") {
           if (active && sketchView.points) markers.push({ p: g.p, tone: tone!, selected: isSel, hovered: isHover });
           continue;
@@ -845,7 +928,7 @@ export function ViewportView() {
       list.push({ id: f.id, frame: fr, active, shapes, markers, regions, profile: !!profileOf, fill: (active ? sketchView.shading : selected || inLoft) || (!!profileOf && !profileOf.regions?.length) || !isSketchConsumed(doc, f.id) ? fr.fill : undefined });
     }
     vp.setSketches(list);
-  }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, sessionFeature, sketchView.points, sketchView.shading]);
+  }, [vp, regen, doc, sketchId, selection, hover, selectedEntity, sketchSel, sketchUI?.hoverEntity, hoverGeom, sessionFeature, sketchView.points, sketchView.shading]);
 
   // Interference boxes.
   const interference = useApp((s) => s.interference);
@@ -961,18 +1044,37 @@ export function ViewportView() {
 
   // Keyboard routing for sketch tools and typed dimensions.
   useEffect(() => {
+    // Keys that arrive before the size box has taken focus (fast typing, a busy rebuild) are added to what was
+    // typed, in order, never replacing it (audit B-3).
+    const setT = (t: { key: "a" | "b"; text: string } | null) => {
+      typingRef.current = t;
+      setTyping(t);
+      if (t) typed.current.apply(t.key, t.text);
+    };
     sketchKeys.handle = (e) => {
       if (mode.kind !== "sketch") return false;
       if (e.key === "Escape" && useImagePick.getState().kind) {
         cancelImagePick();
         return true;
       }
+      const cur = typingRef.current;
+      if (cur && e.key === "Enter" && controller.busy) {
+        typed.current.apply(cur.key, cur.text);
+        setT(null);
+        return controller.key(new KeyboardEvent("keydown", { key: "Enter" }));
+      }
       return controller.key(e);
     };
     sketchKeys.typeDigit = (key) => {
       if (mode.kind !== "sketch" || !controller.busy || !/^([0-9.]|Tab)$/.test(key) || !controller.typable) return false;
-      // Tab opens the first size field, digits open it with that first digit.
-      setTyping({ key: "a", text: key === "Tab" ? "" : key });
+      const cur = typingRef.current;
+      if (key === "Tab") {
+        // Tab opens the first size field; with one open it keeps that value and moves to the next.
+        const other = cur && typed.current.other(cur.key);
+        setT(cur ? (other ? { key: other, text: "" } : cur) : { key: "a", text: "" });
+        return true;
+      }
+      setT(cur ? { key: cur.key, text: cur.text + key } : { key: "a", text: key });
       return true;
     };
     return () => {
@@ -982,14 +1084,18 @@ export function ViewportView() {
   }, [controller, mode.kind]);
 
   const unitFactor = LENGTH_TO_MM[doc.units];
-  const applyTyped = (key: "a" | "b", text: string) => {
+  typed.current = {
+    apply: (k, t) => applyTyped(k, t),
+    other: (k) => (sketchUI?.dims.find((d) => d.key !== k)?.key as "a" | "b" | undefined) ?? null,
+  };
+  function applyTyped(key: "a" | "b", text: string) {
     const dim = sketchUI?.dims.find((d) => d.key === key);
     const isAngle = dim?.label === "∠";
     // The conic's ρ is a plain ratio, not a length (audit W-8). Formulas and parameters work here too (W-9).
     const plain = dim?.label === "ρ";
     const r = text.trim() ? documentEvaluator(useApp.getState().doc).eval(text, isAngle ? "angle" : plain ? "number" : "length") : null;
     controller.setTyped(key, r?.ok ? (isAngle ? (r.value * 180) / Math.PI : r.value) : undefined);
-  };
+  }
 
   // Snap marker & dimension positions (recomputed each render; camera changes re-render via camTick).
   const snapScreen = sketchUI?.snap && frame ? vp?.sketchToScreen(sketchUI.snap.p, frame) : null;
@@ -1047,7 +1153,8 @@ export function ViewportView() {
       <InlinePrompt />
       {session && mode.kind === "model" && <MissingRefs vp={vp} feature={sessionFeature} regen={regen} />}
 
-      {kernelReady && mode.kind === "model" && !session && doc.features.length === 0 && <StartCard />}
+      {/* A running lesson already says what to do, so the start card waits (audit B-5). */}
+      {kernelReady && mode.kind === "model" && !session && doc.features.length === 0 && !coach && <StartCard />}
       <HoverInfo />
 
       {mode.kind === "pickPlane" && (

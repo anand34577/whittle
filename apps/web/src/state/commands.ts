@@ -52,7 +52,7 @@ import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type Construct
 import { stretchSelection, breakSelection, gridPatternSelection, circularPatternSelection, moveSelection, scaleSelection, deleteSketchSelection, startConstraint, makeConstrainable, autoConstrainSketch, copySketchSelection, pasteSketchClip, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { intersectIntoSketch } from "./sectionCurves";
-import { copySteps, folderSteps, pasteSteps } from "./steps";
+import { copySteps, folderSteps, pasteSteps, renameSelection } from "./steps";
 import { clearInterference, colorByComponent, makeComponent, runGeometryCheck, runInterference, runMinRadius, toggleGround } from "./inspect";
 import { THEMES } from "./prefs";
 import {
@@ -336,7 +336,7 @@ export const COMMANDS: Command[] = [
   { id: "tool-sfillet", label: "Sketch fillet", short: "Fillet", group: "Sketch", icon: "fillet", keywords: "round corner radius arc blend", hint: "Click a corner where two lines meet, then type the radius", when: inSketch, run: () => setSketchTool("sfillet") },
   { id: "tool-schamfer", label: "Sketch chamfer", short: "Chamfer", group: "Sketch", icon: "chamfer", keywords: "bevel cut corner", hint: "Click a corner where two lines meet, then type the distance", when: inSketch, run: () => setSketchTool("schamfer") },
   { id: "tool-gpoint", label: "Point", group: "Sketch", icon: "point", keywords: "dot marker datum construction", hint: "Click to place a point you can dimension and constrain to", when: inSketch, run: () => setSketchTool("gpoint") },
-  { id: "make-constrainable", label: "Make constrainable", short: "Constrain", group: "Sketch", icon: "link", keywords: "convert dimension constraint lines geometry trim fillet parametric", hint: "Turn this shape into lines and arcs you can dimension, constrain, trim and fillet", when: (s) => hasEntity(s) && s.selectedEntity !== null, run: () => makeConstrainable() },
+  { id: "make-constrainable", label: "Split into lines and arcs", short: "Split", group: "Sketch", icon: "link", keywords: "convert dimension constraint constrainable lines geometry trim fillet parametric explode", hint: "Turn this shape into lines and arcs you can dimension, constrain, trim and fillet", when: (s) => hasEntity(s) && s.selectedEntity !== null, run: () => makeConstrainable() },
   { id: "auto-constrain", label: "AutoConstrain", group: "Sketch", icon: "coincident", keywords: "auto constrain join ends coincident horizontal vertical fix tidy lock", hint: "Join touching ends and set level lines horizontal or vertical, in one step", when: inSketch, run: () => autoConstrainSketch() },
   { id: "geo-move", label: "Move geometry", short: "Move", group: "Sketch", icon: "move", keywords: "translate shift stretch reposition numeric", hint: "Select geometry, then type how far to move it", when: hasGeometry, run: () => void moveSelection(false) },
   { id: "geo-copy", label: "Copy geometry", short: "Copy", group: "Sketch", icon: "duplicate", keywords: "duplicate clone offset translate", hint: "Select geometry, then type how far to place the copy", when: hasGeometry, run: () => void moveSelection(true) },
@@ -421,6 +421,21 @@ export const COMMANDS: Command[] = [
       if (id) void confirmDeleteFeature(id);
     },
   },
+  { id: "rename", label: "Rename", group: "Edit", icon: "edit", keys: "F2", keywords: "name title call label", hint: "Rename the selected body, or the step picked in the timeline", when: (s) => s.mode.kind === "model" && !s.session, run: renameSelection },
+  {
+    id: "body-appearance",
+    label: "Color and finish",
+    group: "View",
+    icon: "palette",
+    keywords: "colour color paint appearance finish look matte gloss metal shiny",
+    hint: "Pick a body's color and finish in the properties panel",
+    when: (s) => s.mode.kind === "model" && (s.regen?.bodies.length ?? 0) > 0,
+    run: () => {
+      const s = get();
+      if (!s.selection.some((p) => "bodyId" in p)) useApp.setState({ selection: [{ kind: "body", bodyId: s.regen!.bodies[0]!.id }] });
+      useApp.setState({ panelOpen: true });
+    },
+  },
   {
     id: "hide",
     label: "Hide body",
@@ -485,6 +500,36 @@ export const COMMANDS: Command[] = [
   { id: "coach", label: "Lessons", group: "Help", icon: "sparkStep", keywords: "tutorial learn tour help getting started guided first part lesson course teach", hint: "Short hands-on lessons that check off as you go", run: () => useApp.setState({ coach: "pick", panel: null }) },
   { id: "welcome", label: "Start screen & templates", short: "Templates", group: "Help", icon: "home", keywords: "examples samples templates", run: () => useApp.setState({ panel: "welcome" }) },
 ];
+
+/**
+ * Everyday words people type for the common commands, on top of each command's own (audit U-17): the search should
+ * understand "round corners", "make it hollow" and "save as STL", not only the command's name.
+ */
+export const EVERYDAY_WORDS: Record<string, string> = {
+  fillet: "round corners corner soften smooth curve curved",
+  chamfer: "bevel corners",
+  shell: "hollow out empty inside thin walls",
+  hole: "cut drill opening bore through",
+  extrude: "thicker taller raise lift grow solid 3d",
+  "press-pull": "thicker thinner longer shorter",
+  revolve: "spin turn lathe round vase",
+  export: "save download share send file",
+  "export-stl": "save download file",
+  "export-3mf": "save download file",
+  "export-step": "save download file",
+  "view-home": "camera move orbit look around turn rotate view reset",
+  "view-fit": "camera zoom see everything whole all",
+  combine: "add together merge weld glue",
+  move: "shift drag position",
+  scale: "size",
+  settings: "inch inches millimetres millimeters metric imperial",
+  params: "sizes numbers values",
+  undo: "back revert mistake oops",
+  delete: "remove erase",
+  "component-colors": "color colour",
+  sketch: "draw drawing outline 2d",
+};
+for (const c of COMMANDS) if (EVERYDAY_WORDS[c.id]) c.keywords = `${c.keywords ?? ""} ${EVERYDAY_WORDS[c.id]}`;
 
 COMMANDS.push(
   { id: "curve-3d", label: "3D sketch (curve through points)", short: "3D sketch", group: "Create", icon: "curve3d", keywords: "3d curve spline wire path points space rail", hint: "Click points on the model; a curve runs through them", when: NEEDS_BODY, run: model(() => startCurve("points")) },
@@ -612,6 +657,7 @@ export function commandForKey(e: KeyboardEvent, s: AppState): string | null {
   if (e.altKey) return null;
   if (e.key === "Delete" || e.key === "Backspace") return "delete";
   if (e.key === "?") return "shortcuts";
+  if (e.key === "F2") return "rename";
   const classic = s.prefs.keys === "classic";
   // Fit works in a sketch too: a shape dimensioned bigger than the screen needs it most.
   if (e.shiftKey && k === "h") return "view-fit";

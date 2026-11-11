@@ -109,17 +109,25 @@ await step("03-draw-and-offset", async () => {
   expect(sk.constraints.filter((c) => c.type === "parallel").length === 4, "parallel to their originals", sk.constraints);
 });
 
+/** The copy tools for selected geometry sit in a fold-out in the sketch panel. */
+async function openCopyTools() {
+  const head = page.getByRole("button", { name: /Copy, mirror and repeat/ }).first();
+  if ((await head.getAttribute("aria-expanded")) === "false") await head.click();
+}
+
 await step("04-mirror-and-pattern", async () => {
   let sk = await sketchInfo();
   const mine = geomIds(sk).slice(-8, -4);
   await select(mine);
   const before = count(sk, "line");
+  await openCopyTools();
   await page.getByRole("button", { name: /Mirror ↕/ }).first().click();
   await waitBuilt();
   sk = await sketchInfo();
   expect(count(sk, "line") === before + 4, "mirrored copy", count(sk, "line"));
   expect(sk.constraints.some((c) => c.type === "symmetric"), "held symmetric", sk.constraints);
   await select(mine);
+  await openCopyTools();
   await page.getByRole("button", { name: /Row →/ }).first().click();
   await waitBuilt();
   sk = await sketchInfo();
@@ -176,7 +184,8 @@ await step("06-offset-tool-drag", async () => {
 await step("07-dimension-placed-by-click", async () => {
   // The Dimension tool: pick the edge, move to where the dimension goes, click, then the value box opens there.
   await setTool("dimension");
-  await click(250, -120);
+  // On the bottom edge, to the left of its "H" glyph (the glyph takes clicks on itself).
+  await click(222, -120);
   await page.mouse.move(...at(270, -70), { steps: 5 });
   expect((await page.locator(".cmark--placing").count()) === 1, "the dimension follows the pointer", {});
   expect((await page.locator(".inline-prompt").count()) === 0, "no value box until it is placed", {});

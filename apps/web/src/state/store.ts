@@ -162,6 +162,10 @@ export interface AppState {
   sketchView: SketchViewSettings;
   /** Which ribbon tab shows outside a sketch. */
   ribbonTab: "solid" | "surface" | "tools";
+  /** The parameter the Parameters dialog should put the cursor in when it opens. */
+  focusParam?: string | null;
+  /** Sketch geometry a panel row points at (a constraint's lines, say), lit in the view. */
+  hoverGeom: Id[];
   /** Frame the model once the next rebuild arrives (after inserting things). */
   fitOnRegen: boolean;
   /** What a click selects in the model: anything, or only bodies, faces or edges. */
@@ -198,6 +202,7 @@ export const useApp = create<AppState>(() => ({
   view: { display: "edges", section: null, analysis: null, grid: true, ortho: false },
   sketchView: DEFAULT_SKETCH_VIEW,
   ribbonTab: "solid",
+  hoverGeom: [],
   measure: [],
   radial: null,
   panel: null,
@@ -308,7 +313,12 @@ export function undo() {
   const { session } = get();
   if (session) {
     const prev = session.stack[session.stack.length - 1];
-    if (!prev) return cancelSession();
+    if (!prev) {
+      // Undo past the first change of an open step leaves it: say so, so the change of mode isn't a surprise (audit B-12).
+      const name = findFeature(session.base, session.featureId)?.name ?? findFeature(get().doc, session.featureId)?.name ?? "the step";
+      cancelSession();
+      return toast("info", session.isNew ? `Nothing left to undo in the new ${name}, so it was removed.` : `Stopped editing ${name}; it is as it was.`);
+    }
     set({ doc: prev.doc, session: { ...session, stack: session.stack.slice(0, -1) }, selectedEntity: null });
     return;
   }
@@ -379,10 +389,26 @@ export function editFeature(id: Id) {
  * Apply the open feature. A new one still waiting for its picks (no edges, no face...) is never kept as a broken
  * step: OK (`explicit`) says what's missing and stays open, and anything else that ends the session drops it.
  */
-export function commitSession(explicit = false) {
+/**
+ * Apply the open step. `explicit`: the person pressed Enter or OK. `keepFailed`: they chose to keep a step that
+ * doesn't build; without it, Enter and OK on a failing step say why instead of quietly adding it (audit U-12).
+ */
+export function commitSession(explicit = false, keepFailed = false) {
   const { session, doc, regen, builtDoc } = get();
   if (!session) return;
-  const st = session.isNew && builtDoc === doc ? regen?.status.find((x) => x.id === session.featureId) : undefined;
+  const live = builtDoc === doc ? regen?.status.find((x) => x.id === session.featureId) : undefined;
+  const st = session.isNew ? live : undefined;
+  const name = findFeature(doc, session.featureId)?.name ?? "This step";
+  if (explicit && !keepFailed && live?.state === "error") {
+    const fix = live.fix;
+    return toast(
+      "error",
+      `${name} can't be built yet: ${live.message ?? "it fails"}`,
+      fix
+        ? { label: fix.label, run: () => updateFeature(session.featureId, fix.label, (d) => void ((d as unknown as Record<string, string>)[fix.field] = fix.value)) }
+        : { label: "Keep anyway", run: () => commitSession(true, true) },
+    );
+  }
   // The rebuild may have included an edge the pointer only rests on (the hover preview), so a new fillet or
   // chamfer with no picked edges is judged here, not by that rebuild (audit W-10).
   const now = findFeature(doc, session.featureId);
@@ -400,6 +426,8 @@ export function commitSession(explicit = false) {
   }
   if (doc === session.base) return;
   commitFinal(session, doc);
+  // A failing step that is kept (or left by starting something else) says so once more, with a way back to it.
+  if (live?.state === "error") toast("error", `${name} couldn't be built. It is marked red in the timeline.`, { label: "Edit", run: () => editFeature(session.featureId) });
 }
 
 function commitFinal(session: Session, doc: WhittleDocument) {
@@ -595,6 +623,8 @@ export function isNarrow(): boolean {
 }
 
 export function toast(kind: Toast["kind"], text: string, action?: Toast["action"], nextStep?: boolean) {
+  // While a lesson runs, its card says what to do next; a second voice saying it again is noise (audit S-1).
+  if (nextStep && get().coach) return;
   const id = ++toastId;
   set({ toasts: [...get().toasts.slice(-3), { id, kind, text, action, nextStep }] });
   // A longer message (a refusal and its reason) stays up long enough to read.

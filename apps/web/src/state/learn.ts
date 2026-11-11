@@ -42,3 +42,13 @@ export function recentCommands(): string[] {
 export function noteRun(id: string) {
   write("whittle.recent", [id, ...recentCommands().filter((x) => x !== id)].slice(0, 8));
 }
+
+/** The "How it works" card opens the first time a tool is used, then stays folded (audit S-3). */
+export function guideSeen(type: string): boolean {
+  return read("whittle.guidesSeen").includes(type);
+}
+
+export function noteGuideSeen(type: string) {
+  const seen = read("whittle.guidesSeen");
+  if (!seen.includes(type)) write("whittle.guidesSeen", [...seen, type]);
+}

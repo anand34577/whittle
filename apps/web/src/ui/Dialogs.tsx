@@ -29,15 +29,16 @@ import {
 } from "../state/files";
 import { apiJson, ask, invoke } from "../state/platform";
 import { exportParametersCsv, importParametersCsv, sendToSlicer } from "../state/files";
-import { mutate, selectedBodyId, setPrefs, useApp } from "../state/store";
+import { mutate, selectedBodyId, setPrefs, toast, useApp } from "../state/store";
 import { promptDialog } from "../state/dialogs";
 import { TEMPLATES } from "../state/templates";
-import { LESSONS, lessonById } from "../state/lessons";
-import { NAV_PRESETS } from "../state/prefs";
+import { LESSONS, lessonById, lessonProgress, lessonsDone, untickLesson } from "../state/lessons";
+import { NAV_PRESETS, PROFILES } from "../state/prefs";
+import { applyProfile } from "./Settings";
 import { Icon } from "./icons";
 import { Checkbox, Select } from "./controls";
-import { ProfilePicker } from "./Settings";
 import { Modal } from "./Modal";
+import { DeferredInput } from "./DeferredInput";
 import { Spinner } from "./feedback";
 export { Modal };
 import type { DrawingSettings, ExportFormat } from "@whittle/kernel";
@@ -77,6 +78,9 @@ const KIND_OPTIONS: { value: QuantityKind; label: string; hint: string }[] = [
 
 export function ParamsDialog() {
   const doc = useApp((s) => s.doc);
+  // Opened from one parameter (the browser, the search): the cursor waits in its value (audit U-3).
+  const [focusId] = useState(() => useApp.getState().focusParam ?? null);
+  useEffect(() => () => useApp.setState({ focusParam: null }), []);
   const ev = useMemo(() => documentEvaluator(doc), [doc]);
   const [draft, setDraft] = useState<{ name: string; expr: string; kind: QuantityKind }>({ name: "", expr: "", kind: "length" });
   const nameError = draft.name ? validateParamName(draft.name, doc.parameters) : null;
@@ -85,7 +89,10 @@ export function ParamsDialog() {
 
   const update = (id: string, patch: Partial<Parameter>) =>
     mutate(
-      "Edit parameter",
+      (() => {
+        const p = doc.parameters.find((x) => x.id === id);
+        return p && patch.expr !== undefined ? `${p.name} ${p.expr} → ${patch.expr}` : `Edit ${p?.name ?? "parameter"}`;
+      })(),
       (d) => {
         const p = d.parameters.find((x) => x.id === id);
         if (p) Object.assign(p, patch);
@@ -127,23 +134,24 @@ export function ParamsDialog() {
               </label>
               <label className="ptable__cell">
                 <small className="ptable__label">Value or formula</small>
-                <input className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onChange={(e) => update(p.id, { expr: e.target.value })} aria-label="Formula" title={v?.error} />
+                <DeferredInput className={`input mono ${v?.ok ? "" : "is-error"}`} value={p.expr} onCommit={(expr) => update(p.id, { expr })} aria-label="Formula" title={v?.error} autoFocus={p.id === focusId} />
               </label>
               <Select<QuantityKind> size="sm" ariaLabel="Kind" value={p.kind} onChange={(v) => update(p.id, { kind: v })} options={KIND_OPTIONS} />
               <span className={`mono ptable__result ${v?.ok ? "" : "is-error"}`} title={v?.error}>
                 {v?.ok ? formatQuantity(v.value, p.kind, doc.units) : v?.error ?? ""}
                 {v?.ok && n === 0 && <small className="ptable__unused" title="Nothing uses it yet: type its name in any field, or delete it">unused</small>}
+                {v?.ok && n > 0 && <small className="ptable__used">used {n === 1 ? "once" : `${n} times`}</small>}
               </span>
               <label className="ptable__cell">
                 <small className="ptable__label">Note</small>
-                <input className="input" placeholder={n ? `Used ${n}\u00d7` : "Unused"} value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
+                <input className="input" placeholder="Add a note" value={p.comment ?? ""} onChange={(e) => update(p.id, { comment: e.target.value })} aria-label="Note" />
               </label>
               <span className="ptable__acts">
               <button
                 className={`iconbtn ${p.favorite ? "is-on" : ""}`}
-                aria-label={p.favorite ? `Unstar ${p.name}` : `Star ${p.name}`}
+                aria-label={p.favorite ? `Unpin ${p.name}` : `Pin ${p.name}`}
                 aria-pressed={!!p.favorite}
-                title={p.favorite ? "Starred: listed first and editable from the properties panel" : "Star: list it first and edit it from the properties panel"}
+                title={p.favorite ? "Pinned: listed first, and editable from the properties panel. Click to unpin" : "Pin: list it first, and edit it from the properties panel"}
                 onClick={() => update(p.id, { favorite: !p.favorite || undefined })}
               >
                 <Icon name={p.favorite ? "starOn" : "star"} size={16} />
@@ -151,7 +159,7 @@ export function ParamsDialog() {
               <button
                 className="iconbtn"
                 aria-label={`Delete ${p.name}`}
-                title={n ? `Used by ${n} feature(s)` : "Delete"}
+                title={n ? `Delete (used ${n === 1 ? "once" : `${n} times`})` : "Delete"}
                 onClick={async () => {
                   if (n && !(await ask({ title: `Delete ${p.name}?`, message: `${p.name} is used ${n} time${n > 1 ? "s" : ""} in this design. Formulas that use it will show an error until you change them.`, confirmLabel: "Delete", danger: true }))) return;
                   mutate("Delete parameter", (d) => {
@@ -688,6 +696,22 @@ function RecentLibrary() {
   );
 }
 
+const SHORT_PROFILE: Record<string, string> = { beginner: "Newcomer", maker: "Maker", engineer: "Engineer", designer: "Designer", educator: "Teaching" };
+
+/** First run: who Whittle is tuned for, as one quiet row that can be ignored. */
+function ProfileRow() {
+  return (
+    <div className="profilerow" role="group" aria-label="Tune Whittle for">
+      <span className="muted">Tune Whittle for:</span>
+      {PROFILES.map((p) => (
+        <button key={p.id} type="button" className="btn btn--small btn--ghost" title={p.blurb} aria-label={p.label} onClick={() => applyProfile(p.id, true)}>
+          <Icon name={p.icon} size={14} /> {SHORT_PROFILE[p.id] ?? p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Welcome() {
   const [recovered, setRecovered] = useState<Awaited<ReturnType<typeof readAutosave>>>(null);
   const who = useApp((s) => (s.platform.kind === "server" ? (s.platform.user?.id ?? "-") : s.platform.kind));
@@ -697,23 +721,16 @@ export function Welcome() {
   }, [ready, who]);
   const platform = useApp((s) => s.platform.kind);
   const profile = useApp((s) => s.prefs.profile);
-  const [asked, setAsked] = useState(false);
+  const unit = useApp((s) => (s.prefs.units === "in" ? "in" : "mm"));
   const close = () => useApp.setState({ panel: null });
-  if (profile === null && !asked) {
-    return (
-      <Modal title="Welcome to Whittle" wide onClose={close}>
-        <ProfilePicker onDone={() => setAsked(true)} />
-      </Modal>
-    );
-  }
-  // Newcomers and classes see the guided start first.
-  const guided = profile === "beginner" || profile === "educator";
+  // Newcomers, classes and anyone who hasn't said yet see the guided start near the top, until they've done it.
+  const guided = (profile === null || profile === "beginner" || profile === "educator") && !lessonsDone().includes("first");
   const firstPart = (
     <button
-      className={`start-card start-card--learn ${guided ? "start-card--primary" : ""}`}
+      className={`start-card start-card--learn ${guided && !recovered ? "start-card--primary" : ""}`}
       onClick={() =>
         void newDesign("mm", "My first part").then((ok) => {
-          if (ok) (untick("first"), useApp.setState({ coach: "first", panel: null }));
+          if (ok) (untickLesson("first"), useApp.setState({ coach: "first", panel: null }));
         })
       }
     >
@@ -726,33 +743,14 @@ export function Welcome() {
   );
   return (
     <Modal title="Welcome to Whittle" wide onClose={close}>
+      {/* The profile is an offer, not a gate: the start screen is there from the first moment (audit S-4). */}
+      {profile === null && <ProfileRow />}
       <div className="welcome">
         <section className="welcome__start">
           <h3 className="eyebrow">Start</h3>
-          {guided && firstPart}
-          <button className={`start-card ${guided ? "" : "start-card--primary"}`} onClick={() => void newDesign("mm")}>
-            <Icon name="file" />
-            <span>
-              <b>New design</b>
-              <small>Millimetres</small>
-            </span>
-          </button>
-          <button className="start-card" onClick={() => void newDesign("in")}>
-            <Icon name="file" />
-            <span>
-              <b>New design</b>
-              <small>Inches</small>
-            </span>
-          </button>
-          <button className="start-card" onClick={() => void openFromComputer()}>
-            <Icon name="folder" />
-            <span>
-              <b>{platform === "server" ? "Open from this computer" : "Open a file"}</b>
-              <small>.whittle</small>
-            </span>
-          </button>
+          {/* Work that would otherwise be lost comes first (audit B-9). */}
           {recovered && (
-            <button className="start-card start-card--recover" onClick={() => void loadDocumentConfirm(recovered.doc, recovered.fileName, true)}>
+            <button className="start-card start-card--recover start-card--primary" onClick={() => void loadDocumentConfirm(recovered.doc, recovered.fileName, true)}>
               <Icon name="undo" />
               <span>
                 <b>Continue where you left off</b>
@@ -763,6 +761,30 @@ export function Welcome() {
               </span>
             </button>
           )}
+          {guided && firstPart}
+          <div className={`start-card start-card--split ${guided || recovered ? "" : "start-card--primary"}`}>
+            <button className="start-card__main" onClick={() => void newDesign(unit)}>
+              <Icon name="file" />
+              <span>
+                <b>New design</b>
+                <small>{unit === "in" ? "Inches" : "Millimetres"}</small>
+              </span>
+            </button>
+            <span className="unitswitch" role="group" aria-label="Units for the new design">
+              {(["mm", "in"] as const).map((u) => (
+                <button key={u} type="button" aria-pressed={unit === u} className={unit === u ? "is-on" : ""} onClick={() => setPrefs({ units: u })}>
+                  {u}
+                </button>
+              ))}
+            </span>
+          </div>
+          <button className="start-card" onClick={() => void openFromComputer()}>
+            <Icon name="folder" />
+            <span>
+              <b>{platform === "server" ? "Open from this computer" : "Open a file"}</b>
+              <small>.whittle</small>
+            </span>
+          </button>
           <button className="start-card" onClick={() => useApp.setState({ panel: "parts" })}>
             <Icon name="library" />
             <span>
@@ -779,7 +801,17 @@ export function Welcome() {
             <h3 className="eyebrow">Templates: real, editable designs</h3>
             <div className="tpl-grid">
               {TEMPLATES.map((t) => (
-                <button key={t.id} className="tpl" onClick={() => void loadDocumentConfirm(t.build(), null)}>
+                <button
+                  key={t.id}
+                  className="tpl"
+                  onClick={() =>
+                    void loadDocumentConfirm(t.build(), null).then((ok) => {
+                      // A template's promise is "change one number": point at the number (audit U-4).
+                      const first = ok && (useApp.getState().doc.parameters.find((p) => p.favorite) ?? useApp.getState().doc.parameters[0]);
+                      if (first) toast("info", `Try it: click ${first.name} in Parameters on the left and change it. The whole part follows.`, undefined, true);
+                    })
+                  }
+                >
                   <span className="tpl__art">
                     <TemplateArt id={t.id} />
                   </span>
@@ -865,17 +897,11 @@ export function VersionsDialog() {
 
 /* ───────────────────────────── Guided first part ───────────────────────────── */
 
-/** Steps stay ticked once done in order (closing a panel never unticks one). */
-const ticked = new Set<string>();
-/** A lesson started again starts with nothing ticked (audit G-2). */
-const untick = (id: string) => {
-  for (const k of [...ticked]) if (k.startsWith(`${id}:`)) ticked.delete(k);
-};
 
 const startLesson = (id: string) =>
   void newDesign("mm", lessonById(id)?.title).then((ok) => {
     if (!ok) return;
-    untick(id);
+    untickLesson(id);
     useApp.setState({ coach: id, panel: null });
   });
 
@@ -909,14 +935,7 @@ export function Coach() {
       </aside>
     );
   }
-  let before = true;
-  const done = lesson.steps.map((st, i) => {
-    const key = `${lesson.id}:${i}`;
-    if (!ticked.has(key) && before && st.done(s)) ticked.add(key);
-    before = ticked.has(key);
-    return before;
-  });
-  const current = done.indexOf(false);
+  const { done, current } = lessonProgress(s)!;
   const next = LESSONS[LESSONS.indexOf(lesson) + 1];
   return (
     <aside className="coach" aria-label={lesson.title}>

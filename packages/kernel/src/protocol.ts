@@ -87,6 +87,8 @@ export interface FeatureStatus {
   state: FeatureState;
   message?: string;
   fix?: FeatureFix;
+  /** Worth knowing but not wrong (one body in several pieces, say): listed under Problems as a note, the step stays ok. */
+  note?: string;
   ms?: number;
   /** Boundary Fill: the cells the tool bodies were cut into. */
   cells?: { volume: number; center: Vec3 }[];

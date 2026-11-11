@@ -89,7 +89,7 @@ await step("02-draw-solver-lines", async () => {
   expect(sk.geometry.filter((g) => g.type === "point").length === 4, "corners are shared points", sk.geometry);
   expect(hv.length === 4, "level lines got Horizontal / Vertical", sk.constraints);
   expect(sk.sol?.state === "under" && sk.sol.dof === 4, "under-defined with 4 freedoms", sk.sol);
-  await page.getByText(/4 degrees of freedom left/).waitFor();
+  await page.getByText(/4 ways it can still move/).waitFor();
   // The closed loop is a solid profile.
   expect(await state(() => (window.whittle.useApp.getState().regen.sketches[0].fill?.length ?? 0) > 0), "profile is filled", {});
 });
@@ -124,7 +124,7 @@ await step("04-api-fully-defined", async () => {
     ],
   });
   expect(r.solver?.state === "full" && r.solver.dof === 0, "fully defined", r);
-  await page.getByText("Fully defined").waitFor();
+  await page.getByText(/Fully sized/).first().waitFor();
   await page.screenshot({ path: `${out}/04a-fully-defined.png` });
 });
 

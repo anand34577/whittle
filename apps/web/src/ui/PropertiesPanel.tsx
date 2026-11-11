@@ -1,7 +1,7 @@
 /** Right-hand panel: the active feature's editor, the selected sketch shape, or an inspector. */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Draft } from "immer";
-import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, combineBodies, type Inertia, display, formatQuantity, geomType, principalMoments, trim, documentEvaluator, maxPolylineCorner, maxRectCorner, relabelUnits, type WhittleDocument } from "@whittle/core";
+import { BODY_COLORS, CONSTRAINT_LABELS, DIMENSIONS, constraintLabel, FEATURE_LABELS, LENGTH_TO_MM, type LengthUnit, type SketchEntity, type SketchFeature, combineBodies, type Inertia, display, formatQuantity, geomType, principalMoments, trim, documentEvaluator, maxPolylineCorner, maxRectCorner, relabelUnits, sketchCountText, constraintSubject, type WhittleDocument } from "@whittle/core";
 import { availableConstraints, canConstrain, constrainSelection, geoMutate, makeConstrainable, offsetSelection, patternSelection, mirrorSelection, setDimension } from "../state/constraintOps";
 import { commandById, isAvailable } from "../state/commands";
 import { nextSteps } from "../state/problems";
@@ -30,6 +30,7 @@ import { FeatureEditor } from "./FeatureEditors";
 import { fixInUnits } from "./DragHandle";
 import { Icon, type IconName } from "./icons";
 import { ask } from "../state/platform";
+import { guideSeen, noteGuideSeen } from "../state/learn";
 
 export const FEATURE_ICONS: Record<string, IconName> = {
   sketch: "sketch",
@@ -129,8 +130,9 @@ function GeometryActions() {
   const [count, setCount] = useState(4);
   const [gap, setGap] = useState(20);
   return (
+    // Folded: picking a line is usually about relating it, not copying it (audit U-11).
+    <Disclosure summary="Copy, mirror and repeat">
     <div className="shape-actions">
-      <h3 className="eyebrow">Copy</h3>
       <div className="btnrow">
         <button className="btn btn--small" onClick={() => void offsetSelection()} title="Parallel lines and concentric arcs at a distance">
           <Icon name="offset" size={15} /> Offset
@@ -163,10 +165,20 @@ function GeometryActions() {
         </button>
       </div>
     </div>
+    </Disclosure>
   );
 }
 
 function StatusNote({ status, featureId }: { status?: FeatureStatus; featureId: string }) {
+  if (status?.state === "ok" && status.note)
+    return (
+      <div className="note note--info" role="status">
+        <Icon name="info" size={16} />
+        <div>
+          <p>{status.note}</p>
+        </div>
+      </div>
+    );
   if (!status || (status.state !== "error" && status.state !== "warning") || !status.message) return null;
   const fix = status.fix;
   return (
@@ -248,7 +260,7 @@ function EntityEditor({ e }: { e: SketchEntity }) {
       <h3 className="eyebrow">{ENTITY_LABELS[e.type]}</h3>
       {canConstrain(e) && (
         <button className="btn btn--small" onClick={() => makeConstrainable(e.id)} title="Lines and arcs you can dimension, constrain, trim and fillet">
-          <Icon name="link" size={15} /> Make constrainable
+          <Icon name="link" size={15} /> Split into lines and arcs
         </button>
       )}
       {e.type === "text" && (
@@ -482,17 +494,21 @@ function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
   const options = availableConstraints();
   const picked = sel.map((id) => geomType(sketch, id)).filter(Boolean);
   const counts = picked.reduce<Record<string, number>>((a, k) => ({ ...a, [k!]: (a[k!] ?? 0) + 1 }), {});
-  const state = !sol
-    ? "Solving…"
-    : sol.state === "full"
-      ? "Fully defined"
-      : sol.state === "under"
-        ? `${sol.dof} degree${sol.dof === 1 ? "" : "s"} of freedom left. Add constraints or dimensions to pin it down (blue can still move, green is fixed).`
+  // While solving, the last answer stays in place (faded) so the rows below don't jump (audit B-7).
+  const last = useRef(sol);
+  if (sol) last.current = sol;
+  const shown = sol ?? last.current;
+  const state = !shown
+    ? "Working out what can still move…"
+    : shown.state === "full"
+      ? "Fully sized: nothing can move by accident."
+      : shown.state === "under"
+        ? `Not fully sized yet: ${shown.dof} way${shown.dof === 1 ? "" : "s"} it can still move. Blue lines can still move, green ones are fixed. Add sizes or relations to pin it down.`
         : null; // conflicts and errors already show as the sketch's warning above
   return (
     <div className="panel__section constraints">
       {state && (
-        <p className={`constraints__state constraints__state--${sol?.state ?? "under"}`} role="status">
+        <p className={`constraints__state constraints__state--${shown?.state ?? "under"} ${sol ? "" : "is-stale"}`} role="status">
           {state}
         </p>
       )}
@@ -519,12 +535,19 @@ function ConstraintSection({ sketch }: { sketch: SketchFeature }) {
         <h3 className="constraints__title">Constraints <span className="muted">{sketch.constraints!.length}</span></h3>
         <ul className="constraints__list" aria-label="Constraints">
           {sketch.constraints!.map((c) => (
-            <li key={c.id} className={`${sol?.bad.includes(c.id) ? "is-bad" : ""} ${sel.includes(c.id) ? "is-selected" : ""}`}>
+            <li
+              key={c.id}
+              className={`${sol?.bad.includes(c.id) ? "is-bad" : ""} ${sel.includes(c.id) ? "is-selected" : ""}`}
+              // Hovering a row lights what it holds in the sketch (audit B-8).
+              onPointerEnter={() => useApp.setState({ hoverGeom: c.refs })}
+              onPointerLeave={() => useApp.setState({ hoverGeom: [] })}
+            >
               {c.value !== undefined ? (
-                <ExprInput label={constraintLabel(sketch, c)} kind={c.type === "angle" ? "angle" : "length"} value={c.value} onChange={(v, live) => setDimension(c.id, v, live)} />
+                <ExprInput label={`${constraintLabel(sketch, c)} · ${constraintSubject(sketch, c)}`} kind={c.type === "angle" ? "angle" : "length"} value={c.value} onChange={(v, live) => setDimension(c.id, v, live)} />
               ) : (
                 <button className="constraints__name" onClick={() => useApp.setState({ sketchSel: [c.id], selectedEntity: null })}>
                   {CONSTRAINT_LABELS[c.type]}
+                  <small className="muted"> · {constraintSubject(sketch, c)}</small>
                 </button>
               )}
               <button
@@ -547,13 +570,8 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
   const selected = useApp((s) => s.selectedEntity);
   const e = sketch.entities.find((x) => x.id === selected);
   const status = useApp((s) => s.regen?.status.find((x) => x.id === sketch.id));
-  // Constraint-ready lines and curves count too, or a sketch drawn that way reads "0 shapes".
-  const shapes = sketch.entities.length;
-  const curves = sketch.geometry?.filter((g) => g.type !== "point").length ?? 0;
-  const contents = [
-    shapes || !curves ? `${shapes} shape${shapes === 1 ? "" : "s"}` : "",
-    curves === 1 ? "1 line or curve" : curves ? `${curves} lines and curves` : "",
-  ].filter(Boolean).join(", ");
+  // One way of counting everywhere: closed shapes, then loose lines (audit B-4).
+  const contents = sketchCountText(sketch);
   return (
     <>
       <header className="panel__head">
@@ -598,12 +616,10 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
           </div>
         )}
       </div>
-      <footer className="panel__foot">
-        <button className="btn btn--accent btn--wide" onClick={finishSketch}>
-          <Icon name="finish" size={16} /> Finish sketch
-        </button>
-        <button className="btn btn--ghost" onClick={cancelSession} title="Discard changes to this sketch">
-          Cancel
+      {/* Finish lives once, top right in the toolbar (audit S-2); here only the way out without keeping changes. */}
+      <footer className="panel__foot panel__foot--quiet">
+        <button className="btn btn--ghost" onClick={cancelSession} title="Leave the sketch without keeping what changed since it was opened">
+          Discard changes
         </button>
       </footer>
     </>
@@ -630,41 +646,8 @@ async function changeUnits(to: LengthUnit) {
 }
 
 /** Densities in g/cm³ (typical values). */
-/** General engineering materials first; printing filaments have a group of their own. */
-const GROUP_ORDER = ["Metals", "Plastics", "Wood & other", "3D printing"];
-
-export const MATERIALS = [
-  { id: "pla", label: "PLA", density: 1.24, group: "3D printing" },
-  { id: "petg", label: "PETG", density: 1.27, group: "3D printing" },
-  { id: "abs", label: "ABS", density: 1.04, group: "Plastics" },
-  { id: "nylon", label: "Nylon (PA)", density: 1.01, group: "Plastics" },
-  { id: "resin", label: "Resin (SLA)", density: 1.18, group: "3D printing" },
-  { id: "acrylic", label: "Acrylic", density: 1.18, group: "Plastics" },
-  { id: "al", label: "Aluminium 6061", density: 2.7, group: "Metals" },
-  { id: "steel", label: "Steel", density: 7.85, group: "Metals" },
-  { id: "stainless", label: "Stainless steel", density: 8.0, group: "Metals" },
-  { id: "brass", label: "Brass", density: 8.5, group: "Metals" },
-  { id: "copper", label: "Copper", density: 8.96, group: "Metals" },
-  { id: "titanium", label: "Titanium", density: 4.43, group: "Metals" },
-  { id: "pine", label: "Pine", density: 0.5, group: "Wood & other" },
-  { id: "oak", label: "Oak", density: 0.75, group: "Wood & other" },
-  { id: "plywood", label: "Plywood", density: 0.6, group: "Wood & other" },
-  { id: "mdf", label: "MDF", density: 0.75, group: "Wood & other" },
-  { id: "walnut", label: "Walnut", density: 0.64, group: "Wood & other" },
-  { id: "bamboo", label: "Bamboo", density: 0.7, group: "Wood & other" },
-  { id: "glass", label: "Glass", density: 2.5, group: "Wood & other" },
-  { id: "concrete", label: "Concrete", density: 2.4, group: "Wood & other" },
-  { id: "ceramic", label: "Ceramic (porcelain)", density: 2.4, group: "Wood & other" },
-  { id: "silicone", label: "Silicone rubber", density: 1.1, group: "Plastics" },
-  { id: "tpu", label: "TPU (flexible)", density: 1.21, group: "3D printing" },
-  { id: "pc", label: "Polycarbonate", density: 1.2, group: "Plastics" },
-  { id: "pom", label: "Acetal (POM)", density: 1.41, group: "Plastics" },
-  { id: "al7075", label: "Aluminium 7075", density: 2.81, group: "Metals" },
-  { id: "castiron", label: "Cast iron", density: 7.2, group: "Metals" },
-  { id: "zinc", label: "Zinc (die cast)", density: 6.6, group: "Metals" },
-  { id: "silver", label: "Sterling silver", density: 10.4, group: "Metals" },
-  { id: "gold", label: "Gold (18k)", density: 15.6, group: "Metals" },
-].sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.label.localeCompare(b.label));
+import { MATERIALS } from "../state/materials";
+export { MATERIALS };
 
 /** The finish and color a physical material suggests when it is given to a body (as in other CAD, the material carries its look). */
 const MATERIAL_LOOKS: Record<string, { color: string; look: string }> = {
@@ -703,6 +686,9 @@ function Inspector() {
   const densityOf = (id?: string) => (MATERIALS.find((m) => m.id === (id ?? mat)) ?? MATERIALS.find((m) => m.id === mat)!).density;
   const density = densityOf();
   const p = selection[0];
+  const engineering = useApp((s) => s.prefs.profile === "engineer" || s.prefs.profile === "designer");
+  const [moreStats, setMoreStats] = useState(false);
+  const deep = engineering || moreStats;
 
   const bodyId = p && (p.kind === "body" || p.kind === "face" || p.kind === "edge") ? p.bodyId : undefined;
   const body = regen?.bodies.find((b) => b.id === bodyId);
@@ -852,7 +838,7 @@ function Inspector() {
         )}
         {p?.kind === "sketch" && <SketchSummary id={p.sketchId} />}
         <div className="panel__section">
-          <h3 className="eyebrow">{body ? "Measurements" : "Model"}</h3>
+          <h3 className="eyebrow">{body ? "Measurements" : bodies.length > 1 ? "Model · all bodies" : "Model"}</h3>
           <dl className="stats">
             {!body && (
               <>
@@ -893,7 +879,15 @@ function Inspector() {
                 <dd className="mono">{massText((body ? (body.volume / 1000) * densityOf(meta?.material) : bodies.reduce((a, b) => a + (b.volume / 1000) * densityOf(doc.bodies[b.id]?.material), 0)))}</dd>
               </>
             )}
-            {(body ? [body] : bodies).length > 0 && totalVolume > 0 && (
+            {!body && bodies.length > 0 && (
+              <>
+                <dt>Size</dt>
+                <dd className="mono" title="Overall width × depth × height of everything shown">
+                  {[0, 1, 2].map((i) => trim((Math.max(...bodies.map((b) => b.bbox[1][i]!)) - Math.min(...bodies.map((b) => b.bbox[0][i]!))) / LENGTH_TO_MM[unit], display.digits)).join(" × ")} {unit}
+                </dd>
+              </>
+            )}
+            {deep && (body ? [body] : bodies).length > 0 && totalVolume > 0 && (
               <>
                 <dt>Center of mass</dt>
                 <dd className="mono" title="Weighted by volume (uniform density)">
@@ -901,7 +895,7 @@ function Inspector() {
                 </dd>
               </>
             )}
-            {principal && (
+            {deep && principal && (
               <>
                 <dt>Inertia</dt>
                 <dd className="mono" title="Principal moments of inertia about the center of mass, for the chosen material (g·cm²)">
@@ -920,6 +914,12 @@ function Inspector() {
               </>
             )}
           </dl>
+          {/* Centre of mass and inertia are engineering numbers: one click away for everyone else (audit B-10). */}
+          {!engineering && bodies.length > 0 && (
+            <button className="link small" onClick={() => setMoreStats(!moreStats)} aria-expanded={moreStats}>
+              {moreStats ? "Fewer details" : "More: centre of mass, inertia"}
+            </button>
+          )}
           {!body && bodies.length === 0 && <p className="muted small">Nothing to measure yet. Sketch a shape and extrude it, or add a quick Box.</p>}
         </div>
         {!p && <KeySizes />}
@@ -937,15 +937,15 @@ function SketchSummary({ id }: { id: string }) {
   if (!sk) return null;
   const users = doc.features.filter((g) => g.type !== "sketch" && JSON.stringify(g).includes(id)).map((g) => g.name);
   const plane = sk.plane.kind === "origin" ? `${sk.plane.plane} plane` : sk.plane.kind === "construction" ? "Construction plane" : "Model face";
-  const state = !sol ? "Shapes (no constraints)" : sol.state === "full" ? "Fully defined" : sol.state === "under" ? `${sol.dof} way${sol.dof === 1 ? "" : "s"} to move left` : "Constraints conflict";
+  const state = !sol ? "Shapes (no relations)" : sol.state === "full" ? "Fully sized" : sol.state === "under" ? `Not fully sized: ${sol.dof} way${sol.dof === 1 ? "" : "s"} it can move` : "Relations conflict";
   return (
     <div className="panel__section">
       <h3 className="eyebrow">Sketch</h3>
       <dl className="stats">
         <dt>On</dt>
         <dd>{plane}</dd>
-        <dt>Shapes</dt>
-        <dd className="mono">{sk.entities.length + (sk.geometry?.filter((g) => g.type !== "point").length ?? 0)}</dd>
+        <dt>Holds</dt>
+        <dd>{sketchCountText(sk)}</dd>
         <dt>State</dt>
         <dd>{state}</dd>
         <dt>Used by</dt>
@@ -1005,8 +1005,9 @@ function NextSteps() {
   const steps = nextSteps(state)
     .map((x) => ({ ...x, c: commandById(x.id) }))
     .filter((x) => x.c && isAvailable(x.c, state));
-  // An empty design shows the same ways in as a card in the middle of the view.
-  if (!steps.length || (state.mode.kind === "model" && state.doc.features.length === 0)) return null;
+  // An empty design shows the same ways in as a card in the middle of the view. A running lesson, or a plane being
+  // picked, already says what comes next (audit S-1).
+  if (!steps.length || state.coach || state.mode.kind === "pickPlane" || (state.mode.kind === "model" && state.doc.features.length === 0)) return null;
   return (
     <div className="panel__section">
       <h3 className="eyebrow">Next steps</h3>
@@ -1041,6 +1042,9 @@ export function PropertiesPanel() {
   if (f && session) {
     const status = regen?.status.find((x) => x.id === f.id);
     const busy = !regen || status?.state === "incomplete";
+    // Open the first time this kind of step is made by someone being guided, folded after that.
+    const firstTime = session.isNew && (profile === null || profile === "beginner" || profile === "educator") && !guideSeen(f.type);
+    if (firstTime) noteGuideSeen(f.type);
     return (
       <aside className="panel" aria-label={`${f.name} properties`}>
         <header className="panel__head">
@@ -1068,7 +1072,7 @@ export function PropertiesPanel() {
           <StatusNote status={status} featureId={f.id} />
           {GUIDES[f.type] && (
             <div className="panel__section panel__guide">
-              <Disclosure summary="How it works" defaultOpen={session.isNew && (profile === "beginner" || profile === "educator")}>
+              <Disclosure summary="How it works" defaultOpen={firstTime}>
                 <GuideCard guide={GUIDES[f.type]!} />
               </Disclosure>
             </div>
@@ -1079,9 +1083,16 @@ export function PropertiesPanel() {
           <button type="submit" hidden data-submit />
         </form>
         <footer className="panel__foot">
-          <button className="btn btn--accent btn--wide" onClick={() => commitSession(true)} disabled={busy}>
-            <Icon name="check" size={16} /> OK
-          </button>
+          {status?.state === "error" ? (
+            // A step that doesn't build isn't applied by the main button; keeping it is a deliberate choice (audit U-12).
+            <button className="btn btn--wide" onClick={() => commitSession(true, true)} title="Add this step even though it doesn't build yet; it stays marked red">
+              Keep anyway
+            </button>
+          ) : (
+            <button className="btn btn--accent btn--wide" onClick={() => commitSession(true)} disabled={busy}>
+              <Icon name="check" size={16} /> OK
+            </button>
+          )}
           <button className="btn btn--ghost" onClick={cancelSession}>
             Cancel
           </button>

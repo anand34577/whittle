@@ -6,4 +6,8 @@ ignore = [
   "RUSTSEC-2026-0387",
   # rsa "Marvin" timing (via openidconnect). RS256 verification only, no private key; no fixed version exists.
   "RUSTSEC-2023-0071",
+  # SQLite before 3.54.0 can return stale memory when it opens a database with a crafted -wal file written by
+  # someone else (via sqlx -> libsqlite3-sys 0.30). The server only opens its own database in its own data folder.
+  # The fix needs libsqlite3-sys 0.39, which no sqlx release accepts yet (0.9.0 stops at 0.37): remove this then.
+  "RUSTSEC-2026-0459",
 ]

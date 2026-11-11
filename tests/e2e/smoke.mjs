@@ -50,6 +50,8 @@ await step("03-param-change", async () => {
   await page.getByTitle("Parameters").click();
   const row = page.locator(".ptable__row").filter({ has: page.locator('input[value="width"]') });
   await row.getByLabel("Formula").fill("120 mm");
+  // Enter applies the value (Escape in the field would put the old one back); Escape then closes the dialog.
+  await page.keyboard.press("Enter");
   await page.keyboard.press("Escape");
   await waitBuilt();
   await page.waitForTimeout(600);

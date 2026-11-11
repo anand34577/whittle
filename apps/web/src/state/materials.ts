@@ -1,0 +1,36 @@
+/** Materials for mass estimates and exports (densities in g/cm³). Kept apart from the UI so exports can read it. */
+/** General engineering materials first; printing filaments have a group of their own. */
+const GROUP_ORDER = ["Metals", "Plastics", "Wood & other", "3D printing"];
+
+export const MATERIALS = [
+  { id: "pla", label: "PLA", density: 1.24, group: "3D printing" },
+  { id: "petg", label: "PETG", density: 1.27, group: "3D printing" },
+  { id: "abs", label: "ABS", density: 1.04, group: "Plastics" },
+  { id: "nylon", label: "Nylon (PA)", density: 1.01, group: "Plastics" },
+  { id: "resin", label: "Resin (SLA)", density: 1.18, group: "3D printing" },
+  { id: "acrylic", label: "Acrylic", density: 1.18, group: "Plastics" },
+  { id: "al", label: "Aluminium 6061", density: 2.7, group: "Metals" },
+  { id: "steel", label: "Steel", density: 7.85, group: "Metals" },
+  { id: "stainless", label: "Stainless steel", density: 8.0, group: "Metals" },
+  { id: "brass", label: "Brass", density: 8.5, group: "Metals" },
+  { id: "copper", label: "Copper", density: 8.96, group: "Metals" },
+  { id: "titanium", label: "Titanium", density: 4.43, group: "Metals" },
+  { id: "pine", label: "Pine", density: 0.5, group: "Wood & other" },
+  { id: "oak", label: "Oak", density: 0.75, group: "Wood & other" },
+  { id: "plywood", label: "Plywood", density: 0.6, group: "Wood & other" },
+  { id: "mdf", label: "MDF", density: 0.75, group: "Wood & other" },
+  { id: "walnut", label: "Walnut", density: 0.64, group: "Wood & other" },
+  { id: "bamboo", label: "Bamboo", density: 0.7, group: "Wood & other" },
+  { id: "glass", label: "Glass", density: 2.5, group: "Wood & other" },
+  { id: "concrete", label: "Concrete", density: 2.4, group: "Wood & other" },
+  { id: "ceramic", label: "Ceramic (porcelain)", density: 2.4, group: "Wood & other" },
+  { id: "silicone", label: "Silicone rubber", density: 1.1, group: "Plastics" },
+  { id: "tpu", label: "TPU (flexible)", density: 1.21, group: "3D printing" },
+  { id: "pc", label: "Polycarbonate", density: 1.2, group: "Plastics" },
+  { id: "pom", label: "Acetal (POM)", density: 1.41, group: "Plastics" },
+  { id: "al7075", label: "Aluminium 7075", density: 2.81, group: "Metals" },
+  { id: "castiron", label: "Cast iron", density: 7.2, group: "Metals" },
+  { id: "zinc", label: "Zinc (die cast)", density: 6.6, group: "Metals" },
+  { id: "silver", label: "Sterling silver", density: 10.4, group: "Metals" },
+  { id: "gold", label: "Gold (18k)", density: 15.6, group: "Metals" },
+].sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.label.localeCompare(b.label));

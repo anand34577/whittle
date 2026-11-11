@@ -897,3 +897,101 @@ export function autoConstrain(sk: Geo, tol = 1e-3): { coincident: number; aligne
   }
   return { coincident, aligned };
 }
+
+/**
+ * What a sketch holds, counted the way a person sees it (audit B-4): closed shapes (a rectangle is one, whether it
+ * is one shape or four joined lines) and loose lines or curves that don't close. Points and construction are left out.
+ */
+export function sketchCounts(sk: Pick<SketchFeature, "entities" | "geometry" | "constraints">): { shapes: number; loose: number } {
+  let shapes = 0;
+  let loose = 0;
+  for (const e of drawnEntities(sk.entities)) {
+    if (e.construction) continue;
+    if (e.type === "polyline" && e.open) loose++;
+    else shapes++;
+  }
+  const geo = (sk.geometry ?? []).filter((g) => g.type !== "point" && !g.construction);
+  // Lines and arcs joined end to end (by a shared point or a coincident relation) form one chain; a chain whose
+  // every end meets another is a closed shape.
+  const unionFind = () => {
+    const up = new Map<Id, Id>();
+    const find = (x: Id): Id => {
+      const p = up.get(x);
+      if (p === undefined || p === x) return x;
+      const r = find(p);
+      up.set(x, r);
+      return r;
+    };
+    return { find, join: (a: Id, b: Id) => void up.set(find(a), find(b)) };
+  };
+  const pts = unionFind();
+  for (const c of sk.constraints ?? []) if (c.type === "coincident" && c.refs.length === 2) pts.join(c.refs[0]!, c.refs[1]!);
+  const ends = (g: SketchGeom): Id[] => (g.type === "line" || g.type === "arc" ? [g.a, g.b] : g.type === "spline" && !g.closed ? [g.pts[0]!, g.pts[g.pts.length - 1]!] : []);
+  const chain = unionFind();
+  const byPoint = new Map<Id, Id>();
+  for (const g of geo) {
+    const e = ends(g);
+    if (!e.length) {
+      shapes++; // circles, ellipses and closed splines close on their own
+      continue;
+    }
+    for (const p of e) {
+      const r = pts.find(p);
+      const other = byPoint.get(r);
+      if (other) chain.join(g.id, other);
+      else byPoint.set(r, g.id);
+    }
+  }
+  const degree = new Map<Id, Map<Id, number>>();
+  for (const g of geo) {
+    const e = ends(g);
+    if (!e.length) continue;
+    const root = chain.find(g.id);
+    const d = degree.get(root) ?? new Map<Id, number>();
+    for (const p of e) d.set(pts.find(p), (d.get(pts.find(p)) ?? 0) + 1);
+    degree.set(root, d);
+  }
+  for (const d of degree.values()) {
+    if ([...d.values()].every((n) => n >= 2)) shapes++;
+    else loose++;
+  }
+  return { shapes, loose };
+}
+
+/** "1 closed shape", "2 closed shapes, 1 loose line", "Empty". */
+export function sketchCountText(sk: Pick<SketchFeature, "entities" | "geometry" | "constraints">): string {
+  const { shapes, loose } = sketchCounts(sk);
+  const parts = [shapes ? `${shapes} closed shape${shapes === 1 ? "" : "s"}` : "", loose ? `${loose} loose line${loose === 1 ? "" : "s"}` : ""].filter(Boolean);
+  return parts.length ? parts.join(", ") : "Empty";
+}
+
+/**
+ * What a constraint holds, in words (audit B-8): "line 2", "the circle", "line 1 and line 3", with a width or height
+ * named when a length is level or upright. Lines, arcs and circles are numbered in the order they were drawn.
+ */
+export function constraintSubject(sk: Pick<SketchFeature, "geometry">, c: SketchConstraint): string {
+  const geo = sk.geometry ?? [];
+  const nth = (id: Id) => {
+    const g = geo.find((x) => x.id === id);
+    if (!g) return id === "origin" ? "the origin" : id === "xaxis" ? "the horizontal axis" : id === "yaxis" ? "the vertical axis" : "";
+    const same = geo.filter((x) => x.type === g.type);
+    const name = g.type === "point" ? "point" : g.type === "spline" ? "curve" : g.type;
+    return same.length > 1 ? `${name} ${same.indexOf(g) + 1}` : `the ${name}`;
+  };
+  const names = c.refs.map(nth).filter(Boolean);
+  if (c.type === "distance" && c.refs.length === 1) {
+    const g = geo.find((x) => x.id === c.refs[0]);
+    const pt = (id: Id) => geo.find((x): x is Extract<SketchGeom, { type: "point" }> => x.id === id && x.type === "point");
+    if (g?.type === "line") {
+      const a = pt(g.a);
+      const b = pt(g.b);
+      if (a && b) {
+        const dx = Math.abs(b.x - a.x);
+        const dy = Math.abs(b.y - a.y);
+        const what = dy < 1e-6 * Math.max(1, dx) ? "width" : dx < 1e-6 * Math.max(1, dy) ? "height" : "length";
+        return `${what} of ${names[0]}`;
+      }
+    }
+  }
+  return names.length <= 2 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}

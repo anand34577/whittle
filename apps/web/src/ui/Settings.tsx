@@ -5,7 +5,7 @@ import { ACCENTS, type Density, NAV_PRESETS, PROFILES, type Profile, THEMES, typ
 import { setPrefs, useApp } from "../state/store";
 import { APP_VERSION } from "@whittle/core";
 import { AssistantSettings } from "./Assistant";
-import { Select, Slider, Switch, Tabs } from "./controls";
+import { Disclosure, Select, Slider, Switch, Tabs } from "./controls";
 import { Modal } from "./Modal";
 import { type Tab, takeStartTab } from "./settingsTab";
 import { Icon } from "./icons";
@@ -36,6 +36,8 @@ function ThemeCard({ id, label, swatch, blurb, on }: { id: ThemePref; label: str
   );
 }
 
+const MAIN_THEMES: string[] = ["daylight", "daylightdark", "contrast"];
+
 function Appearance() {
   const prefs = useApp((s) => s.prefs);
   return (
@@ -43,10 +45,18 @@ function Appearance() {
       <h3 className="eyebrow">Theme</h3>
       <div className="themegrid" role="radiogroup" aria-label="Theme">
         <ThemeCard id="system" label="Match system" swatch={["linear-gradient(135deg, #1b1a18 50%, #ece8df 50%)" as string, "#8884", "#999"]} blurb="Follows your operating system's light or dark mode" on={prefs.theme === "system"} />
-        {THEMES.map((t) => (
-          <ThemeCard key={t.id} id={t.id} label={t.label} swatch={t.swatch} blurb={t.blurb} on={prefs.theme === t.id} />
+        {THEMES.filter((t) => MAIN_THEMES.includes(t.id)).map((t) => (
+          <ThemeCard key={t.id} id={t.id} label={t.label === "Daylight" ? "Light" : t.label === "Daylight dark" ? "Dark" : t.label} swatch={t.swatch} blurb={t.blurb} on={prefs.theme === t.id} />
         ))}
       </div>
+      {/* Light, dark, high contrast and the system's choice up front; the rest stay one click away (audit S-5). */}
+      <Disclosure summary="More themes" defaultOpen={!MAIN_THEMES.includes(prefs.theme as string) && prefs.theme !== "system"}>
+        <div className="themegrid" role="radiogroup" aria-label="More themes">
+          {THEMES.filter((t) => !MAIN_THEMES.includes(t.id)).map((t) => (
+            <ThemeCard key={t.id} id={t.id} label={t.label} swatch={t.swatch} blurb={t.blurb} on={prefs.theme === t.id} />
+          ))}
+        </div>
+      </Disclosure>
       <h3 className="eyebrow">Accent color</h3>
       <div className="accentrow" role="radiogroup" aria-label="Accent color">
         {ACCENTS.map((a) => (

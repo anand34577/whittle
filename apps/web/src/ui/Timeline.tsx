@@ -5,10 +5,10 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { Feature } from "@whittle/core";
-import { activeEnd, dependents, featureInputs, reorderProblem } from "@whittle/core";
+import { activeEnd, dependents, featureInputs, reorderProblem, sketchCountText } from "@whittle/core";
 import { confirmDeleteFeature, editFeature, moveFeature, mutate, updateFeature, useApp } from "../state/store";
 import { Icon } from "./icons";
-import { copySteps, folderSteps, timelinePick } from "../state/steps";
+import { copySteps, folderSteps, renameStep, timelinePick } from "../state/steps";
 import { promptDialog } from "../state/dialogs";
 import { FEATURE_ICONS } from "./PropertiesPanel";
 
@@ -51,7 +51,7 @@ export function summary(f: Feature, units: string): string {
   const parts: (string | undefined)[] = (() => {
     switch (f.type) {
       case "sketch":
-        return [n(f.entities.length + (f.geometry?.length ?? 0), "shape")];
+        return [sketchCountText(f)];
       case "extrude":
         return [f.extent === "through" ? "Through all" : f.extent === "face" ? "Up to a face" : v(f.distance) + (f.extent === "symmetric" ? " both ways" : ""), op];
       case "revolve":
@@ -197,7 +197,8 @@ export function Timeline() {
                 className={`step step--${state} ${isSelected(f) || (picked.length > 1 && picked.includes(f.id)) ? "is-selected" : ""} ${folderOf.has(f.id) ? "is-in-folder" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? (reorderProblem(doc, dragStep.from, i) ? "is-drop-blocked" : "is-drop-before") : ""} ${parents.has(f.id) ? "is-parent" : ""} ${children.has(f.id) ? "is-child" : ""} ${hovered === f.id ? "is-hovered" : ""}`}
                 onPointerEnter={() => (setHot(f.id), glow(f))}
                 onPointerLeave={() => (setHot(null), useApp.setState({ hover: null }))}
-                title={`${f.name}${summary(f, doc.units) ? " · " + summary(f, doc.units) : ""}${st?.message ? "\n" + st.message : ""}\nDouble-click (or Enter) to edit · drag, or Alt + arrow keys, to reorder`}
+                aria-label={`${f.name}${summary(f, doc.units) ? ", " + summary(f, doc.units) : ""}${state === "error" ? ", failed" : state === "warning" ? ", needs a look" : ""}`}
+                title={`${f.name}${summary(f, doc.units) ? " · " + summary(f, doc.units) : ""}${st?.message ? "\n" + st.message : ""}\nDouble-click (or Enter) to edit · F2 to rename · drag, or Alt + arrow keys, to reorder`}
                 onClick={(e) => {
                   if (e.shiftKey || e.ctrlKey || e.metaKey) return setPicked((p) => (p.includes(f.id) ? p.filter((x) => x !== f.id) : [...p, f.id]));
                   setPicked([f.id]);
@@ -215,6 +216,9 @@ export function Timeline() {
                   } else if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                     e.preventDefault();
                     editFeature(f.id);
+                  } else if (e.key === "F2") {
+                    e.preventDefault();
+                    void renameStep(f.id);
                   }
                 }}
                 onContextMenu={(e) => {
@@ -272,12 +276,27 @@ export function Timeline() {
           >
             <Icon name="suppress" size={16} /> {menu.f.suppressed ? "Turn back on" : "Turn off (suppress)"}
           </button>
-          <button role="menuitem" disabled={menu.index === 0} onClick={() => (setMenu(null), moveFeature(menu.index, menu.index - 1))}>
-            <Icon name="arrowLeft" size={16} /> Move earlier
+          <button role="menuitem" onClick={() => (setMenu(null), void renameStep(menu.f.id))}>
+            <Icon name="edit" size={16} /> Rename<kbd>F2</kbd>
           </button>
-          <button role="menuitem" disabled={menu.index >= doc.features.length - 1} onClick={() => (setMenu(null), moveFeature(menu.index, menu.index + 1))}>
-            <Icon name="arrowRight" size={16} /> Move later
-          </button>
+          {/* A move that would be refused isn't offered: it is greyed with the reason (audit U-15). */}
+          {(
+            [
+              ["Move earlier", "arrowLeft", menu.index - 1],
+              ["Move later", "arrowRight", menu.index + 1],
+            ] as const
+          ).map(([label, icon, to]) => {
+            const why = to < 0 || to >= doc.features.length ? "It's already at that end." : reorderProblem(doc, menu.index, to);
+            return (
+              <button key={label} role="menuitem" disabled={!!why} title={why ?? undefined} onClick={() => (setMenu(null), moveFeature(menu.index, to))}>
+                <Icon name={icon} size={16} />
+                <span className="menu__text">
+                  {label}
+                  {why && <small>{why}</small>}
+                </span>
+              </button>
+            );
+          })}
           <button
             role="menuitem"
             onClick={() => {

@@ -9,8 +9,9 @@
   --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
 
-  --fs-xs: 11px;
-  --fs-sm: 12px;
+  /* Four steps and nothing smaller than 12 px for words (audit V-1): captions, body, panel titles, dialog titles. */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
   --fs-md: 13px;
   --fs-lg: 15px;
   --fs-xl: 18px;
@@ -51,7 +52,7 @@
   --line-strong: oklch(0.4 0.01 75);
   --text-1: oklch(0.93 0.012 85);
   --text-2: oklch(0.75 0.012 80);
-  --text-3: oklch(0.57 0.012 80);
+  --text-3: oklch(0.63 0.012 80); /* 4.5:1 or better on every panel (audit V-2) */
   --accent: oklch(0.73 0.17 50);
   --accent-hover: oklch(0.78 0.16 52);
   --accent-ink: oklch(0.2 0.04 50);
@@ -80,8 +81,8 @@
   --line-strong: oklch(0.75 0.012 85);
   --text-1: oklch(0.23 0.012 70);
   --text-2: oklch(0.42 0.012 70);
-  --text-3: oklch(0.58 0.012 75);
-  --accent: oklch(0.64 0.18 45);
+  --text-3: oklch(0.5 0.012 75);
+  --accent: oklch(0.56 0.18 45);
   --accent-hover: oklch(0.59 0.18 43);
   --accent-ink: oklch(0.99 0.01 85);
   --accent-soft: oklch(0.64 0.18 45 / 0.13);

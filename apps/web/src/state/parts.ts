@@ -460,8 +460,12 @@ export function insertPart(def: PartDef) {
       b.add(mv);
     }
   }
+  // Sizes say in plain words which part and which size they are; "nut1_across_flats" alone reads like code (audit U-16).
+  for (const prm of b.params) prm.comment ??= `${def.title}: ${prm.name.slice(b.prefix.length + 1).replace(/_/g, " ")}`;
   mutate(`Insert ${def.title}`, (d) => {
     d.parameters.push(...(b.params as Draft<Parameter>[]));
+    // The part's steps arrive as one folded group named after it, not loose among the person's own steps.
+    if (b.features.length > 1) (d.folders ??= []).push({ id: uid("fo"), name: n > 1 ? `${def.title} ${n}` : def.title, features: b.features.map((f) => f.id), open: false });
     const at = d.rollback === null ? d.features.length : d.rollback;
     d.features.splice(at, 0, ...(b.features as Draft<Feature>[]));
     if (d.rollback !== null) d.rollback += b.features.length;

@@ -49,6 +49,13 @@ export interface Prefs {
   updateCheck: boolean;
   /** Decimal places for measurements and read-outs (0 to 6). */
   precision?: number;
+  /** Show every tool group and workspace tab, whatever the profile (newcomer profiles start with the essentials). */
+  allTools?: boolean;
+}
+
+/** Profiles that start with a short toolbar: the essentials, with everything else one click away (audit S-2). */
+export function simpleToolbar(p: Pick<Prefs, "profile" | "allTools">): boolean {
+  return !p.allTools && (p.profile === null || p.profile === "beginner" || p.profile === "maker" || p.profile === "educator");
 }
 
 export interface ThemeInfo {

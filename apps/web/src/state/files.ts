@@ -7,6 +7,7 @@
  *   browser  File System Access API where available, downloads elsewhere;
  *            every save also keeps a copy in the browser (IndexedDB)
  */
+import { MATERIALS } from "./materials";
 import {
   FILE_EXTENSION,
   type LengthUnit,
@@ -185,10 +186,11 @@ export function loadDocument(doc: WhittleDocument, fileName: string | null) {
 }
 
 /** Load a template or recovered work, asking first if the current design has unsaved changes. */
-export async function loadDocumentConfirm(doc: WhittleDocument, fileName: string | null, unsaved = false) {
-  if (!(await confirmDiscard())) return;
+export async function loadDocumentConfirm(doc: WhittleDocument, fileName: string | null, unsaved = false): Promise<boolean> {
+  if (!(await confirmDiscard())) return false;
   loadDocument(doc, fileName);
   if (unsaved) useApp.setState({ dirty: true }); // recovered work has not been saved to a file
+  return true;
 }
 
 /** Open: on the server this shows your designs; elsewhere it picks a file. */
@@ -428,7 +430,7 @@ export async function exportDesign(format: ExportFormat, bodyId?: string) {
   const { doc, prefs } = useApp.getState();
   try {
     // The parts list names materials, not their ids (audit K-8).
-    const materialNames = format === "drawing" ? Object.fromEntries((await import("../ui/PropertiesPanel")).MATERIALS.map((m) => [m.id, m.label])) : undefined;
+    const materialNames = format === "drawing" ? Object.fromEntries(MATERIALS.map((m) => [m.id, m.label])) : undefined;
     const file = await withTask(`Exporting ${format.toUpperCase()}…`, () => getKernel().export(doc, format, bodyId ? [bodyId] : undefined, prefs.meshQuality, format === "drawing" ? { ...prefs.drawing, materialNames } : undefined));
     const name = bodyId ? `${safeName(doc.name)} - ${safeName(doc.bodies[bodyId]?.name ?? "body")}` : safeName(doc.name);
     if (await saveBytes(file.data, `${name}.${file.ext}`, file.mime, EXPORT_FILTERS[file.ext]!)) toast("ok", `Exported ${format.toUpperCase()}`);

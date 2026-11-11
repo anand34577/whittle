@@ -44,7 +44,7 @@
 .toolgroup__label {
   display: block;
   text-align: center;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -101,7 +101,7 @@
   height: 14px;
   padding: 0 6px;
   border-radius: var(--r-pill);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -154,7 +154,7 @@
 .radial__item kbd,
 .dock kbd {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-3);
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -486,7 +486,7 @@
   border-radius: 5px;
   background: var(--select-soft);
   color: var(--select);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 .chip__x {
   margin-left: auto;
@@ -748,7 +748,7 @@ details.points summary {
   position: absolute;
   top: 16px;
   right: 16px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -785,7 +785,7 @@ details.points summary {
 
 .groupmenu__head {
   padding: 8px 10px 3px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -1309,4 +1309,88 @@ details.points summary {
 }
 .orientcube__face[data-face="bottom"] {
   background-image: linear-gradient(color-mix(in oklch, black 14%, transparent), color-mix(in oklch, black 14%, transparent));
+}
+
+/* ═══════════════ Click targets (audit V-3): nothing too small to hit, without changing the look ═══════════════ */
+.split__more {
+  width: 18px;
+  border-left: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
+}
+.groupmenu__btn {
+  height: 20px;
+  line-height: 20px;
+  padding: 0 8px;
+}
+.tree__eye {
+  min-width: 26px;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.problems-btn,
+.docname__state {
+  min-height: 24px;
+}
+@media (pointer: coarse) {
+  .tool,
+  .iconbtn,
+  .dock__btn,
+  .tree__eye,
+  .split__more {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
+/* One switch between the essentials and every tool (audit S-2). */
+.ribbon__alltools {
+  margin-left: auto;
+  align-self: center;
+  padding: 2px 10px;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* Right-click as a plain list (newcomer profiles). */
+.ctxlist {
+  position: absolute;
+  z-index: 40;
+  min-width: 220px;
+  transform: none;
+}
+.radial__item:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+/* Polish (audit V-7). The drawing options read as something to open, not a caption. */
+.export-drawing > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--bg-2);
+  width: max-content;
+}
+.export-drawing > summary::-webkit-details-marker {
+  display: none;
+}
+.export-drawing > summary::before {
+  content: "▸";
+  color: var(--text-3);
+}
+.export-drawing[open] > summary::before {
+  content: "▾";
+}
+/* "Pick a plane" is the one thing to do at that moment: it reads like the lesson card, not a faint caption. */
+.viewport__banner {
+  padding: 8px 8px 8px 16px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-1);
+  border: 1px solid color-mix(in oklch, var(--accent) 45%, var(--line));
 }
