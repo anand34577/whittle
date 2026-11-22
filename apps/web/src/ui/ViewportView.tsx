@@ -797,6 +797,9 @@ export function ViewportView() {
     // Areas of the sketch go in and out of the profile; "up to a face" also takes a face.
     else if (f?.type === "extrude") filter = { faces: f.extent === "face", edges: false, planes: false, sketches: true };
     else if (f?.type === "revolve") filter = { faces: false, edges: false, planes: false, sketches: true };
+    else if (f?.type === "csys" && f.mode === "references" && session?.csysInput) {
+      filter = { faces: false, edges: true, planes: false, sketches: false, csysGeometry: session.csysInput === "origin" ? "vertex" : "edge" };
+    }
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     else if (mode.kind === "model" && priority !== "all") filter = { faces: priority === "face", edges: priority === "edge", planes: false, sketches: priority === "body" };
     const kinds: readonly DatumKind[] | undefined = f?.type === "construct" ? CONSTRUCT_MODES[f.mode].datums
@@ -956,11 +959,37 @@ export function ViewportView() {
   }, [vp, interference]);
 
   const datumVisibility = doc.datumVisibility;
+  const editingCsys = sessionFeature?.type === "csys" ? sessionFeature : undefined;
   useEffect(() => {
-    vp?.setConstructionPlanes((regen?.planes ?? []).filter((frame) =>
-      frame.kind === "curve" || (datumVisibility?.categories?.[frame.kind ?? "plane"] !== false && datumVisibility?.items?.[frame.id] !== false),
-    ));
-  }, [vp, regen, datumVisibility]);
+    const visible = (id: Id, kind: DatumKind) =>
+      datumVisibility?.categories?.[kind] !== false && datumVisibility?.items?.[id] !== false;
+    const frames = (regen?.planes ?? []).filter((frame) => frame.kind === "curve" || visible(frame.id, frame.kind ?? "plane"));
+    let partial = regen?.partialCsys?.id === editingCsys?.id ? regen?.partialCsys : undefined;
+    if (editingCsys && visible(editingCsys.id, "csys")) {
+      const f = editingCsys;
+      const builtDoc = useApp.getState().builtDoc;
+      const built = builtDoc && findFeature(builtDoc, f.id, "csys");
+      const index = frames.findIndex((frame) => frame.id === f.id);
+      if (!built || built.mode !== f.mode || (f.mode === "references" && built.refs !== f.refs)) {
+        if (index >= 0) frames.splice(index, 1);
+        partial = undefined;
+      } else if (f.mode === "references") {
+        const flipX = built.flipX !== f.flipX;
+        const flipZ = built.flipZ !== f.flipZ;
+        const reverse = (v: Vec3): Vec3 => [-v[0], -v[1], -v[2]];
+        const frame = frames[index];
+        // Display flip changes immediately while the worker regenerates dependent features.
+        if (frame && (flipX || flipZ)) frames[index] = {
+          ...frame,
+          xDir: flipX ? reverse(frame.xDir) : frame.xDir,
+          yDir: flipX !== flipZ ? reverse(frame.yDir) : frame.yDir,
+          normal: flipZ ? reverse(frame.normal) : frame.normal,
+        };
+        if (partial?.z && flipZ) partial = { ...partial, z: reverse(partial.z) };
+      }
+    } else partial = undefined;
+    vp?.setConstructionPlanes(frames, partial);
+  }, [vp, regen, datumVisibility, editingCsys]);
 
   // Reference pictures: the edited sketch's always, others unless hidden.
   useEffect(() => {
@@ -1040,7 +1069,10 @@ export function ViewportView() {
     const f = sessionFeature;
     const pb = regen?.pickBodies ?? regen?.bodies ?? [];
     const edgeRefs = f && (f.type === "fillet" || f.type === "chamfer") ? f.edges : f?.type === "pattern" && f.axisGeom?.edge ? [f.axisGeom.edge] : [];
-    for (const ref of edgeRefs) {
+    const csysEdges = f?.type === "csys" && f.mode === "references"
+      ? Object.values(f.refs ?? {}).flatMap((ref) => ref.kind === "edge" || ref.kind === "vertex" ? [ref.edge] : [])
+      : [];
+    for (const ref of [...edgeRefs, ...csysEdges]) {
       const b = pb.find((x) => x.id === ref.bodyId);
       const i = b ? matchEdge(b.edges, ref) : -1;
       if (b && i >= 0) items.push({ pick: { kind: "edge", bodyId: b.id, index: i }, style: "ref" });

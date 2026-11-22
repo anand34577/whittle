@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { createRequire } from "node:module";
+import opencascade from "replicad-opencascadejs";
+import { setOC } from "replicad";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   type ConstructFeature, type CsysFeature, type SketchFeature, type Vec3,
-  dependents, deserializeDocument, makeConstruct, makeConstructionPlane, makeCsys, makeSketch,
+  dependents, deserializeDocument, makeConstruct, makeConstructionPlane, makeCsys, makePrimitive, makeSketch,
   newDocument, renameParameter, reorderProblem, serializeDocument,
 } from "@whittle/core";
 import { Builder } from "../src/build";
+
+beforeAll(async () => {
+  const wasm = createRequire(import.meta.url).resolve("replicad-opencascadejs/wasm");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setOC(await (opencascade as any)({ locateFile: () => wasm }));
+});
 
 function fixture() {
   const doc = newDocument();
@@ -106,13 +115,62 @@ describe("datum coordinate systems", () => {
     }
   });
 
+  it("previews just the resolved origin and Z while keeping the incomplete frame out of the timeline", () => {
+    const { doc, csys } = fixture();
+    const builder = new Builder();
+    const initialRefs = { ...csys.refs };
+    csys.refs = { origin: initialRefs.origin };
+    const point = builder.regen(doc, "preview", csys.id);
+    expect(point.partialCsys).toEqual({ id: csys.id, origin: [0, 0, 4] });
+    csys.refs.z = initialRefs.z;
+    const axis = builder.regen(doc, "preview", csys.id);
+    expect(axis.partialCsys?.id).toBe(csys.id);
+    expectVector(axis.partialCsys!.z!, [0, Math.SQRT1_2, Math.SQRT1_2]);
+    csys.flipZ = true;
+    const flipped = builder.regen(doc, "preview", csys.id);
+    expectVector(flipped.partialCsys!.z!, [0, -Math.SQRT1_2, -Math.SQRT1_2]);
+    expect(flipped.planes.some((frame) => frame.id === csys.id)).toBe(false);
+    expect(flipped.sketches).toHaveLength(0);
+    expect(builder.regen(doc, "final").partialCsys).toBeUndefined();
+  });
+
+  it("resolves and regenerates model vertex and straight-edge refs with a plane-derived X", () => {
+    const doc = newDocument();
+    const box = makePrimitive(doc, "box");
+    const zPlane = makeConstructionPlane(doc, { kind: "origin", plane: "XY", offset: "0" });
+    const xPlane = makeConstructionPlane(doc, { kind: "origin", plane: "XZ", offset: "0" });
+    doc.features.push(box, zPlane, xPlane);
+    const builder = new Builder();
+    const edge = builder.regen(doc, "final").bodies[0]!.edges.find((edge) =>
+      edge.curve === "LINE" && Math.abs(edge.tangent[2]) > 0.99)!;
+    const edgeRef = { ...edge, bodyId: box.id };
+    const csys = makeCsys(doc);
+    csys.mode = "references";
+    csys.refs = { origin: { kind: "vertex", edge: edgeRef, end: 0 }, z: { kind: "edge", edge: edgeRef }, x: { kind: "plane", id: xPlane.id } };
+    doc.features.push(csys);
+    expect(dependents(doc, box.id).map((f) => f.id)).toContain(csys.id);
+    const built = builder.regen(doc, "final");
+    const frame = built.planes.find((entry) => entry.id === csys.id)!;
+    expectVector(frame.normal, edge.tangent);
+    expect(Math.abs(frame.xDir[0])).toBeCloseTo(1);
+    expectVector(new Builder().regen(deserializeDocument(serializeDocument(doc)), "final").planes.at(-1)!.origin, frame.origin);
+    if (box.type !== "primitive") throw new Error("Expected a primitive fixture");
+    box.position[2] = "1";
+    const moved = builder.regen(doc, "final").planes.at(-1)!;
+    expectVector(moved.origin, [frame.origin[0], frame.origin[1], frame.origin[2] + 1]);
+    csys.refs.x = { kind: "plane", id: zPlane.id };
+    const ambiguous = builder.regen(doc, "preview", csys.id);
+    expect(ambiguous.status.at(-1)?.message).toContain("does not define a unique X direction");
+    expect(ambiguous.partialCsys?.z).toBeDefined();
+  });
+
   const invalid: [string, (f: ReturnType<typeof fixture>) => void, string, "error" | "incomplete"][] = [
     ["unassigned", ({ csys }) => { delete csys.refs.origin; }, "Pick a datum point", "incomplete"],
-    ["missing", ({ csys }) => { csys.refs.origin!.id = "missing"; }, "must exist", "error"],
+    ["missing", ({ csys }) => { csys.refs.origin = { kind: "point", id: "missing" }; }, "must exist", "error"],
     ["wrong declared kind", ({ csys, x }) => { csys.refs.origin = { kind: "axis", id: x.id } as unknown as CsysFeature["refs"]["origin"]; }, "Expected a datum point", "error"],
-    ["wrong resolved kind", ({ csys, x }) => { csys.refs.origin!.id = x.id; }, "Expected a datum point", "error"],
+    ["wrong resolved kind", ({ csys, x }) => { csys.refs.origin = { kind: "point", id: x.id }; }, "Expected a datum point", "error"],
     ["forward", ({ doc, x }) => { doc.features.splice(doc.features.indexOf(x), 1); doc.features.push(x); }, "earlier", "error"],
-    ["self", ({ csys }) => { csys.refs.origin!.id = csys.id; }, "itself", "error"],
+    ["self", ({ csys }) => { csys.refs.origin = { kind: "point", id: csys.id }; }, "itself", "error"],
     ["cycle", ({ doc, csys }) => {
       const after = makeConstructionPlane(doc, { kind: "csys", csys: csys.id, plane: "XY", offset: "0" });
       doc.features.push(after);

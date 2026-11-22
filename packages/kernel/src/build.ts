@@ -10,7 +10,7 @@
  */
 import { CSYS_INPUT_KINDS, type BodyOp, type CsysFeature, type CsysInput, type EdgeRef, type LengthUnit, lengthText, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, drawnEntities, entityOutline, expandSketch, frameAxes, planeOrigin, sketchGap, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
 import { type Blueprint, Drawing, type Edge, type Face, draw, organiseBlueprints, type FaceFinder, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeSolid, Vector, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
-import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
+import type { BodyResult, FeatureStatus, PartialCsys, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
 import "./fastTopo";
 import { parseOBJ, stlToShape } from "./stl";
@@ -18,7 +18,7 @@ import { circleOf, constructFrame } from "./construct";
 import { surfaceTool, prismSurface, revolveSurface } from "./surface";
 import { CELL_INFO, alignBody, curveTool, widestSection, applyJoint, joinKeepingFaces, boundaryCells, deleteFaces, patternOnPath, replaceFaces, ribTool, threadTool } from "./extra";
 import { solveSketch } from "./solver";
-import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, scale, sub as subv } from "./refs";
+import { add, cross, dot, edgeInfo, faceInfo, norm, resolveEdge, resolveFace, resolveVertex, scale, sub as subv } from "./refs";
 
 import { type AnySketch, clean, cutSolids, fixNormals, fuseSolids, intersectSolids, isValidShape, AXES, FRIENDLY, FeatureError, ORIGIN_FRAMES, bodyForRefs, boxCenter, deg, shapeBounds, describeError, hasSolid, orient, planeFromFrame, polyDrawing, drawingPieces, sketchDrawing, sketchPath, sketchRegionDrawings } from "./shared";
 export * from "./shared";
@@ -182,38 +182,67 @@ function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, t
   return;
 }
 
-function csysFrame(f: CsysFeature, ev: Evaluator, built: (id: Id) => SketchFrame | undefined): SketchFrame {
+function csysFrame(
+  f: CsysFeature,
+  ev: Evaluator,
+  built: (id: Id) => SketchFrame | undefined,
+  bodies: Map<Id, Shape3D>,
+  showPartial?: (preview: PartialCsys) => void,
+): { frame: SketchFrame; warning?: string } {
   if (f.mode === "manual") {
     const origin = f.position.map((expr, i) => ev.num(expr, "length", `Origin ${"XYZ"[i]}`)) as Vec3;
     const [rx, ry, rz] = f.rotation.map((expr, i) => ev.num(expr, "angle", `Rotation about ${"XYZ"[i]}`)) as Vec3;
     const rotate = (v: Vec3) => rotateAbout(rotateAbout(rotateAbout(v, AXES.x, rx), AXES.y, ry), AXES.z, rz);
-    return { id: f.id, kind: "csys", origin, xDir: rotate(AXES.x), yDir: rotate(AXES.y), normal: rotate(AXES.z) };
+    return { frame: { id: f.id, kind: "csys", origin, xDir: rotate(AXES.x), yDir: rotate(AXES.y), normal: rotate(AXES.z) } };
   }
+  let uncertain = false;
   const source = (input: CsysInput, label: string) => {
     const ref = f.refs?.[input];
-    if (!ref?.id) throw new FeatureError(`Pick ${label}.`, undefined, true);
+    if (!ref) throw new FeatureError(`Pick ${label}.`, undefined, true);
+    if (ref.kind === "vertex" && input === "origin") {
+      const match = resolveVertex(bodyForRefs(bodies, ref.edge.bodyId), ref);
+      if (!match) throw new FeatureError("The edge locating the origin vertex changed. Pick the vertex again.");
+      uncertain ||= match.uncertain;
+      return match.item;
+    }
+    if (ref.kind === "edge" && input !== "origin") {
+      const match = resolveEdge(bodyForRefs(bodies, ref.edge.bodyId), ref.edge);
+      if (!match || match.item.geomType !== "LINE") throw new FeatureError("The reference needs a straight edge. Pick the edge again.");
+      uncertain ||= match.uncertain;
+      const direction = subv(match.item.endPoint.toTuple(), match.item.startPoint.toTuple());
+      return dot(direction, ref.edge.tangent) < 0 ? scale(direction, -1) : direction;
+    }
+    if (ref.kind === "vertex" || ref.kind === "edge" || !CSYS_INPUT_KINDS[input].includes(ref.kind)) {
+      throw new FeatureError(`Expected ${label}.`);
+    }
     if (ref.id === f.id) throw new FeatureError("A coordinate system cannot reference itself.");
-    if (!CSYS_INPUT_KINDS[input].includes(ref.kind)) throw new FeatureError(`Expected ${label}.`);
     // Only prior successful steps are in the map. Every cycle has a forward edge.
     const frame = built(ref.id);
     if (!frame) throw new FeatureError(`The reference for ${label} must exist, be earlier in the timeline, be unsuppressed, and build successfully.`);
     if (frame.kind !== ref.kind) throw new FeatureError(`Expected ${label}.`);
-    return frame;
+    return input === "origin" ? frame.origin : frame.normal;
   };
-  const { origin } = source("origin", "a datum point for the origin");
-  const z = source("z", "a datum axis or plane for Z").normal;
-  const x = source("x", "a datum axis for X").normal;
   const unit = (v: Vec3, message: string): Vec3 => {
     const length = Math.hypot(...v);
     if (!Number.isFinite(length) || length < 1e-9) throw new FeatureError(message);
     return scale(v, 1 / length);
   };
-  const zUnit = unit(z, "The Z reference has no direction.");
-  const xHint = unit(x, "The X reference has no direction.");
-  const normal = f.flipZ ? scale(zUnit, -1) : zUnit;
+  const origin = source("origin", "a datum point, coordinate system, or vertex for the origin");
+  showPartial?.({ id: f.id, origin });
+  const z = unit(source("z", "a datum axis, plane, or straight edge for Z"), "The Z reference has no direction.");
+  const normal = f.flipZ ? scale(z, -1) : z;
+  showPartial?.({ id: f.id, origin, z: normal });
+  const x = source("x", "a datum axis, plane, or straight edge for X");
+  // Orient the plane intersection using the unflipped Z so Flip Z leaves X alone.
+  const xHint = f.refs.x?.kind === "plane"
+    ? unit(cross(x, z), "The X plane is perpendicular to Z and does not define a unique X direction.")
+    : unit(x, "The X reference has no direction.");
   const yDir = unit(cross(normal, f.flipX ? scale(xHint, -1) : xHint), "The X and Z references are parallel.");
   const xDir = cross(yDir, normal);
-  return { id: f.id, kind: "csys", origin, xDir, yDir, normal };
+  return {
+    frame: { id: f.id, kind: "csys", origin, xDir, yDir, normal },
+    warning: uncertain ? "A coordinate system edge or vertex moved. Check that it is still the intended reference." : undefined,
+  };
 }
 
 /** The frame of an origin plane (optionally tilted), a flat face, or a construction plane, moved by its offset. */
@@ -404,6 +433,18 @@ export class Builder {
     }
     let ghost: BodyResult | undefined;
     const gi = this.ghostFeature ? doc.features.findIndex((f) => f.id === this.ghostFeature) : -1;
+    let partialCsys: PartialCsys | undefined;
+    const active = doc.features[gi];
+    const beforeActive = gi > 0 ? this.cache[gi - 1] : undefined;
+    if (gi < end && active?.type === "csys" && active.mode === "references" && !active.suppressed && beforeActive &&
+      !this.cache[gi]?.sketches.has(active.id)) {
+      try {
+        csysFrame(active, createEvaluator(doc.parameters, doc.units), (id) => beforeActive.sketches.get(id)?.frame, beforeActive.bodies,
+          (partial) => { partialCsys = partial; });
+      } catch {
+        // The build status already describes the incomplete or invalid input.
+      }
+    }
     const gs = gi >= 0 ? this.cache[gi]?.ghost : undefined;
     const ghostOp = gi >= 0 ? this.cache[gi]?.ghostOp : undefined;
     if (gs) {
@@ -414,7 +455,7 @@ export class Builder {
       }
     }
     for (const s of statuses) if (CELL_INFO.has(s.id)) s.cells = CELL_INFO.get(s.id);
-    return { bodies, sketches, planes, status: statuses, pickBodies, ghost, ghostOp: ghost ? ghostOp : undefined, ms: performance.now() - t0, rebuilt };
+    return { bodies, sketches, planes, partialCsys, status: statuses, pickBodies, ghost, ghostOp: ghost ? ghostOp : undefined, ms: performance.now() - t0, rebuilt };
   }
 
   /** The final body shapes of the active timeline (for export). */
@@ -609,9 +650,9 @@ export class Builder {
       }
 
       case "csys": {
-        const frame = csysFrame(f, ev, (id) => sketches.get(id)?.frame);
+        const { frame, warning } = csysFrame(f, ev, (id) => sketches.get(id)?.frame, bodies);
         sketches.set(f.id, { frame, drawing: null });
-        return;
+        return warning;
       }
 
       case "cplane": {

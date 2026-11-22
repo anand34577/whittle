@@ -11,9 +11,9 @@ export function datumKind(f: Feature): DatumKind | undefined {
 }
 
 export const CSYS_INPUT_KINDS: Record<CsysInput, readonly DatumKind[]> = {
-  origin: ["point"],
+  origin: ["point", "csys"],
   z: ["axis", "plane"],
-  x: ["axis"],
+  x: ["axis", "plane"],
 };
 
 /** Older documents store separate arrays of geometry picks and literal coordinates. */
@@ -33,7 +33,7 @@ export function featureInputs(f: Feature): Id[] {
       if (f.plane.kind === "csys") return [f.plane.csys];
       return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
     case "csys":
-      return f.mode === "references" ? [...new Set(Object.values(f.refs ?? {}).map((ref) => ref.id))] : [];
+      return f.mode === "references" ? [...new Set(Object.values(f.refs ?? {}).map((ref) => ref.kind === "edge" || ref.kind === "vertex" ? ref.edge.bodyId : ref.id))] : [];
     case "rib":
       return [f.sketch, ...(f.target ? [f.target] : [])];
     case "thread":

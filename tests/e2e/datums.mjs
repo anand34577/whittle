@@ -197,21 +197,53 @@ try {
     return [...regen.planes, ...regen.sketches].find((frame) => frame.id === id);
   }, id);
   assert.deepEqual((await frameFor(csys.id)).origin, [12, 0, 0]);
-  await page.getByRole("radio", { name: "From datums", exact: true }).click();
-  await page.getByRole("button", { name: "Pick Origin", exact: true }).click();
+  await page.getByRole("radio", { name: "References", exact: true }).click();
+  const collector = (name) => page.getByRole("button", { name, exact: true });
+  const pressed = (name) => collector(name).getAttribute("aria-pressed");
+  assert.equal(await pressed("Pick Origin"), "true");
   await row("Fixture axis").click();
   assert.equal((await active()).refs.origin, undefined, "Wrong-kind pick is rejected in the CSYS editor");
   await row("Second point").click();
-  await page.getByRole("button", { name: "Pick Z direction", exact: true }).click();
+  assert.equal(await pressed("Pick Z axis"), "true");
+  assert.equal(await collector("Replace Origin").textContent(), "Second point");
+  await waitBuilt();
+  const partial = () => page.evaluate(() => window.whittle.useApp.getState().regen.partialCsys);
+  assert.ok((await partial())?.origin);
+  assert.equal((await partial()).z, undefined);
   await page.waitForFunction((id) => window.whittle.viewportRef.current.filter.datumInputs?.has(id), intersectionAxis.id);
   await clickDatumOutline(intersectionAxis.id);
-  await page.getByRole("button", { name: "Pick X direction", exact: true }).click();
+  assert.equal(await pressed("Pick X axis"), "true");
+  await waitBuilt();
+  assert.ok((await partial()).z);
+  const flipZ = page.getByRole("checkbox", { name: "Flip Z", exact: true });
+  const flipX = page.getByRole("checkbox", { name: "Flip X", exact: true });
+  const assertFlipped = (after, before) => assert.ok(after.every((value, i) => Math.abs(value + before[i]) < 1e-9));
+  const partialZ = (await partial()).z;
+  await flipZ.click();
+  await waitBuilt();
+  assertFlipped((await partial()).z, partialZ);
+  await flipZ.click();
   await step(pointAxis.name).click();
   assert.deepEqual((await active()).refs, {
     origin: { kind: "point", id: "test-point-2" },
     z: { kind: "axis", id: intersectionAxis.id },
     x: { kind: "axis", id: pointAxis.id },
   });
+  assert.equal(await pressed("Replace X axis"), "false");
+  await collector("Clear Origin").click();
+  assert.equal(await pressed("Pick Origin"), "true");
+  assert.equal((await active()).refs.origin, undefined);
+  await row("Second point").click();
+  await collector("Replace X axis").click();
+  assert.equal(await pressed("Replace X axis"), "true");
+  assert.equal(await collector("Replace X axis").textContent(), pointAxis.name);
+  await step(pointAxis.name).click();
+  await waitBuilt();
+  const beforeFlip = await frameFor(csys.id);
+  await flipX.click();
+  await waitBuilt();
+  assertFlipped((await frameFor(csys.id)).xDir, beforeFlip.xDir);
+  await flipX.click();
   await finish();
 
   const color = () => page.evaluate((id) => window.whittle.viewportRef.current.datums.get(id).materials[0].color.getHex(), csys.id);
@@ -311,6 +343,36 @@ try {
   assert.ok(Math.abs(signedOffset - 7) < 1e-6, "Plane offsets from the newly picked face");
   await finish();
   console.log("ok  Construction plane starts on a selected face and can be rebound to another flat face");
+
+  await command("csys");
+  const modelCsys = await active();
+  await page.getByRole("radio", { name: "References", exact: true }).click();
+  await waitBuilt();
+  const boxEdges = await page.evaluate((id) =>
+    window.whittle.useApp.getState().regen.pickBodies.find((body) => body.id === id).edges, box.id);
+  const previewHit = async (positions, accept = () => true) => {
+    for (const position of positions) {
+      const xy = await screen(position);
+      const pick = await page.evaluate(([clientX, clientY]) => window.whittle.viewportRef.current.pick({ clientX, clientY }), xy);
+      if (pick?.kind === "edge" && pick.bodyId === box.id && accept(boxEdges[pick.index])) return { xy, pick };
+    }
+    assert.fail("A visible box edge or vertex should be pickable");
+  };
+  const vertex = await previewHit(boxEdges.flatMap((edge) => edge.ends ?? []));
+  await page.mouse.click(...vertex.xy);
+  assert.equal((await active()).refs.origin?.kind, "vertex");
+  assert.equal(await pressed("Pick Z axis"), "true");
+  const zEdge = await previewHit(boxEdges.map((edge) => edge.mid));
+  await page.mouse.click(...zEdge.xy);
+  assert.equal((await active()).refs.z?.kind, "edge");
+  const direction = boxEdges[zEdge.pick.index].tangent;
+  const perpendicular = (edge) => Math.abs(edge.tangent.reduce((sum, component, i) => sum + component * direction[i], 0)) < 0.01;
+  const xEdge = await previewHit(boxEdges.filter(perpendicular).map((edge) => edge.mid), perpendicular);
+  await page.mouse.click(...xEdge.xy);
+  assert.equal((await active()).refs.x?.kind, "edge");
+  await finish();
+  assert.deepEqual((await frameFor(modelCsys.id)).origin, vertex.pick.at);
+  console.log("ok  CSYS collects persistent model vertex and straight edges from the viewport");
 } finally {
   await browser.close();
 }

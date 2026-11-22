@@ -94,12 +94,19 @@ export interface FeatureStatus {
   cells?: { volume: number; center: Vec3 }[];
 }
 
+export interface PartialCsys {
+  id: Id;
+  origin: Vec3;
+  z?: Vec3;
+}
+
 export interface RegenResult {
   seq: number;
   bodies: BodyResult[];
   sketches: SketchFrame[];
   /** Construction planes, for display and picking. */
   planes: SketchFrame[];
+  partialCsys?: PartialCsys;
   status: FeatureStatus[];
   /** Bodies as they were just before pickBefore (for picking while a feature previews). */
   pickBodies?: BodyResult[];

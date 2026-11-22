@@ -14,7 +14,7 @@ import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { BodyMeta, Id, OriginPlane, SketchImage, Vec2, Vec3 } from "@whittle/core";
-import type { BodyResult, SketchFrame } from "@whittle/kernel";
+import type { BodyResult, PartialCsys, SketchFrame } from "@whittle/kernel";
 import type { Pick, ViewSettings } from "../state/store";
 import { lookById } from "./looks";
 import { VIEWPORT_THEMES, type ViewportTheme } from "./theme";
@@ -28,6 +28,7 @@ export type CubeView = "front" | "back" | "left" | "right" | "top" | "bottom" | 
 export interface PickFilter {
   datums?: boolean;
   datumInputs?: ReadonlySet<Id>;
+  csysGeometry?: "vertex" | "edge";
   faces: boolean;
   edges: boolean;
   planes: boolean;
@@ -602,7 +603,7 @@ export class Viewport {
 
   private static readonly csysColors = [0xdb575d, 0x43a872, 0x4b87df];
 
-  setConstructionPlanes(frames: SketchFrame[]) {
+  setConstructionPlanes(frames: SketchFrame[], partial?: PartialCsys) {
     this.clearGroup(this.cplanes);
     this.datums.clear();
     this.lastClick = null;
@@ -667,6 +668,23 @@ export class Viewport {
       const toWorld = this.frameMapper(f);
       const corners = [toWorld([-h, -h]), toWorld([h, -h]), toWorld([h, h]), toWorld([-h, h])];
       this.datums.set(f.id, { kind: "plane", segments: corners.map((start, i) => [start, corners[(i + 1) % 4]!]), materials: [mat, border.material] });
+    }
+    if (partial) {
+      const origin = new THREE.Vector3(...partial.origin);
+      const color = Viewport.csysColors[2];
+      const point = new THREE.Points(new THREE.BufferGeometry().setFromPoints([origin]),
+        new THREE.PointsMaterial({ color, size: 9, sizeAttenuation: false, depthTest: false }));
+      point.raycast = () => {};
+      point.renderOrder = 5;
+      this.cplanes.add(point);
+      if (partial.z) {
+        const end = origin.clone().addScaledVector(new THREE.Vector3(...partial.z), s * 0.55);
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, end]),
+          new THREE.LineBasicMaterial({ color, depthTest: false }));
+        line.raycast = () => {};
+        line.renderOrder = 5;
+        this.cplanes.add(line);
+      }
     }
     this.invalidate();
   }
@@ -1418,7 +1436,7 @@ export class Viewport {
   pick(e: { clientX: number; clientY: number }): Pick | null {
     // Bodies are drawn away from where they are while exploded, so a click wouldn't mean the right place.
     if ((this.view.explode ?? 0) > 0.001) return null;
-    const usePick = this.pickBodies.length > 0;
+    const usePick = this.pickBodies.length > 0 || !!this.filter.csysGeometry;
     const views = usePick ? this.pickBodies : [...this.bodies.values()].filter((v) => v.visible);
     this.raycaster.setFromCamera(this.ndc(e), this.camera);
     const meshes = views.map((v) => v.mesh);
@@ -1450,7 +1468,10 @@ export class Viewport {
     }
     // Edges first: they're thin, so they get a generous screen-space radius.
     if (this.filter.edges) {
-      const edge = this.pickEdge(views, sp, faceHit?.distance ?? Infinity);
+      const faceDist = faceHit?.distance ?? Infinity;
+      const edge = this.filter.csysGeometry === "vertex"
+        ? this.pickStraightEndpoint(views, sp, faceDist)
+        : this.pickEdge(views, sp, faceDist);
       if (edge) return edge;
     }
     if (this.filter.datums && !this.filter.datumInputs) {
@@ -1537,6 +1558,30 @@ export class Viewport {
     return { d: Math.hypot(pa[0] + dx * t - sp[0], pa[1] + dy * t - sp[1]), t };
   }
 
+  private pickStraightEndpoint(views: BodyView[], sp: Vec2, faceDist: number): Pick | null {
+    let distance = 7;
+    let best: Pick | null = null;
+    const ray = this.raycaster.ray;
+    const point = new THREE.Vector3();
+    const tolerance = this.orbit.distance * 0.004;
+    for (const view of views) {
+      for (const [index, edge] of view.data.edges.entries()) {
+        if (edge.curve !== "LINE" || edge.length <= 1e-9 || !edge.ends) continue;
+        for (const at of edge.ends) {
+          const screen = this.worldToScreen(at);
+          const d = Math.hypot(screen[0] - sp[0], screen[1] - sp[1]);
+          if (d >= distance) continue;
+          point.set(...at);
+          if (this.view.section && this.clip.distanceToPoint(point) < 0) continue;
+          if (point.sub(ray.origin).dot(ray.direction) > faceDist + tolerance) continue;
+          distance = d;
+          best = { kind: "edge", bodyId: view.id, index, at };
+        }
+      }
+    }
+    return best;
+  }
+
   private pickEdge(views: BodyView[], sp: Vec2, faceDist: number): Pick | null {
     const radius = 7;
     let best: { d: number; bodyId: Id; index: number; at: Vec3 } | null = null;
@@ -1549,6 +1594,7 @@ export class Viewport {
       const pos = v.data.edgePositions;
       const ranges = v.data.edgeRanges;
       for (let ei = 0; ei < ranges.length / 2; ei++) {
+        if (this.filter.csysGeometry === "edge" && v.data.edges[ei]?.curve !== "LINE") continue;
         const s = ranges[ei * 2]!;
         const c = ranges[ei * 2 + 1]!;
         for (let k = s; k + 1 < s + c; k += 2) {

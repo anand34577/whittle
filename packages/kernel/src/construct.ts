@@ -2,7 +2,7 @@
 import { CONSTRUCT_MODES, type ConstructFeature, type DatumKind, type Vec3, constructRefs, frameAxes } from "@whittle/core";
 import type { Edge, Face, Shape3D } from "replicad";
 import type { SketchFrame } from "./protocol";
-import { add, byLength, cross, dist, dot, edgeInfo, faceInfo, len, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
+import { add, byLength, cross, dist, dot, edgeInfo, faceInfo, len, norm, resolveEdge, resolveVertex, resolveFace, scale, sub } from "./refs";
 
 export interface ConstructEnv {
   body(id: string): Shape3D;
@@ -111,14 +111,10 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
       case "point":
         return datum(ref.id, "point").origin;
       case "vertex": {
-        const r = resolveEdge(env.body(ref.edge.bodyId), ref.edge);
-        if (!r || r.item.geomType !== "LINE") throw env.fail("The edge locating this vertex is gone. Pick the vertex again.");
-        const start = r.item.startPoint.toTuple();
-        const end = r.item.endPoint.toTuple();
-        const alignment = dot(norm(sub(end, start)), ref.edge.tangent);
-        if (Math.abs(alignment) < 0.9) throw env.fail("The vertex direction changed. Pick the vertex again.");
+        const r = resolveVertex(env.body(ref.edge.bodyId), ref);
+        if (!r) throw env.fail("The edge locating this vertex is gone or changed direction. Pick the vertex again.");
         uncertain ||= r.uncertain;
-        return (ref.end === 0) === (alignment > 0) ? start : end;
+        return r.item;
       }
       default:
         throw env.fail("This needs a datum point, vertex, or XYZ point.");

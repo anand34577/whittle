@@ -650,7 +650,7 @@ export function startConstruct(mode: ConstructMode) {
 }
 
 /** Snap to a nearby edge endpoint, retaining a straight edge's persistent reference when possible. */
-function snapPointPick(p: Pick & { at?: Vec3 }): { at: Vec3; vertex?: VertexRef } | null {
+function snapPointPick(p: Pick & { at?: Vec3 }, persistentOnly = false): { at: Vec3; vertex?: VertexRef } | null {
   if (!p.at) return null;
   const at = p.at;
   const body = p.kind === "face" || p.kind === "edge" || p.kind === "body" ? pickableBodies().find((b) => b.id === p.bodyId) : undefined;
@@ -658,7 +658,7 @@ function snapPointPick(p: Pick & { at?: Vec3 }): { at: Vec3; vertex?: VertexRef 
   let vertex: VertexRef | undefined;
   let bestD = 3;
   if (body) for (const e of body.edges) {
-    if (!e.ends) continue;
+    if (!e.ends || (persistentOnly && (e.curve !== "LINE" || e.length <= 1e-9))) continue;
     const [start, end] = e.ends;
     for (const i of [0, 1] as const) {
       const pick = e.ends[i];
@@ -798,28 +798,38 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
-  if (f?.type === "csys" && p?.kind === "datum") {
-    const input = session?.csysInput;
-    if (f.mode !== "references" || !input) return;
-    const source = findFeature(doc, p.id);
-    if (!source || source.suppressed || doc.features.indexOf(source) >= doc.features.indexOf(f)) {
-      return toast("warn", "Pick an earlier, unsuppressed datum.");
-    }
-    const kind = datumKind(source);
-    if (kind !== p.datumKind) return;
-    if (!CSYS_INPUT_KINDS[input].includes(kind)) {
-      return toast("warn", "Pick a datum of the requested kind.");
+  if (f?.type === "csys" && f.mode === "references" && session?.csysInput && p) {
+    const input = session.csysInput;
+    const refs = { ...f.refs };
+    if (p.kind === "datum") {
+      const source = findFeature(doc, p.id);
+      if (!source || source.suppressed || doc.features.indexOf(source) >= doc.features.indexOf(f)) {
+        return toast("warn", "Pick an earlier, unsuppressed datum.");
+      }
+      const kind = datumKind(source);
+      if (kind !== p.datumKind || !CSYS_INPUT_KINDS[input].includes(kind)) {
+        return toast("warn", "Pick a reference of the requested kind.");
+      }
+      if (input === "origin" && (kind === "point" || kind === "csys")) refs.origin = { kind, id: p.id };
+      if (input !== "origin" && (kind === "axis" || kind === "plane")) refs[input] = { kind, id: p.id };
+    } else if (input === "origin") {
+      const vertex = p.kind === "edge" ? snapPointPick(p, true)?.vertex : undefined;
+      if (!vertex) return toast("warn", "Pick a model vertex at the end of a straight edge, or a datum point.");
+      refs.origin = vertex;
+    } else {
+      const edge = edgeRefFromPick(p);
+      if (edge?.curve !== "LINE" || edge.length <= 1e-9) return toast("warn", "Pick a straight edge, datum axis, or plane.");
+      refs[input] = { kind: "edge", edge };
     }
     mutate("Pick coordinate system reference", (d) => {
       const x = findFeature(d, f.id, "csys");
-      if (!x) return;
-      const refs = (x.refs ??= {});
-      if (input === "origin" && kind === "point") refs.origin = { kind, id: p.id };
-      if (input === "z" && (kind === "axis" || kind === "plane")) refs.z = { kind, id: p.id };
-      if (input === "x" && kind === "axis") refs.x = { kind, id: p.id };
+      if (x) x.refs = refs;
     });
     const current = get().session;
-    if (current) set({ session: { ...current, csysInput: undefined } });
+    const order = ["origin", "z", "x"] as const;
+    const next = order.slice(order.indexOf(input) + 1).find((field) => !refs[field])
+      ?? order.find((field) => !refs[field]);
+    if (current?.featureId === f.id) set({ session: { ...current, csysInput: next } });
     return;
   }
   if (f?.type === "cplane" && p?.kind === "face") {

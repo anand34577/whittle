@@ -1048,6 +1048,31 @@ button.docname__state:hover {
   margin-left: auto;
 }
 
+.csys-refs {
+  display: grid;
+  gap: 4px;
+}
+.csys-refs__row {
+  display: grid;
+  grid-template-columns: 3.5em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+.csys-refs__pick {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  white-space: nowrap;
+}
+.csys-refs__pick[aria-pressed="true"] {
+  border-color: var(--select);
+}
+.csys-refs__row .link:disabled {
+  visibility: hidden;
+}
+
 .tips p {
   margin: 0 0 8px;
   font-size: var(--fs-sm);

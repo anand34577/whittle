@@ -259,9 +259,9 @@ export interface CsysFeature extends FeatureBase {
   rotation: [Expr, Expr, Expr];
   mode: "manual" | "references";
   refs: {
-    origin?: DatumRef<"point">;
-    z?: DatumRef<"axis" | "plane">;
-    x?: DatumRef<"axis">;
+    origin?: DatumRef<"point" | "csys"> | VertexRef;
+    z?: DatumRef<"axis" | "plane"> | { kind: "edge"; edge: EdgeRef };
+    x?: DatumRef<"axis" | "plane"> | { kind: "edge"; edge: EdgeRef };
   };
   flipZ: boolean;
   flipX: boolean;

@@ -1054,9 +1054,9 @@ function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
 }
 
 const CSYS_FIELDS: { input: CsysInput; label: string; hint: string }[] = [
-  { input: "origin", label: "Origin", hint: "Pick a datum point" },
-  { input: "z", label: "Z direction", hint: "Pick a datum axis or plane" },
-  { input: "x", label: "X direction", hint: "Pick a datum axis" },
+  { input: "origin", label: "Origin", hint: "Point, CSYS, or vertex" },
+  { input: "z", label: "Z axis", hint: "Axis, plane, or straight edge" },
+  { input: "x", label: "X axis", hint: "Axis, plane, or straight edge" },
 ];
 
 function CsysEditor({ f }: { f: CsysFeature }) {
@@ -1069,10 +1069,10 @@ function CsysEditor({ f }: { f: CsysFeature }) {
   return (
     <>
       <Segmented label="Placement" value={f.mode} options={[
-        { value: "manual", label: "Manual" }, { value: "references", label: "From datums" },
+        { value: "manual", label: "Manual" }, { value: "references", label: "References" },
       ]} onChange={(mode) => {
         upd(f, "Placement", (d) => { d.mode = mode; });
-        chooseInput();
+        chooseInput(mode === "references" ? CSYS_FIELDS.find(({ input }) => !f.refs?.[input])?.input : undefined);
       }} />
       {f.mode === "manual" ? (
         <>
@@ -1090,20 +1090,32 @@ function CsysEditor({ f }: { f: CsysFeature }) {
         </>
       ) : (
         <>
-          {CSYS_FIELDS.map(({ input, label, hint }) => {
-            const ref = f.refs?.[input];
-            const name = ref && (features.find((feature) => feature.id === ref.id)?.name ?? "Missing datum");
-            return (
-              <div className="picker" key={input}>
-                <button className="btn btn--small" aria-pressed={picking === input} onClick={() => chooseInput(picking === input ? undefined : input)}>Pick {label}</button>
-                <span>{picking === input ? hint : name ?? "Unassigned"}</span>
-                {ref && <button className="link" aria-label={`Clear ${label}`} onClick={() => upd(f, `Clear ${label}`, (d) => { delete d.refs[input]; })}>Clear</button>}
-              </div>
-            );
-          })}
+          <div className="csys-refs">
+            {CSYS_FIELDS.map(({ input, label, hint }) => {
+              const ref = f.refs?.[input];
+              const active = picking === input;
+              const name = ref && (ref.kind === "edge" || ref.kind === "vertex"
+                ? `${features.find((feature) => feature.id === ref.edge.bodyId)?.name ?? "Missing body"} · ${ref.kind === "edge" ? "Edge" : "Vertex"}`
+                : features.find((feature) => feature.id === ref.id)?.name ?? "Missing datum");
+              return (
+                <div className="csys-refs__row" key={input}>
+                  <span>{label}</span>
+                  <button type="button" className="btn btn--small csys-refs__pick" aria-pressed={active}
+                    aria-label={`${ref ? "Replace" : "Pick"} ${label}`} title={name ? `${name} · Pick ${hint.toLowerCase()}` : hint}
+                    onClick={() => chooseInput(input)}>
+                    {name ?? hint}
+                  </button>
+                  <button type="button" className="link" aria-label={`Clear ${label}`} disabled={!ref} onClick={() => {
+                    upd(f, `Clear ${label}`, (d) => { delete d.refs[input]; });
+                    chooseInput(input);
+                  }}>Clear</button>
+                </div>
+              );
+            })}
+          </div>
           <Checkbox label="Flip Z" checked={f.flipZ} onChange={(value) => upd(f, "Flip Z", (d) => { d.flipZ = value; })} />
           <Checkbox label="Flip X" checked={f.flipX} onChange={(value) => upd(f, "Flip X", (d) => { d.flipX = value; })} />
-          <p className="field__note">X is projected perpendicular to Z. Y completes the right-handed frame.</p>
+          <p className="field__note">X is projected perpendicular to Z. An X plane supplies its intersection with the plane perpendicular to Z.</p>
         </>
       )}
     </>
