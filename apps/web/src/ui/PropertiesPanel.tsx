@@ -28,46 +28,9 @@ import { ColorPicker, Disclosure, NumberField, Select, Slider } from "./controls
 import { importImage, startImagePick, traceImage, updateImage } from "../state/refImage";
 import { FeatureEditor } from "./FeatureEditors";
 import { fixInUnits } from "./DragHandle";
-import { Icon, type IconName } from "./icons";
+import { featureIcon, Icon, type IconName } from "./icons";
 import { ask } from "../state/platform";
 import { guideSeen, noteGuideSeen } from "../state/learn";
-
-export const FEATURE_ICONS: Record<string, IconName> = {
-  sketch: "sketch",
-  extrude: "extrude",
-  revolve: "revolve",
-  fillet: "fillet",
-  chamfer: "chamfer",
-  shell: "shell",
-  primitive: "box",
-  mirror: "mirror",
-  pattern: "pattern",
-  hole: "hole",
-  loft: "loft",
-  move: "move",
-  combine: "combine",
-  import: "import",
-  sweep: "sweep",
-  coil: "coil",
-  split: "split",
-  offset: "offset",
-  boundingSolid: "box",
-  scale: "scale",
-  draft: "draft",
-  offsetFace: "move",
-  cplane: "plane",
-  csys: "origin",
-  construct: "plane",
-  curve: "path",
-  surface: "shell",
-  rib: "extrude",
-  thread: "thread",
-  replaceFace: "move",
-  deleteFace: "trash",
-  align: "move",
-  boundaryFill: "combine",
-  joint: "move",
-};
 
 const ENTITY_LABELS: Record<SketchEntity["type"], string> = {
   rect: "Rectangle",
@@ -1049,7 +1012,7 @@ export function PropertiesPanel() {
     return (
       <aside className="panel" aria-label={`${f.name} properties`}>
         <header className="panel__head">
-          <Icon name={FEATURE_ICONS[f.type]!} />
+          <Icon name={featureIcon(f)} />
           <div>
             <input
               className="title-input"

@@ -4,7 +4,7 @@ import { type DatumKind, activeEnd, datumKind, documentEvaluator, featureInputs,
 import { createSketchOn, handlePick, saveNamedView, showNamedView } from "../state/actions";
 import { editFeature, mutate, useApp } from "../state/store";
 import { renameBody, renameStep } from "../state/steps";
-import { Icon } from "./icons";
+import { DATUM_ICONS, Icon } from "./icons";
 import { DeferredInput } from "./DeferredInput";
 
 function Section({ title, count, children, defaultOpen = true, forceOpen = false, control }: { title: string; count?: number; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean; control?: React.ReactNode }) {
@@ -133,7 +133,7 @@ export function Browser() {
                         handlePick({ kind: "datum", id: f.id, datumKind: kind }, e.shiftKey || e.ctrlKey || e.metaKey);
                       }
                     }} onDoubleClick={() => mode.kind === "model" && !choosingDatum && editFeature(f.id)}>
-                      <Icon name={kind === "csys" ? "origin" : kind} size={16} />
+                      <Icon name={DATUM_ICONS[kind]} size={16} />
                       <span className={`tree__name ${visible && categoryVisible ? "" : "is-muted"}`}>{f.name}</span>
                     </button>
                     <button className="tree__eye" title="Edit" aria-label={`Edit ${f.name}`} onClick={() => editFeature(f.id)}>

@@ -48,6 +48,9 @@ try {
 
   const tree = page.getByRole("navigation", { name: "Design browser" });
   const row = (name) => tree.getByRole("button", { name, exact: true });
+  const step = (name) => page.locator(".timeline").getByRole("button", { name, exact: true });
+  const icon = (button) => button.locator("svg").innerHTML();
+  const datumIcons = new Set();
   const screen = (world) => page.evaluate((world) => {
     const vp = window.whittle.viewportRef.current;
     const [x, y] = vp.worldToScreen(world);
@@ -68,6 +71,15 @@ try {
     await page.evaluate(() => window.whittle.useApp.setState({ selection: [] }));
     await page.mouse.click(...await screen(worlds[i]));
     assert.equal(await row(datum.name).getAttribute("aria-pressed"), "true", "Viewport pick selects the Browser row");
+    assert.equal(await step(datum.name).getAttribute("aria-pressed"), "true", "Viewport pick selects the timeline step");
+    await page.evaluate(() => window.whittle.useApp.setState({ selection: [] }));
+    await step(datum.name).click();
+    await page.mouse.move(3, 3);
+    assert.equal(await row(datum.name).getAttribute("aria-pressed"), "true", "Timeline click selects the Browser row");
+    assert.notEqual(await opacity(), unselected, "Timeline selection highlights the datum after the pointer leaves");
+    const glyph = await icon(step(datum.name));
+    assert.equal(glyph, await icon(row(datum.name)), "Timeline and Browser share a datum icon");
+    datumIcons.add(glyph);
   }
 
   await row("Fixture plane").dblclick();
@@ -194,7 +206,7 @@ try {
   await page.waitForFunction((id) => window.whittle.viewportRef.current.filter.datumInputs?.has(id), intersectionAxis.id);
   await clickDatumOutline(intersectionAxis.id);
   await page.getByRole("button", { name: "Pick X direction", exact: true }).click();
-  await row(pointAxis.name).click();
+  await step(pointAxis.name).click();
   assert.deepEqual((await active()).refs, {
     origin: { kind: "point", id: "test-point-2" },
     z: { kind: "axis", id: intersectionAxis.id },
@@ -210,8 +222,13 @@ try {
   await page.evaluate(() => window.whittle.useApp.setState({ selection: [] }));
   await clickDatumOutline(csys.id);
   assert.equal(await row(csys.name).getAttribute("aria-pressed"), "true", "Viewport triad selects its Browser row");
-  await row(csys.name).dblclick();
-  assert.equal((await active()).id, csys.id);
+  assert.equal(await step(csys.name).getAttribute("aria-pressed"), "true", "Triad picks select the timeline step");
+  const csysIcon = await icon(step(csys.name));
+  assert.equal(csysIcon, await icon(row(csys.name)));
+  datumIcons.add(csysIcon);
+  assert.equal(datumIcons.size, 4, "Planes, axes, points and CSYS have distinct icons");
+  await step(csys.name).dblclick();
+  assert.equal((await active()).id, csys.id, "Double-clicking the timeline step edits the CSYS");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await waitBuilt();
 
@@ -229,7 +246,7 @@ try {
   await row("Show all datum coordinate systems").click();
   assert.equal(await visible(), true);
 
-  await row(csys.name).click();
+  await step(csys.name).click();
   await page.keyboard.press("s");
   await page.getByRole("button", { name: "YZ", exact: true }).click();
   const sketch = await active();
