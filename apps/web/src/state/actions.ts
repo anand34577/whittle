@@ -492,6 +492,9 @@ export function startConstructionPlane() {
   const face = selection.map((p) => faceRefFromPick(p)).find((x): x is FaceRef => !!x && x.surface === "PLANE");
   const cp = selection.find((p) => p.kind === "datum" && p.datumKind === "plane");
   const op = selection.find((p) => p.kind === "plane");
+  if (!face && !cp && !op && selection.some((p) => p.kind === "face")) {
+    return toast("warn", "A construction plane needs a flat face.");
+  }
   const off = defaultLength(doc.units, 10);
   const base: PlaneRef = face
     ? { kind: "face", face, offset: off }
@@ -817,6 +820,15 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     const current = get().session;
     if (current) set({ session: { ...current, csysInput: undefined } });
+    return;
+  }
+  if (f?.type === "cplane" && p?.kind === "face") {
+    const face = faceRefFromPick(p);
+    if (!face || face.surface !== "PLANE") return toast("warn", "A construction plane needs a flat face.");
+    mutate("Pick base face", (d) => {
+      const x = findFeature(d, f.id, "cplane");
+      if (x) x.plane = { kind: "face", face, offset: x.plane.offset };
+    });
     return;
   }
   if (f && (f.type === "construct" || f.type === "cplane") && p?.kind === "datum") {

@@ -153,7 +153,7 @@ export function hintFor(s: AppState): string {
       case "csys":
         return f.mode === "manual" ? "Set the origin and rotation · Enter to finish" : "Choose the origin, Z and X references · Enter to finish";
       case "cplane":
-        return "Set the offset and tilt · then pick this plane when starting a sketch · Enter to finish";
+        return "Pick a flat face or datum plane as the base, then set the offset · Enter to finish";
       case "offsetFace":
         return f.faces.length === 0 ? "Click the flat faces to push or pull" : "Type a distance: positive pulls out, negative pushes in · Enter to finish";
       case "draft":

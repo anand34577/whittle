@@ -272,6 +272,45 @@ try {
   assert.deepEqual(await frameFor(csys.id), beforeOpen);
   assert.deepEqual((await frameFor(sketch.id)).origin, beforeOpen.origin);
   console.log("ok  CSYS creation, reference picking, triad selection, visibility, principal plane sketch, and save/reopen");
+
+  await command("box");
+  const box = await active();
+  await finish();
+  await page.evaluate(() => window.whittle.viewportRef.current.viewTo("home"));
+  await page.waitForFunction(() => !window.whittle.viewportRef.current.anim);
+  const centers = await page.evaluate((id) =>
+    window.whittle.useApp.getState().regen.bodies.find((b) => b.id === id).faces.map((face) => face.center), box.id);
+  const facePicks = [];
+  for (const center of centers) {
+    const xy = await screen(center);
+    const pick = await page.evaluate(([clientX, clientY]) => window.whittle.viewportRef.current.pick({ clientX, clientY }), xy);
+    if (pick?.kind === "face" && pick.bodyId === box.id && !facePicks.some((f) => f.index === pick.index)) {
+      facePicks.push({ xy, index: pick.index });
+    }
+  }
+  assert.ok(facePicks.length >= 2, "Two flat faces can be picked in the viewport");
+  const selectedFace = () => page.evaluate(() => window.whittle.useApp.getState().selection[0]);
+  await page.mouse.click(...facePicks[0].xy);
+  assert.equal((await selectedFace()).kind, "face");
+  await page.getByRole("toolbar", { name: "Actions for the selection" }).getByRole("button", { name: "Plane", exact: true }).click();
+  const facePlane = await active();
+  assert.equal(facePlane.plane.kind, "face");
+  assert.equal(facePlane.plane.face.bodyId, box.id);
+  const faceOffset = page.getByLabel("Offset", { exact: true });
+  await faceOffset.fill("7");
+  await faceOffset.press("Tab");
+  await waitBuilt();
+  await page.mouse.click(...facePicks[1].xy);
+  await waitBuilt();
+  const rebound = (await active()).plane;
+  assert.equal(rebound.kind, "face");
+  assert.notDeepEqual(rebound.face.normal, facePlane.plane.face.normal);
+  assert.equal(rebound.offset, "7");
+  const faceFrame = await frameFor(facePlane.id);
+  const signedOffset = faceFrame.origin.reduce((sum, x, i) => sum + (x - rebound.face.center[i]) * rebound.face.normal[i], 0);
+  assert.ok(Math.abs(signedOffset - 7) < 1e-6, "Plane offsets from the newly picked face");
+  await finish();
+  console.log("ok  Construction plane starts on a selected face and can be rebound to another flat face");
 } finally {
   await browser.close();
 }

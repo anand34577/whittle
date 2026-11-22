@@ -30,7 +30,7 @@ import {
   resolveGeometry,
   trim,
 } from "@whittle/core";
-import { createSketchOn, handlePick, matchEdge, matchFace, samePick } from "../state/actions";
+import { createSketchOn, faceRefFromPick, handlePick, matchEdge, matchFace, samePick } from "../state/actions";
 import { regionAt } from "../state/regions";
 import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addMidpointLine, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, dimPlaceCancel, dimPlaceClick, dimPlaceMove, placingConstraint, useDimPlacing, offsetAt, offsetCancel, offsetDrag, offsetPlace, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable, whyUnavailable } from "../state/commands";
@@ -789,6 +789,7 @@ export function ViewportView() {
     else if (f?.type === "rib") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (f?.type === "surface") filter = f.op === "patch" || f.op === "ruled" ? { faces: false, edges: true, planes: false, sketches: false } : bodiesOnly;
     else if (f?.type === "curve") filter = { faces: true, edges: true, planes: false, sketches: f.source === "project" };
+    else if (f?.type === "cplane") filter = bodiesOnly;
     else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "pattern" && f.axisGeom) filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
@@ -1044,7 +1045,7 @@ export function ViewportView() {
       const i = b ? matchEdge(b.edges, ref) : -1;
       if (b && i >= 0) items.push({ pick: { kind: "edge", bodyId: b.id, index: i }, style: "ref" });
     }
-    const faceRefs = f?.type === "shell" ? f.faces : f?.type === "hole" && f.face ? [f.face] : f?.type === "pattern" && f.axisGeom?.face ? [f.axisGeom.face] : [];
+    const faceRefs = f?.type === "cplane" && f.plane.kind === "face" ? [f.plane.face] : f?.type === "shell" ? f.faces : f?.type === "hole" && f.face ? [f.face] : f?.type === "pattern" && f.axisGeom?.face ? [f.axisGeom.face] : [];
     for (const ref of faceRefs) {
       const b = pb.find((x) => x.id === ref.bodyId);
       const i = b ? matchFace(b.faces, ref) : -1;
@@ -1145,7 +1146,7 @@ export function ViewportView() {
     const p = selection[0]!;
     const ids =
       p.kind === "face"
-        ? ["sketch", "press-pull", "hole", "fillet", "shell", "measure"]
+        ? ["sketch", ...(faceRefFromPick(p)?.surface === "PLANE" ? ["plane"] : []), "press-pull", "hole", "fillet", "shell", "measure"]
         : p.kind === "edge"
           ? ["fillet", "chamfer", "measure"]
           : p.kind === "sketch"
