@@ -9,7 +9,21 @@ const browser = await chromium.launch({
 });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
-  await page.addInitScript(() => localStorage.setItem("whittle.debug", "1"));
+  await page.addInitScript(() => {
+    localStorage.setItem("whittle.debug", "1");
+    // Use an in-memory file handle in place of the OS picker.
+    let file;
+    const handle = {
+      name: "datum-regression.whittle",
+      createWritable: async () => ({
+        write: async (bytes) => { file = new File([bytes], handle.name); },
+        close: async () => {},
+      }),
+      getFile: async () => file,
+    };
+    window.showSaveFilePicker = async () => handle;
+    window.showOpenFilePicker = async () => [handle];
+  });
   await page.goto(process.argv[2] ?? "http://localhost:5173/");
   const welcome = page.getByRole("dialog", { name: "Welcome to Whittle" });
   await welcome.getByRole("button", { name: /Engineer & professional/ }).click();
@@ -114,13 +128,13 @@ try {
     await waitBuilt();
     assert.equal(await active(), undefined);
   };
-  const clickDatumOutline = async (id) => {
+  const clickDatumOutline = async (id, clicks = 1) => {
     const segments = await page.evaluate((id) => window.whittle.viewportRef.current.datums.get(id).segments, id);
     for (const [start, end] of segments) {
       const [x, y] = await screen(start.map((value, i) => (value + end[i]) / 2));
       const pick = await page.evaluate(([clientX, clientY]) => window.whittle.viewportRef.current.pick({ clientX, clientY }), [x, y]);
       if (pick?.id === id) {
-        await page.mouse.click(x, y);
+        await page.mouse.click(x, y, { clickCount: clicks });
         return;
       }
     }
@@ -158,6 +172,89 @@ try {
   const regenerated = await page.evaluate((id) => window.whittle.useApp.getState().regen.planes.find((frame) => frame.id === id), intersectionAxis.id);
   assert.ok(Math.abs(regenerated.origin[2] - 6) < 1e-6, "Changing the plane offset moves its dependent axis");
   console.log("ok  Browser and viewport construction picks persist and regenerate");
+
+  const command = (id) => page.evaluate((id) => window.whittle.commands.find((c) => c.id === id).run(), id);
+  await command("csys");
+  const csys = await active();
+  const originX = page.getByLabel("Origin X", { exact: true });
+  await originX.fill("12");
+  await originX.press("Tab");
+  await waitBuilt();
+  const frameFor = (id) => page.evaluate((id) => {
+    const { regen } = window.whittle.useApp.getState();
+    return [...regen.planes, ...regen.sketches].find((frame) => frame.id === id);
+  }, id);
+  assert.deepEqual((await frameFor(csys.id)).origin, [12, 0, 0]);
+  await page.getByRole("radio", { name: "From datums", exact: true }).click();
+  await page.getByRole("button", { name: "Pick Origin", exact: true }).click();
+  await row("Fixture axis").click();
+  assert.equal((await active()).refs.origin, undefined, "Wrong-kind pick is rejected in the CSYS editor");
+  await row("Second point").click();
+  await page.getByRole("button", { name: "Pick Z direction", exact: true }).click();
+  await page.waitForFunction((id) => window.whittle.viewportRef.current.filter.datumInputs?.has(id), intersectionAxis.id);
+  await clickDatumOutline(intersectionAxis.id);
+  await page.getByRole("button", { name: "Pick X direction", exact: true }).click();
+  await row(pointAxis.name).click();
+  assert.deepEqual((await active()).refs, {
+    origin: { kind: "point", id: "test-point-2" },
+    z: { kind: "axis", id: intersectionAxis.id },
+    x: { kind: "axis", id: pointAxis.id },
+  });
+  await finish();
+
+  const color = () => page.evaluate((id) => window.whittle.viewportRef.current.datums.get(id).materials[0].color.getHex(), csys.id);
+  await page.mouse.move(3, 3);
+  const initial = await color();
+  await row(csys.name).click();
+  assert.notEqual(await color(), initial, "CSYS Browser selection highlights its triad");
+  await page.evaluate(() => window.whittle.useApp.setState({ selection: [] }));
+  await clickDatumOutline(csys.id);
+  assert.equal(await row(csys.name).getAttribute("aria-pressed"), "true", "Viewport triad selects its Browser row");
+  await row(csys.name).dblclick();
+  assert.equal((await active()).id, csys.id);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await waitBuilt();
+
+  await clickDatumOutline(csys.id, 2);
+  assert.equal((await active()).id, csys.id, "Double-clicking the triad edits the CSYS");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await waitBuilt();
+
+  const visible = () => page.evaluate((id) => window.whittle.viewportRef.current.datums.has(id), csys.id);
+  await row(`Hide ${csys.name}`).click();
+  assert.equal(await visible(), false);
+  await row("Hide all datum coordinate systems").click();
+  await row(`Show ${csys.name}`).click();
+  assert.equal(await visible(), false, "Category visibility overrides the item setting");
+  await row("Show all datum coordinate systems").click();
+  assert.equal(await visible(), true);
+
+  await row(csys.name).click();
+  await page.keyboard.press("s");
+  await page.getByRole("button", { name: "YZ", exact: true }).click();
+  const sketch = await active();
+  assert.deepEqual(sketch.plane, { kind: "csys", csys: csys.id, plane: "YZ", offset: "0" });
+  await waitBuilt();
+  await page.waitForFunction(() => !window.whittle.viewportRef.current.anim);
+  const canvas = await page.locator(".viewport canvas").boundingBox();
+  const cx = canvas.x + canvas.width / 2;
+  const cy = canvas.y + canvas.height / 2;
+  await command("tool-rect");
+  await page.mouse.click(cx - 50, cy - 30);
+  await page.mouse.click(cx + 50, cy + 30);
+  await waitBuilt();
+  assert.ok((await active()).geometry.length > 0, "A profile can be drawn on the CSYS plane");
+  await page.getByRole("button", { name: "Finish sketch", exact: true }).click();
+  await waitBuilt();
+  await command("save");
+  await page.waitForFunction(() => window.whittle.useApp.getState().fileName === "datum-regression.whittle" && !window.whittle.useApp.getState().dirty);
+  const beforeOpen = await frameFor(csys.id);
+  await command("open");
+  await page.getByText("Opened datum-regression.whittle", { exact: true }).waitFor();
+  await waitBuilt();
+  assert.deepEqual(await frameFor(csys.id), beforeOpen);
+  assert.deepEqual((await frameFor(sketch.id)).origin, beforeOpen.origin);
+  console.log("ok  CSYS creation, reference picking, triad selection, visibility, principal plane sketch, and save/reopen");
 } finally {
   await browser.close();
 }

@@ -8,7 +8,7 @@
  * friendly message (and, where possible, a one-click fix) and later features
  * keep building on the last good state.
  */
-import { type BodyOp, type EdgeRef, type LengthUnit, lengthText, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, drawnEntities, entityOutline, expandSketch, frameAxes, planeOrigin, sketchGap, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
+import { CSYS_INPUT_KINDS, type BodyOp, type CsysFeature, type CsysInput, type EdgeRef, type LengthUnit, lengthText, type Evaluator, type FaceRef, type Feature, type HoleFeature, type Id, type SketchFeature, type SketchSolution, type Vec3, type WhittleDocument, activeEnd, createEvaluator, deserializeDocument, drawnEntities, entityOutline, expandSketch, frameAxes, planeOrigin, sketchGap, polylinePath, resolveEntity, thickenPath } from "@whittle/core";
 import { type Blueprint, Drawing, type Edge, type Face, draw, organiseBlueprints, type FaceFinder, Plane, type Shape3D, type Wire, asDir, basicFaceExtrusion, cast, downcast, genericSweep, getOC, makeHelix, makeOffset, makePln, drawCircle, importSTEP, loft, makeBox, makeSolid, Vector, makeCompound, makeCylinder, makeSphere, measureArea, measureShapeVolumeProperties } from "replicad";
 import type { BodyResult, FeatureStatus, RegenResult, SketchFrame } from "./protocol";
 import type { CoilFeature, DraftFeature, OffsetFaceFeature, PlaneRef, SweepFeature } from "@whittle/core";
@@ -182,6 +182,40 @@ function applyOpUnchecked(bodies: Map<Id, Shape3D>, featureId: Id, op: BodyOp, t
   return;
 }
 
+function csysFrame(f: CsysFeature, ev: Evaluator, built: (id: Id) => SketchFrame | undefined): SketchFrame {
+  if (f.mode === "manual") {
+    const origin = f.position.map((expr, i) => ev.num(expr, "length", `Origin ${"XYZ"[i]}`)) as Vec3;
+    const [rx, ry, rz] = f.rotation.map((expr, i) => ev.num(expr, "angle", `Rotation about ${"XYZ"[i]}`)) as Vec3;
+    const rotate = (v: Vec3) => rotateAbout(rotateAbout(rotateAbout(v, AXES.x, rx), AXES.y, ry), AXES.z, rz);
+    return { id: f.id, kind: "csys", origin, xDir: rotate(AXES.x), yDir: rotate(AXES.y), normal: rotate(AXES.z) };
+  }
+  const source = (input: CsysInput, label: string) => {
+    const ref = f.refs?.[input];
+    if (!ref?.id) throw new FeatureError(`Pick ${label}.`, undefined, true);
+    if (ref.id === f.id) throw new FeatureError("A coordinate system cannot reference itself.");
+    if (!CSYS_INPUT_KINDS[input].includes(ref.kind)) throw new FeatureError(`Expected ${label}.`);
+    // Only prior successful steps are in the map. Every cycle has a forward edge.
+    const frame = built(ref.id);
+    if (!frame) throw new FeatureError(`The reference for ${label} must exist, be earlier in the timeline, be unsuppressed, and build successfully.`);
+    if (frame.kind !== ref.kind) throw new FeatureError(`Expected ${label}.`);
+    return frame;
+  };
+  const { origin } = source("origin", "a datum point for the origin");
+  const z = source("z", "a datum axis or plane for Z").normal;
+  const x = source("x", "a datum axis for X").normal;
+  const unit = (v: Vec3, message: string): Vec3 => {
+    const length = Math.hypot(...v);
+    if (!Number.isFinite(length) || length < 1e-9) throw new FeatureError(message);
+    return scale(v, 1 / length);
+  };
+  const zUnit = unit(z, "The Z reference has no direction.");
+  const xHint = unit(x, "The X reference has no direction.");
+  const normal = f.flipZ ? scale(zUnit, -1) : zUnit;
+  const yDir = unit(cross(normal, f.flipX ? scale(xHint, -1) : xHint), "The X and Z references are parallel.");
+  const xDir = cross(yDir, normal);
+  return { id: f.id, kind: "csys", origin, xDir, yDir, normal };
+}
+
 /** The frame of an origin plane (optionally tilted), a flat face, or a construction plane, moved by its offset. */
 function planeFrame(id: Id, plane: PlaneRef, bodies: Map<Id, Shape3D>, sketches: Map<Id, SketchBuilt>, ev: Evaluator): { frame: SketchFrame; warning?: string } {
   const offset = ev.num(plane.offset, "length", "Offset");
@@ -199,6 +233,16 @@ function planeFrame(id: Id, plane: PlaneRef, bodies: Map<Id, Shape3D>, sketches:
       }
     }
     return { frame: { id, origin: scale(normal, offset), xDir, yDir, normal } };
+  }
+  if (plane.kind === "csys") {
+    if (plane.csys === id) throw new FeatureError("A feature cannot reference itself.");
+    const base = sketches.get(plane.csys)?.frame;
+    if (base?.kind !== "csys") throw new FeatureError("The plane needs an earlier, successfully built coordinate system.");
+    const axes = ORIGIN_FRAMES[plane.plane];
+    if (!axes) throw new FeatureError("Choose a valid coordinate system plane.");
+    const world = ([x, y, z]: Vec3) => add(add(scale(base.xDir, x), scale(base.yDir, y)), scale(base.normal, z));
+    const normal = world(axes.normal);
+    return { frame: { id, origin: add(base.origin, scale(normal, offset)), xDir: world(axes.xDir), yDir: world(axes.yDir), normal } };
   }
   if (plane.kind === "construction") {
     const base = sketches.get(plane.plane)?.frame;
@@ -342,7 +386,7 @@ export class Builder {
     }
     const planes: SketchFrame[] = [];
     for (const f of doc.features.slice(0, end)) {
-      const s = f.type === "cplane" || f.type === "construct" || f.type === "curve" ? prev.sketches.get(f.id) : undefined;
+      const s = f.type === "cplane" || f.type === "construct" || f.type === "csys" || f.type === "curve" ? prev.sketches.get(f.id) : undefined;
       if (s) planes.push({ ...s.frame, line: s.frame.line ? s.frame.line.slice() : undefined });
     }
     let pickBodies: BodyResult[] | undefined;
@@ -562,6 +606,12 @@ export class Builder {
         });
         sketches.set(f.id, { frame, drawing: null });
         return warning;
+      }
+
+      case "csys": {
+        const frame = csysFrame(f, ev, (id) => sketches.get(id)?.frame);
+        sketches.set(f.id, { frame, drawing: null });
+        return;
       }
 
       case "cplane": {

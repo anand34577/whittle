@@ -29,6 +29,8 @@ import type {
   ScaleFeature,
   ConstructionPlaneFeature,
   ConstructFeature,
+  CsysFeature,
+  CsysInput,
   CurveFeature,
   SurfaceFeature,
   RibFeature,
@@ -1017,7 +1019,9 @@ function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
   const value = p.kind === "origin" ? p.plane : p.kind === "construction" ? p.plane : "face";
   return (
     <>
-      {p.kind === "face" ? (
+      {p.kind === "csys" ? (
+        <p className="field__note">On the {p.plane} plane of a coordinate system.</p>
+      ) : p.kind === "face" ? (
         <p className="field__note">On a flat model face. Offset moves it along the face normal.</p>
       ) : (
         <Select
@@ -1043,6 +1047,63 @@ function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
             ]}
             onChange={(v) => set("Tilt axis", (pl) => (pl.kind === "origin" ? { ...pl, tilt: v } : pl))}
           />
+        </>
+      )}
+    </>
+  );
+}
+
+const CSYS_FIELDS: { input: CsysInput; label: string; hint: string }[] = [
+  { input: "origin", label: "Origin", hint: "Pick a datum point" },
+  { input: "z", label: "Z direction", hint: "Pick a datum axis or plane" },
+  { input: "x", label: "X direction", hint: "Pick a datum axis" },
+];
+
+function CsysEditor({ f }: { f: CsysFeature }) {
+  const features = useApp((s) => s.doc.features);
+  const picking = useApp((s) => s.session?.csysInput);
+  function chooseInput(input?: CsysInput) {
+    const { session } = useApp.getState();
+    if (session?.featureId === f.id) useApp.setState({ session: { ...session, csysInput: input } });
+  }
+  return (
+    <>
+      <Segmented label="Placement" value={f.mode} options={[
+        { value: "manual", label: "Manual" }, { value: "references", label: "From datums" },
+      ]} onChange={(mode) => {
+        upd(f, "Placement", (d) => { d.mode = mode; });
+        chooseInput();
+      }} />
+      {f.mode === "manual" ? (
+        <>
+          {(["position", "rotation"] as const).map((field) => (
+            <div key={field}>
+              {([0, 1, 2] as const).map((i) => {
+                const axis = "XYZ"[i];
+                const label = field === "position" ? `Origin ${axis}` : `Rotation about ${axis}`;
+                return <ExprInput key={i} label={label} kind={field === "position" ? "length" : "angle"}
+                  value={f[field][i]} onChange={(value) => upd(f, label, (d) => { d[field][i] = value; })} />;
+              })}
+            </div>
+          ))}
+          <p className="field__note">The origin uses world coordinates. Rotations follow the right-hand rule about fixed world X, then Y, then Z.</p>
+        </>
+      ) : (
+        <>
+          {CSYS_FIELDS.map(({ input, label, hint }) => {
+            const ref = f.refs?.[input];
+            const name = ref && (features.find((feature) => feature.id === ref.id)?.name ?? "Missing datum");
+            return (
+              <div className="picker" key={input}>
+                <button className="btn btn--small" aria-pressed={picking === input} onClick={() => chooseInput(picking === input ? undefined : input)}>Pick {label}</button>
+                <span>{picking === input ? hint : name ?? "Unassigned"}</span>
+                {ref && <button className="link" aria-label={`Clear ${label}`} onClick={() => upd(f, `Clear ${label}`, (d) => { delete d.refs[input]; })}>Clear</button>}
+              </div>
+            );
+          })}
+          <Checkbox label="Flip Z" checked={f.flipZ} onChange={(value) => upd(f, "Flip Z", (d) => { d.flipZ = value; })} />
+          <Checkbox label="Flip X" checked={f.flipX} onChange={(value) => upd(f, "Flip X", (d) => { d.flipX = value; })} />
+          <p className="field__note">X is projected perpendicular to Z. Y completes the right-handed frame.</p>
         </>
       )}
     </>
@@ -1584,6 +1645,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <JointEditor f={f} />;
     case "construct":
       return <ConstructEditor f={f} />;
+    case "csys":
+      return <CsysEditor f={f} />;
     case "curve":
       return <CurveEditor f={f} />;
     case "surface":

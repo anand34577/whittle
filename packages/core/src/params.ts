@@ -127,7 +127,7 @@ export function dependsOn(expr: string, parameters: Parameter[]): Set<string> {
 /** Keys whose values are ids, enums or plain text, never expressions. */
 const NOT_EXPR = new Set([
   "id", "type", "name", "mode", "anchor", "text", "sketch", "extent", "op", "target", "axis", "shape", "bodyId", "pattern",
-  "style", "fileName", "format", "data", "surface", "curve", "sketches", "tools", "face", "faces", "edges", "comment",
+  "csys", "style", "fileName", "format", "data", "surface", "curve", "sketches", "tools", "face", "faces", "edges", "comment",
   "profile", "path", "orientation", "section", "keep", "center", "pull", "tilt", "refs", "a", "b", "c",
   // Words, not formulas: plane kind, second pattern direction, thin-wall side, ruled-surface direction, joint type and origin, curve source.
   "kind", "axis2", "thinSide", "direction", "joint", "origin", "source",

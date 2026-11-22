@@ -45,7 +45,8 @@ export type PlaneRef =
     }
   | { kind: "face"; face: FaceRef; offset: Expr }
   /** A named construction plane (see ConstructionPlaneFeature). */
-  | { kind: "construction"; plane: Id; offset: Expr };
+  | { kind: "construction"; plane: Id; offset: Expr }
+  | { kind: "csys"; csys: Id; plane: OriginPlane; offset: Expr };
 
 /**
  * A persistent reference to a face. Rather than an index (which changes
@@ -250,6 +251,23 @@ export interface ConstructionPlaneFeature extends FeatureBase {
   type: "cplane";
   plane: PlaneRef;
 }
+
+export interface CsysFeature extends FeatureBase {
+  type: "csys";
+  /** World-coordinate origin and right-hand rotations about fixed world X, then Y, then Z. */
+  position: [Expr, Expr, Expr];
+  rotation: [Expr, Expr, Expr];
+  mode: "manual" | "references";
+  refs: {
+    origin?: DatumRef<"point">;
+    z?: DatumRef<"axis" | "plane">;
+    x?: DatumRef<"axis">;
+  };
+  flipZ: boolean;
+  flipX: boolean;
+}
+
+export type CsysInput = keyof CsysFeature["refs"];
 
 export type ConstructMode =
   | "midplane" | "plane3" | "plane2e" | "planeEdge" | "planeTangent" | "planePath"
@@ -770,6 +788,7 @@ export type Feature =
   | JointFeature
   | ConstructionPlaneFeature
   | ConstructFeature
+  | CsysFeature
   | CurveFeature
   | SurfaceFeature
   | RibFeature
@@ -831,7 +850,7 @@ export interface NamedView {
   phi: number;
 }
 
-export type DatumKind = "plane" | "axis" | "point";
+export type DatumKind = "plane" | "axis" | "point" | "csys";
 
 export interface WhittleDocument {
   schema: number;

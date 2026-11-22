@@ -56,6 +56,7 @@ export const FEATURE_ICONS: Record<string, IconName> = {
   draft: "draft",
   offsetFace: "move",
   cplane: "plane",
+  csys: "origin",
   construct: "plane",
   curve: "path",
   surface: "shell",
@@ -579,7 +580,7 @@ function SketchPanel({ sketch }: { sketch: SketchFeature }) {
         <div>
           <h2>{sketch.name}</h2>
           <p className="muted">
-            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : sketch.plane.kind === "construction" ? "On a construction plane" : "On a model face"} · {contents}
+            {sketch.plane.kind === "origin" ? `On the ${sketch.plane.plane} plane` : sketch.plane.kind === "construction" ? "On a construction plane" : sketch.plane.kind === "csys" ? `On a CSYS ${sketch.plane.plane} plane` : "On a model face"} · {contents}
           </p>
         </div>
       </header>
@@ -936,7 +937,7 @@ function SketchSummary({ id }: { id: string }) {
   const sk = findFeature(doc, id, "sketch");
   if (!sk) return null;
   const users = doc.features.filter((g) => g.type !== "sketch" && JSON.stringify(g).includes(id)).map((g) => g.name);
-  const plane = sk.plane.kind === "origin" ? `${sk.plane.plane} plane` : sk.plane.kind === "construction" ? "Construction plane" : "Model face";
+  const plane = sk.plane.kind === "origin" ? `${sk.plane.plane} plane` : sk.plane.kind === "construction" ? "Construction plane" : sk.plane.kind === "csys" ? `CSYS ${sk.plane.plane} plane` : "Model face";
   const state = !sol ? "Shapes (no relations)" : sol.state === "full" ? "Fully sized" : sol.state === "under" ? `Not fully sized: ${sol.dof} way${sol.dof === 1 ? "" : "s"} it can move` : "Relations conflict";
   return (
     <div className="panel__section">

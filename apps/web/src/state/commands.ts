@@ -13,6 +13,7 @@ import {
   startAlign,
   startBoundaryFill,
   startConstruct,
+  startCsys,
   startSurface,
   startCurve,
   startDeleteFace,
@@ -169,6 +170,7 @@ export const COMMANDS: Command[] = [
   { id: "mirror", label: "Mirror", group: "Modify", icon: "mirror", keywords: "symmetry flip copy reflect", hint: "Mirror a body across an origin plane", when: (s) => inModel(s) && hasBodies(s), run: model(startMirror) },
   { id: "pattern", label: "Pattern", group: "Modify", icon: "pattern", keywords: "array repeat copies linear circular", hint: "Repeat a body in a row or around an axis", when: (s) => inModel(s) && hasBodies(s), run: model(startPattern) },
   { id: "split", label: "Split body", short: "Split", group: "Modify", icon: "split", keywords: "cut in half slice divide trim separate two parts", hint: "Cut a body in two along a plane, or trim one side away", when: (s) => inModel(s) && hasBodies(s), run: model(startSplit) },
+  { id: "csys", label: "Coordinate system", short: "CSYS", group: "Construct", icon: "origin", keywords: "csys datum frame triad", hint: "Place a coordinate system or build one from datums", when: inModel, run: model(startCsys) },
   { id: "plane", label: "Construction plane", short: "Plane", group: "Create", icon: "plane", keywords: "offset angle datum reference workplane tilt", hint: "A reusable plane (offset or tilted) to sketch on", when: inModel, run: model(startConstructionPlane) },
   { id: "joint", label: "Joint", group: "Modify", icon: "joint", keywords: "assemble hinge revolute slider cylindrical rigid motion drive attach mate", hint: "Connect two bodies so one turns or slides; change the value to drive it", when: (s) => inModel(s) && hasBodies(s), run: model(startJoint) },
   { id: "press-pull", label: "Press / Pull", short: "Press/Pull", group: "Modify", icon: "pressPull", keys: "Q", keywords: "offset face push pull extend cut direct modeling resize", hint: "Smart tool: a profile extrudes, an edge rounds, a flat face pushes or pulls. Select first, then press Q", when: inModel, run: model(startPressPull) },
@@ -586,7 +588,7 @@ const CONSTRUCT_COMMANDS: Command[] = (Object.keys(CONSTRUCT_MODES) as Construct
     !!s.regen?.bodies.length || !!s.regen?.planes.some((frame) => {
       const feature = s.doc.features.find((f) => f.id === frame.id);
       const kind = feature && !feature.suppressed && datumKind(feature);
-      return kind && CONSTRUCT_MODES[m].datums?.includes(kind);
+      return kind && kind !== "csys" && CONSTRUCT_MODES[m].datums?.includes(kind);
     })
   ),
   run: model(() => startConstruct(m)),

@@ -58,7 +58,7 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
   let uncertain = false;
   const { planes, lines, points } = constructRefs(f);
   const allowed = CONSTRUCT_MODES[f.mode].datums;
-  const datum = (id: string, kind: DatumKind): SketchFrame => {
+  const datum = (id: string, kind: Exclude<DatumKind, "csys">): SketchFrame => {
     if (!allowed?.includes(kind)) throw env.fail(`This construction does not accept a datum ${kind}.`);
     if (id === f.id) throw env.fail("A datum cannot reference itself.");
     const frame = env.datum(id);

@@ -12,6 +12,8 @@ import {
   type Vec3,
   CONSTRAINT_LABELS,
   CONSTRUCT_MODES,
+  CSYS_INPUT_KINDS,
+  type DatumKind,
   datumKind,
   featureInputs,
   LENGTH_TO_MM,
@@ -28,7 +30,7 @@ import {
   resolveGeometry,
   trim,
 } from "@whittle/core";
-import { handlePick, matchEdge, matchFace, samePick } from "../state/actions";
+import { createSketchOn, handlePick, matchEdge, matchFace, samePick } from "../state/actions";
 import { regionAt } from "../state/regions";
 import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addMidpointLine, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, dimPlaceCancel, dimPlaceClick, dimPlaceMove, placingConstraint, useDimPlacing, offsetAt, offsetCancel, offsetDrag, offsetPlace, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable, whyUnavailable } from "../state/commands";
@@ -796,14 +798,16 @@ export function ViewportView() {
     else if (f?.type === "revolve") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     else if (mode.kind === "model" && priority !== "all") filter = { faces: priority === "face", edges: priority === "edge", planes: false, sketches: priority === "body" };
-    const kinds = f?.type === "construct" ? CONSTRUCT_MODES[f.mode].datums : f?.type === "cplane" ? ["plane"] : undefined;
+    const kinds: readonly DatumKind[] | undefined = f?.type === "construct" ? CONSTRUCT_MODES[f.mode].datums
+      : f?.type === "cplane" ? ["plane"]
+      : f?.type === "csys" && f.mode === "references" && session?.csysInput ? CSYS_INPUT_KINDS[session.csysInput] : undefined;
     const datumInputs = kinds && f && mode.kind === "model"
       ? new Set(doc.features.slice(0, doc.features.indexOf(f)).filter((source) => {
         const kind = datumKind(source);
         return !source.suppressed && kind && kinds.includes(kind);
       }).map((source) => source.id))
       : undefined;
-    vp.setPickFilter({ ...filter, datumInputs, datums: !!datumInputs || (mode.kind === "model" && !session && priority === "all") });
+    vp.setPickFilter({ ...filter, datumInputs, datums: !!datumInputs || mode.kind === "pickPlane" || (mode.kind === "model" && !session && priority === "all") });
     vp.setPlanesVisible(mode.kind === "pickPlane");
   }, [vp, mode, session, sessionFeature, priority, doc.features]);
 
@@ -1046,7 +1050,7 @@ export function ViewportView() {
       const i = b ? matchFace(b.faces, ref) : -1;
       if (b && i >= 0) items.push({ pick: { kind: "face", bodyId: b.id, index: i }, style: "ref" });
     }
-    if (f?.type === "construct" || f?.type === "cplane") {
+    if (f?.type === "construct" || f?.type === "cplane" || f?.type === "csys") {
       const inputs = featureInputs(f);
       for (const frame of regen?.planes ?? []) {
         if (frame.kind && frame.kind !== "curve" && inputs.includes(frame.id)) {
@@ -1183,7 +1187,15 @@ export function ViewportView() {
 
       {mode.kind === "pickPlane" && (
         <div className="viewport__banner">
-          <Icon name="plane" size={16} /> Pick a plane or a flat face to sketch on
+          <Icon name="plane" size={16} />
+          {mode.csys ? (
+            <>
+              Choose a principal plane of {findFeature(doc, mode.csys)?.name ?? "the coordinate system"}
+              {(["XY", "XZ", "YZ"] as const).map((plane) => (
+                <button key={plane} className="btn btn--small" onClick={() => createSketchOn({ kind: "csys", csys: mode.csys!, plane, offset: "0" })}>{plane}</button>
+              ))}
+            </>
+          ) : "Pick a plane, a flat face, or a coordinate system to sketch on"}
           <button className="btn btn--small btn--ghost" onClick={() => useApp.setState({ mode: { kind: "model" } })}>
             Cancel
           </button>

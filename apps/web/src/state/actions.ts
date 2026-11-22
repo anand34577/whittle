@@ -18,6 +18,7 @@ import {
   type Vec2,
   type Vec3,
   activeEnd,
+  CSYS_INPUT_KINDS,
   constructRefs,
   datumKind,
   defaultLength,
@@ -30,6 +31,7 @@ import {
   makeAlign,
   makeBoundaryFill,
   makeConstruct,
+  makeCsys,
   makeCurve,
   makeSurface,
   makeDeleteFace,
@@ -157,7 +159,7 @@ export function startSketch() {
   }
   const plane = sel.find((p) => p.kind === "plane");
   if (plane && plane.kind === "plane") return createSketchOn({ kind: "origin", plane: plane.plane, offset: "0" });
-  const datum = sel.find((p) => p.kind === "datum" && p.datumKind === "plane");
+  const datum = sel.find((p) => p.kind === "datum" && (p.datumKind === "plane" || p.datumKind === "csys"));
   if (datum) return pickSketchPlane(datum);
   if (get().session) commitSession();
   set({ mode: { kind: "pickPlane" }, selection: [] });
@@ -172,6 +174,13 @@ export function createSketchOn(plane: PlaneRef) {
 export function pickSketchPlane(p: Pick) {
   if (p.kind === "plane") return createSketchOn({ kind: "origin", plane: p.plane as OriginPlane, offset: "0" });
   if (p.kind === "datum" && p.datumKind === "plane") return createSketchOn({ kind: "construction", plane: p.id, offset: "0" });
+  if (p.kind === "datum" && p.datumKind === "csys") {
+    if (get().session) commitSession();
+    if (get().regen?.planes.some((frame) => frame.id === p.id && frame.kind === "csys")) {
+      set({ mode: { kind: "pickPlane", csys: p.id }, selection: [p] });
+    } else toast("warn", "Pick a successfully built coordinate system.");
+    return;
+  }
   if (p.kind === "face") {
     const ref = faceRefFromPick(p);
     if (!ref) return;
@@ -625,6 +634,11 @@ export function startSplitFaces() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+export function startCsys() {
+  const f = makeCsys(get().doc);
+  beginNewFeature(f, `New ${f.name}`);
+}
+
 /** Construction plane / axis / point: picks are routed by handlePick. */
 export function startConstruct(mode: ConstructMode) {
   const f = makeConstruct(get().doc, mode);
@@ -732,7 +746,7 @@ function toggleConstructPick<T>(list: T[], pick: T, limit: number, matches: (ref
 export function handlePick(p: Pick | null, additive: boolean) {
   const { mode, session, doc, selection } = get();
   if (mode.kind === "pickPlane") {
-    if (p && (p.kind === "plane" || (p.kind === "datum" && p.datumKind === "plane") || p.kind === "face")) pickSketchPlane(p);
+    if (p && (p.kind === "plane" || (p.kind === "datum" && (p.datumKind === "plane" || p.datumKind === "csys")) || p.kind === "face")) pickSketchPlane(p);
     return;
   }
   if (mode.kind === "measure") {
@@ -781,6 +795,30 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f?.type === "csys" && p?.kind === "datum") {
+    const input = session?.csysInput;
+    if (f.mode !== "references" || !input) return;
+    const source = findFeature(doc, p.id);
+    if (!source || source.suppressed || doc.features.indexOf(source) >= doc.features.indexOf(f)) {
+      return toast("warn", "Pick an earlier, unsuppressed datum.");
+    }
+    const kind = datumKind(source);
+    if (kind !== p.datumKind) return;
+    if (!CSYS_INPUT_KINDS[input].includes(kind)) {
+      return toast("warn", "Pick a datum of the requested kind.");
+    }
+    mutate("Pick coordinate system reference", (d) => {
+      const x = findFeature(d, f.id, "csys");
+      if (!x) return;
+      const refs = (x.refs ??= {});
+      if (input === "origin" && kind === "point") refs.origin = { kind, id: p.id };
+      if (input === "z" && (kind === "axis" || kind === "plane")) refs.z = { kind, id: p.id };
+      if (input === "x" && kind === "axis") refs.x = { kind, id: p.id };
+    });
+    const current = get().session;
+    if (current) set({ session: { ...current, csysInput: undefined } });
+    return;
+  }
   if (f && (f.type === "construct" || f.type === "cplane") && p?.kind === "datum") {
     const source = findFeature(doc, p.id);
     const index = doc.features.findIndex((x) => x.id === p.id);
@@ -798,7 +836,7 @@ export function handlePick(p: Pick | null, additive: boolean) {
       return;
     }
     const need = CONSTRUCT_MODES[f.mode];
-    if (!need.datums?.includes(kind)) return toast("info", need.hint);
+    if (kind === "csys" || !need.datums?.includes(kind)) return toast("info", need.hint);
     mutate("Pick datum", (d) => {
       const x = findFeature(d, f.id, "construct");
       if (!x) return;

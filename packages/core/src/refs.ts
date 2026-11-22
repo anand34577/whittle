@@ -1,13 +1,20 @@
 /** Relationships between features (used for safe delete, reorder and UI hints). */
-import type { ConstructFeature, ConstructRefs, DatumKind, Feature, Id, WhittleDocument } from "./model";
+import type { ConstructFeature, ConstructRefs, CsysInput, DatumKind, Feature, Id, WhittleDocument } from "./model";
 
 export function datumKind(f: Feature): DatumKind | undefined {
+  if (f.type === "csys") return "csys";
   if (f.type === "cplane") return "plane";
   if (f.type !== "construct") return undefined;
   if (f.mode.startsWith("axis")) return "axis";
   if (f.mode.startsWith("point")) return "point";
   return "plane";
 }
+
+export const CSYS_INPUT_KINDS: Record<CsysInput, readonly DatumKind[]> = {
+  origin: ["point"],
+  z: ["axis", "plane"],
+  x: ["axis"],
+};
 
 /** Older documents store separate arrays of geometry picks and literal coordinates. */
 export function constructRefs(f: ConstructFeature): ConstructRefs {
@@ -22,9 +29,11 @@ export function constructRefs(f: ConstructFeature): ConstructRefs {
 export function featureInputs(f: Feature): Id[] {
   switch (f.type) {
     case "sketch":
-      return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
     case "cplane":
+      if (f.plane.kind === "csys") return [f.plane.csys];
       return f.plane.kind === "face" ? [f.plane.face.bodyId] : f.plane.kind === "construction" ? [f.plane.plane] : [];
+    case "csys":
+      return f.mode === "references" ? [...new Set(Object.values(f.refs ?? {}).map((ref) => ref.id))] : [];
     case "rib":
       return [f.sketch, ...(f.target ? [f.target] : [])];
     case "thread":

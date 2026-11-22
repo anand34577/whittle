@@ -1,6 +1,7 @@
 import type {
   BodyOp,
   ConstructMode,
+  CsysFeature,
   SurfaceOp,
   CurveFeature,
   CircleEntity,
@@ -77,6 +78,7 @@ export const FEATURE_LABELS: Record<FeatureType, string> = {
   offsetFace: "Press/Pull",
   cplane: "Plane",
   construct: "Construct",
+  csys: "Coordinate system",
   curve: "Curve",
   surface: "Surface",
   rib: "Rib",
@@ -252,6 +254,13 @@ export function makeOffsetFace(doc: WhittleDocument): Feature {
 
 export function makeConstructionPlane(doc: WhittleDocument, plane: PlaneRef): Feature {
   return { id: uid("cp"), type: "cplane", name: nextName(doc, "Plane"), plane };
+}
+
+export function makeCsys(doc: WhittleDocument): CsysFeature {
+  return {
+    id: uid("cs"), type: "csys", name: nextName(doc, "CSYS"), mode: "manual",
+    position: ["0", "0", "0"], rotation: ["0", "0", "0"], refs: {}, flipZ: false, flipX: false,
+  };
 }
 
 export function makeJoint(doc: WhittleDocument, bodyId?: Id, fixedId?: Id): Feature {

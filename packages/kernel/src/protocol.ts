@@ -56,7 +56,7 @@ export interface SketchFrame {
   yDir: Vec3;
   normal: Vec3;
   /** Construction geometry kind (planes by default). */
-  kind?: "plane" | "axis" | "point" | "curve";
+  kind?: "plane" | "axis" | "point" | "csys" | "curve";
   /** Curves: line segments as xyz pairs, for display. */
   line?: Float32Array;
   /** Triangles (xyz per vertex, world space) of the closed profile regions. */

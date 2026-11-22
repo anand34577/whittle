@@ -8,6 +8,7 @@ import type { Draft } from "immer";
 import { produce } from "immer";
 import {
   type DatumKind,
+  type CsysInput,
   type EdgeRef,
   type ConstraintType,
   type EntityType,
@@ -52,7 +53,7 @@ export type SketchTool = EntityType | "select" | "path" | "crect" | "rect3" | "c
 
 export type Mode =
   | { kind: "model" }
-  | { kind: "pickPlane" }
+  | { kind: "pickPlane"; csys?: Id }
   | { kind: "measure" }
   | { kind: "sketch"; sketchId: Id; tool: SketchTool; isNew: boolean };
 
@@ -93,6 +94,7 @@ export interface Session {
   label: string;
   /** Editing an early step rolled the timeline back to it; finishing puts the marker back. */
   isolated?: boolean;
+  csysInput?: CsysInput;
   /** Step-by-step undo inside the session (e.g. each shape drawn in a sketch). */
   stack: { doc: WhittleDocument; key?: string; at: number }[];
 }

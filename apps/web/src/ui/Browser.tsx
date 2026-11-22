@@ -33,7 +33,7 @@ export function Browser() {
   const mode = useApp((s) => s.mode);
   const sessionId = useApp((s) => s.session?.featureId);
   const edited = doc.features.find((f) => f.id === sessionId);
-  const choosingDatum = edited?.type === "construct" || edited?.type === "cplane";
+  const choosingDatum = edited?.type === "construct" || edited?.type === "cplane" || edited?.type === "csys";
   const inputs = choosingDatum ? featureInputs(edited) : [];
   const end = activeEnd(doc);
   const ev = documentEvaluator(doc);
@@ -45,6 +45,7 @@ export function Browser() {
     { kind: "plane", title: "Planes", features: planes },
     { kind: "axis", title: "Axes", features: active.filter((f) => datumKind(f) === "axis") },
     { kind: "point", title: "Points", features: active.filter((f) => datumKind(f) === "point") },
+    { kind: "csys", title: "Coordinate systems", features: active.filter((f) => datumKind(f) === "csys") },
   ] as const satisfies ReadonlyArray<{ kind: DatumKind; title: string; features: typeof active }>;
   const curves = active.filter((f) => f.type === "curve");
   const isSel = (fn: (p: (typeof selection)[number]) => boolean) => selection.some(fn);
@@ -113,7 +114,7 @@ export function Browser() {
           const categoryVisible = doc.datumVisibility?.categories?.[kind] !== false;
           const categoryLabel = `${categoryVisible ? "Hide" : "Show"} all datum ${title.toLowerCase()}`;
           return (
-            <Section key={kind} title={title} count={features.length} forceOpen={kind === "plane" && mode.kind === "pickPlane"} control={
+            <Section key={kind} title={title} count={features.length} forceOpen={(kind === "plane" || kind === "csys") && mode.kind === "pickPlane"} control={
               <button className="tree__eye tree__datum-eye" aria-label={categoryLabel} title={categoryLabel} onClick={() => mutate(categoryLabel, (d) => {
                 const settings = (d.datumVisibility ??= {});
                 (settings.categories ??= {})[kind] = !categoryVisible;
@@ -132,7 +133,7 @@ export function Browser() {
                         handlePick({ kind: "datum", id: f.id, datumKind: kind }, e.shiftKey || e.ctrlKey || e.metaKey);
                       }
                     }} onDoubleClick={() => mode.kind === "model" && !choosingDatum && editFeature(f.id)}>
-                      <Icon name={kind} size={16} />
+                      <Icon name={kind === "csys" ? "origin" : kind} size={16} />
                       <span className={`tree__name ${visible && categoryVisible ? "" : "is-muted"}`}>{f.name}</span>
                     </button>
                     <button className="tree__eye" title="Edit" aria-label={`Edit ${f.name}`} onClick={() => editFeature(f.id)}>

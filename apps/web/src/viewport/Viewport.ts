@@ -600,6 +600,8 @@ export class Viewport {
     return sprite;
   }
 
+  private static readonly csysColors = [0xdb575d, 0x43a872, 0x4b87df];
+
   setConstructionPlanes(frames: SketchFrame[]) {
     this.clearGroup(this.cplanes);
     this.datums.clear();
@@ -613,6 +615,22 @@ export class Viewport {
         lines.raycast = () => {};
         lines.renderOrder = 5;
         this.cplanes.add(lines);
+        continue;
+      }
+      if (f.kind === "csys") {
+        const origin = new THREE.Vector3(...f.origin);
+        const segments: [Vec3, Vec3][] = [];
+        const materials = [f.xDir, f.yDir, f.normal].map((dir, i) => {
+          const end = origin.clone().addScaledVector(new THREE.Vector3(...dir), s * 0.55);
+          const material = new THREE.LineBasicMaterial({ color: Viewport.csysColors[i], transparent: true, depthTest: false });
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, end]), material);
+          line.raycast = () => {};
+          line.renderOrder = 5;
+          this.cplanes.add(line);
+          segments.push([f.origin, end.toArray()]);
+          return material;
+        });
+        this.datums.set(f.id, { kind: "csys", segments, materials });
         continue;
       }
       if (f.kind === "axis") {
@@ -1067,11 +1085,11 @@ export class Viewport {
   setHighlights(items: { pick: Pick; style: "hover" | "select" | "ref" }[]) {
     this.clearGroup(this.highlightGroup);
     for (const datum of this.datums.values()) {
-      for (const material of datum.materials) {
-        material.color.set(this.theme.plane);
+      datum.materials.forEach((material, i) => {
+        material.color.set(datum.kind === "csys" ? Viewport.csysColors[i]! : this.theme.plane);
         if (material instanceof THREE.PointsMaterial) material.size = 9;
-      }
-      datum.materials[0]!.opacity = datum.kind === "plane" ? 0.07 : datum.kind === "axis" ? 0.65 : 0.75;
+      });
+      datum.materials[0]!.opacity = datum.kind === "plane" ? 0.07 : datum.kind === "axis" ? 0.65 : datum.kind === "csys" ? 1 : 0.75;
       if (datum.kind === "plane") datum.materials[1]!.opacity = 0.6;
     }
     for (const { pick, style } of items) {
@@ -1559,6 +1577,7 @@ export class Viewport {
     const b = new THREE.Vector3();
     for (const [id, { kind, segments }] of this.datums) {
       if (this.filter.datumInputs && !this.filter.datumInputs.has(id)) continue;
+      if (this.filter.planes && kind !== "plane" && kind !== "csys") continue;
       for (const [start, end] of segments) {
         // Screen-space tolerances stay usable at every zoom and projection.
         a.set(...start).project(this.camera);
