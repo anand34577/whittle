@@ -11,6 +11,9 @@ import {
   type Vec2,
   type Vec3,
   CONSTRAINT_LABELS,
+  CONSTRUCT_MODES,
+  datumKind,
+  featureInputs,
   LENGTH_TO_MM,
   activeEnd,
   documentEvaluator,
@@ -679,6 +682,9 @@ export function ViewportView() {
         for (const p of picks) handlePick(p, true);
       },
       onDoubleClick: (p) => {
+        const { doc, session } = useApp.getState();
+        const edited = findFeature(doc, session?.featureId);
+        if (edited?.type === "construct" || edited?.type === "cplane") return;
         if (p?.kind === "sketch" || p?.kind === "region") editFeature(p.sketchId);
         else if (p?.kind === "datum" && useApp.getState().mode.kind === "model") editFeature(p.id);
         else if (p && (p.kind === "face" || p.kind === "edge" || p.kind === "body")) editFeature(p.bodyId);
@@ -790,9 +796,16 @@ export function ViewportView() {
     else if (f?.type === "revolve") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     else if (mode.kind === "model" && priority !== "all") filter = { faces: priority === "face", edges: priority === "edge", planes: false, sketches: priority === "body" };
-    vp.setPickFilter({ ...filter, datums: mode.kind === "model" && !session && priority === "all" });
+    const kinds = f?.type === "construct" ? CONSTRUCT_MODES[f.mode].datums : f?.type === "cplane" ? ["plane"] : undefined;
+    const datumInputs = kinds && f && mode.kind === "model"
+      ? new Set(doc.features.slice(0, doc.features.indexOf(f)).filter((source) => {
+        const kind = datumKind(source);
+        return !source.suppressed && kind && kinds.includes(kind);
+      }).map((source) => source.id))
+      : undefined;
+    vp.setPickFilter({ ...filter, datumInputs, datums: !!datumInputs || (mode.kind === "model" && !session && priority === "all") });
     vp.setPlanesVisible(mode.kind === "pickPlane");
-  }, [vp, mode, session, sessionFeature, priority]);
+  }, [vp, mode, session, sessionFeature, priority, doc.features]);
 
   // A lesson that asks for one plane lights that plane while picking (audit B-2).
   const coach = useApp((s) => s.coach);
@@ -1032,6 +1045,14 @@ export function ViewportView() {
       const b = pb.find((x) => x.id === ref.bodyId);
       const i = b ? matchFace(b.faces, ref) : -1;
       if (b && i >= 0) items.push({ pick: { kind: "face", bodyId: b.id, index: i }, style: "ref" });
+    }
+    if (f?.type === "construct" || f?.type === "cplane") {
+      const inputs = featureInputs(f);
+      for (const frame of regen?.planes ?? []) {
+        if (frame.kind && frame.kind !== "curve" && inputs.includes(frame.id)) {
+          items.push({ pick: { kind: "datum", id: frame.id, datumKind: frame.kind }, style: "ref" });
+        }
+      }
     }
     if (f?.type === "combine") {
       if (f.target) items.push({ pick: { kind: "body", bodyId: f.target }, style: "ref" });

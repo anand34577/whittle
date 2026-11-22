@@ -202,7 +202,7 @@ function planeFrame(id: Id, plane: PlaneRef, bodies: Map<Id, Shape3D>, sketches:
   }
   if (plane.kind === "construction") {
     const base = sketches.get(plane.plane)?.frame;
-    if (!base) throw new FeatureError("The construction plane this is based on is missing. Pick a new plane.");
+    if (!base || base.kind !== "plane") throw new FeatureError("The construction plane must be an earlier, successfully built datum plane.");
     return { frame: { id, origin: add(base.origin, scale(base.normal, offset)), xDir: base.xDir, yDir: base.yDir, normal: base.normal } };
   }
   const body = bodyForRefs(bodies, plane.face.bodyId);
@@ -555,6 +555,7 @@ export class Builder {
       case "construct": {
         const { frame, warning } = constructFrame(f, {
           body: (id) => bodyForRefs(bodies, id),
+          datum: (id) => sketches.get(id)?.frame,
           angle: (e) => ev.num(e, "angle", "Angle"),
           num: (e) => ev.num(e, "number", "Value"),
           fail: (m) => new FeatureError(m, undefined, /^(Pick|Click)/.test(m)),
@@ -565,7 +566,7 @@ export class Builder {
 
       case "cplane": {
         const { frame, warning } = planeFrame(f.id, f.plane, bodies, sketches, ev);
-        sketches.set(f.id, { frame, drawing: null });
+        sketches.set(f.id, { frame: { ...frame, kind: "plane" }, drawing: null });
         return warning;
       }
 

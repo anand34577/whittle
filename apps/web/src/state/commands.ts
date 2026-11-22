@@ -48,7 +48,7 @@ import { aiAvailable } from "./platform";
 import { downloadCopy, exportDesign, sendToSlicer, newDesign, openDesign, openFromComputer, saveDesign, saveScreenshot } from "./files";
 import { exportSketch, importDxfIntoSketch, importSvgIntoSketch, sketchForExport } from "./drawings";
 import { duplicateEntity, mirrorEntity, offsetEntity, rotateEntity } from "./sketchOps";
-import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, DIMENSIONS, SURFACE_OPS, type SurfaceOp } from "@whittle/core";
+import { type ConstraintType, CONSTRAINT_LABELS, CONSTRUCT_MODES, type ConstructMode, datumKind, DIMENSIONS, SURFACE_OPS, type SurfaceOp } from "@whittle/core";
 import { stretchSelection, breakSelection, gridPatternSelection, circularPatternSelection, moveSelection, scaleSelection, deleteSketchSelection, startConstraint, makeConstrainable, autoConstrainSketch, copySketchSelection, pasteSketchClip, mirrorSelection, offsetSelection, toggleGeometryConstruction } from "./constraintOps";
 import { importImage, startImagePick, traceImage } from "./refImage";
 import { intersectIntoSketch } from "./sectionCurves";
@@ -582,7 +582,13 @@ const CONSTRUCT_COMMANDS: Command[] = (Object.keys(CONSTRUCT_MODES) as Construct
   icon: CONSTRUCT_ICON(m),
   keywords: "construct reference datum plane axis point midplane tangent",
   hint: CONSTRUCT_MODES[m].hint,
-  when: (s: AppState) => inModel(s) && (s.regen?.bodies.length ?? 0) > 0,
+  when: (s: AppState) => inModel(s) && (
+    !!s.regen?.bodies.length || !!s.regen?.planes.some((frame) => {
+      const feature = s.doc.features.find((f) => f.id === frame.id);
+      const kind = feature && !feature.suppressed && datumKind(feature);
+      return kind && CONSTRUCT_MODES[m].datums?.includes(kind);
+    })
+  ),
   run: model(() => startConstruct(m)),
 }));
 COMMANDS.push(...CONSTRUCT_COMMANDS);

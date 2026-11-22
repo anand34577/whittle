@@ -256,6 +256,22 @@ export type ConstructMode =
   | "axisCyl" | "axis2p" | "axis2pl" | "axisEdge" | "axisPerp"
   | "pointVertex" | "point2e" | "point3pl" | "pointCenter" | "pointEdgePlane";
 
+/** A datum is identified by its producing feature and the geometry it is expected to produce. */
+export type DatumRef<K extends DatumKind = DatumKind> = { kind: K; id: Id };
+
+/** A straight edge endpoint, oriented by the saved edge direction. */
+export interface VertexRef {
+  kind: "vertex";
+  edge: EdgeRef;
+  end: 0 | 1;
+}
+
+export interface ConstructRefs {
+  planes: (DatumRef<"plane"> | { kind: "face"; face: FaceRef })[];
+  lines: (DatumRef<"axis"> | { kind: "edge"; edge: EdgeRef })[];
+  points: (DatumRef<"point"> | VertexRef | { kind: "xyz"; at: Vec3 })[];
+}
+
 /**
  * Construction geometry derived from model faces, edges and points: planes (sketchable),
  * axes and points (references). `value` is an angle (planeEdge, planeTangent) or a 0-100 %
@@ -267,6 +283,8 @@ export interface ConstructFeature extends FeatureBase {
   faces: FaceRef[];
   edges: EdgeRef[];
   points: Vec3[];
+  /** When present, these ordered picks replace the legacy face, edge and XYZ arrays. */
+  refs?: ConstructRefs;
   value: Expr;
 }
 

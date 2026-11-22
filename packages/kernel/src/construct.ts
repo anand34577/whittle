@@ -1,11 +1,12 @@
 /** Construction geometry from model references: planes, axes and points. */
-import { type ConstructFeature, type Vec3, frameAxes } from "@whittle/core";
+import { CONSTRUCT_MODES, type ConstructFeature, type DatumKind, type Vec3, constructRefs, frameAxes } from "@whittle/core";
 import type { Edge, Face, Shape3D } from "replicad";
 import type { SketchFrame } from "./protocol";
 import { add, byLength, cross, dist, dot, edgeInfo, faceInfo, len, norm, resolveEdge, resolveFace, scale, sub } from "./refs";
 
 export interface ConstructEnv {
   body(id: string): Shape3D;
+  datum(id: string): SketchFrame | undefined;
   angle(expr: string): number;
   num(expr: string): number;
   fail(message: string): Error;
@@ -55,35 +56,78 @@ const pointFrame = (id: string, origin: Vec3): SketchFrame => ({ id, origin, nor
 
 export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame: SketchFrame; warning?: string } {
   let uncertain = false;
+  const { planes, lines, points } = constructRefs(f);
+  const allowed = CONSTRUCT_MODES[f.mode].datums;
+  const datum = (id: string, kind: DatumKind): SketchFrame => {
+    if (!allowed?.includes(kind)) throw env.fail(`This construction does not accept a datum ${kind}.`);
+    if (id === f.id) throw env.fail("A datum cannot reference itself.");
+    const frame = env.datum(id);
+    if (!frame) throw env.fail("The referenced datum is unavailable. It must be earlier in the timeline, unsuppressed, and built successfully.");
+    if (frame.kind !== kind) throw env.fail(`The referenced feature must be a datum ${kind}.`);
+    return frame;
+  };
   const face = (i: number, flat = false): { f: Face; c: Vec3; n: Vec3 } => {
-    const ref = f.faces[i];
-    if (!ref) throw env.fail(`Pick ${f.faces.length === 0 ? "a face" : "another face"}.`);
-    const r = resolveFace(env.body(ref.bodyId), ref);
+    const ref = planes[i];
+    if (!ref) throw env.fail(`Pick ${i === 0 ? "a face" : "another face"}.`);
+    if (ref.kind !== "face") throw env.fail("This needs a model face.");
+    const r = resolveFace(env.body(ref.face.bodyId), ref.face);
     if (!r) throw env.fail("A face this was built on is gone. Pick it again.");
     uncertain ||= r.uncertain;
     const info = faceInfo(r.item);
     if (flat && info.surface !== "PLANE") throw env.fail("This needs flat faces.");
     return { f: r.item, c: info.center, n: info.normal };
   };
-  const edge = (i: number, line = false): { e: Edge; mid: Vec3; t: Vec3 } => {
-    const ref = f.edges[i];
-    if (!ref) throw env.fail(`Pick ${f.edges.length === 0 ? "an edge" : "another edge"}.`);
-    const r = resolveEdge(env.body(ref.bodyId), ref);
+  const plane = (i: number, flat = true): { c: Vec3; n: Vec3 } => {
+    const ref = planes[i];
+    if (!ref || ref.kind === "face") return face(i, flat);
+    if (ref.kind !== "plane") throw env.fail("This needs a datum plane or face.");
+    const frame = datum(ref.id, "plane");
+    return { c: frame.origin, n: frame.normal };
+  };
+  const edge = (i: number, straight = false): { e: Edge; mid: Vec3; t: Vec3 } => {
+    const ref = lines[i];
+    if (!ref) throw env.fail(`Pick ${i === 0 ? "an edge" : "another edge"}.`);
+    if (ref.kind !== "edge") throw env.fail("This needs a model edge.");
+    const r = resolveEdge(env.body(ref.edge.bodyId), ref.edge);
     if (!r) throw env.fail("An edge this was built on is gone. Pick it again.");
     uncertain ||= r.uncertain;
     const info = edgeInfo(r.item);
-    if (line && info.curve !== "LINE") throw env.fail("This needs straight edges.");
+    if (straight && info.curve !== "LINE") throw env.fail("This needs straight edges.");
     return { e: r.item, mid: info.mid, t: info.tangent };
   };
+  const line = (i: number): { mid: Vec3; t: Vec3 } => {
+    const ref = lines[i];
+    if (!ref || ref.kind === "edge") return edge(i, true);
+    if (ref.kind !== "axis") throw env.fail("This needs a datum axis or straight edge.");
+    const frame = datum(ref.id, "axis");
+    return { mid: frame.origin, t: frame.normal };
+  };
   const pt = (i: number): Vec3 => {
-    const p = f.points[i];
-    if (!p) throw env.fail(`Click ${f.points.length === 0 ? "a point" : "another point"} on the model.`);
-    return p;
+    const ref = points[i];
+    if (!ref) throw env.fail(`Pick ${i === 0 ? "a point" : "another point"}.`);
+    switch (ref.kind) {
+      case "xyz":
+        return ref.at;
+      case "point":
+        return datum(ref.id, "point").origin;
+      case "vertex": {
+        const r = resolveEdge(env.body(ref.edge.bodyId), ref.edge);
+        if (!r || r.item.geomType !== "LINE") throw env.fail("The edge locating this vertex is gone. Pick the vertex again.");
+        const start = r.item.startPoint.toTuple();
+        const end = r.item.endPoint.toTuple();
+        const alignment = dot(norm(sub(end, start)), ref.edge.tangent);
+        if (Math.abs(alignment) < 0.9) throw env.fail("The vertex direction changed. Pick the vertex again.");
+        uncertain ||= r.uncertain;
+        return (ref.end === 0) === (alignment > 0) ? start : end;
+      }
+      default:
+        throw env.fail("This needs a datum point, vertex, or XYZ point.");
+    }
   };
   const circle = (): { c: Vec3; n: Vec3; r: number } => {
     const tries: Edge[] = [];
-    if (f.edges.length) tries.push(edge(0).e);
-    else if (f.faces.length) tries.push(...face(0).f.edges);
+    if (lines.length) tries.push(edge(0).e);
+    else if (planes.length) tries.push(...face(0).f.edges);
     for (const e of tries) {
       if (e.geomType !== "CIRCLE") continue;
       const c = circleOf(e);
@@ -95,8 +139,8 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
   let frame: SketchFrame;
   switch (f.mode) {
     case "midplane": {
-      const a = face(0, true);
-      const b = face(1, true);
+      const a = plane(0);
+      const b = plane(1);
       const x = planeIntersection(a.c, a.n, b.c, b.n);
       if (!x) {
         const n = a.n;
@@ -115,8 +159,8 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
       break;
     }
     case "plane2e": {
-      const a = edge(0, true);
-      const b = edge(1, true);
+      const a = line(0);
+      const b = line(1);
       let n = cross(a.t, b.t);
       if (len(n) < 1e-6) n = cross(a.t, sub(b.mid, a.mid));
       else if (Math.abs(dot(norm(n), sub(b.mid, a.mid))) > 1e-3) throw env.fail("The two edges aren't in one plane (they skew past each other).");
@@ -125,11 +169,13 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
       break;
     }
     case "planeEdge": {
-      const a = edge(0, true);
+      const a = line(0);
       let n0: Vec3;
-      if (f.faces.length) n0 = face(0).n;
+      if (planes.length) n0 = plane(0, false).n;
       else n0 = Math.abs(dot(a.t, [0, 0, 1])) > 0.99 ? [1, 0, 0] : [0, 0, 1];
-      n0 = norm(sub(n0, scale(a.t, dot(n0, a.t))));
+      n0 = sub(n0, scale(a.t, dot(n0, a.t)));
+      if (len(n0) < 1e-9) throw env.fail("The rotation axis is perpendicular to the reference plane.");
+      n0 = norm(n0);
       frame = planeFrame(f.id, a.mid, rotate(n0, a.t, env.angle(f.value)));
       break;
     }
@@ -160,20 +206,20 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
       break;
     }
     case "axis2pl": {
-      const a = face(0, true);
-      const b = face(1, true);
+      const a = plane(0);
+      const b = plane(1);
       const x = planeIntersection(a.c, a.n, b.c, b.n);
-      if (!x) throw env.fail("The planes are parallel, so they never meet.");
+      if (!x) throw env.fail("The planes are parallel and do not define a unique axis.");
       frame = axisFrame(f.id, x.p, x.d);
       break;
     }
     case "axisEdge": {
-      const a = edge(0, true);
+      const a = line(0);
       frame = axisFrame(f.id, a.mid, a.t);
       break;
     }
     case "axisPerp": {
-      const a = face(0);
+      const a = plane(0, false);
       const p = pt(0);
       frame = axisFrame(f.id, sub(p, scale(a.n, dot(sub(p, a.c), a.n))), a.n);
       break;
@@ -182,8 +228,8 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
       frame = pointFrame(f.id, pt(0));
       break;
     case "point2e": {
-      const a = edge(0, true);
-      const b = edge(1, true);
+      const a = line(0);
+      const b = line(1);
       const w = cross(a.t, b.t);
       if (len(w) < 1e-6) throw env.fail("The edges are parallel, so they never cross.");
       const r = sub(b.mid, a.mid);
@@ -192,11 +238,14 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
       const pa = add(a.mid, scale(a.t, s));
       const pb = add(b.mid, scale(b.t, u));
       frame = pointFrame(f.id, scale(add(pa, pb), 0.5));
-      if (dist(pa, pb) > 1e-3) return { frame, warning: "The edges don't quite meet; the point is halfway between them." };
+      if (dist(pa, pb) > 1e-3) {
+        if (lines.some((ref) => ref.kind === "axis")) throw env.fail("The lines are skew and do not intersect.");
+        return { frame, warning: "The edges don't quite meet; the point is halfway between them." };
+      }
       break;
     }
     case "point3pl": {
-      const [a, b, c] = [face(0, true), face(1, true), face(2, true)];
+      const [a, b, c] = [plane(0), plane(1), plane(2)];
       const det = dot(a.n, cross(b.n, c.n));
       if (Math.abs(det) < 1e-9) throw env.fail("These three planes don't meet at one point (two are parallel).");
       const p = scale(add(add(scale(cross(b.n, c.n), dot(a.n, a.c)), scale(cross(c.n, a.n), dot(b.n, b.c))), scale(cross(a.n, b.n), dot(c.n, c.c))), 1 / det);
@@ -207,13 +256,13 @@ export function constructFrame(f: ConstructFeature, env: ConstructEnv): { frame:
       frame = pointFrame(f.id, circle().c);
       break;
     case "pointEdgePlane": {
-      const a = edge(0, true);
-      const p = face(0, true);
+      const a = line(0);
+      const p = plane(0);
       const den = dot(p.n, a.t);
-      if (Math.abs(den) < 1e-9) throw env.fail("The edge runs parallel to the plane.");
+      if (Math.abs(den) < 1e-9) throw env.fail("The axis or edge runs parallel to the plane.");
       frame = pointFrame(f.id, add(a.mid, scale(a.t, dot(p.n, sub(p.c, a.mid)) / den)));
       break;
     }
   }
-  return { frame, warning: uncertain ? "A picked face or edge moved; please check it's still the right one." : undefined };
+  return { frame, warning: uncertain ? "A picked face, edge, or vertex moved; please check it's still the right one." : undefined };
 }

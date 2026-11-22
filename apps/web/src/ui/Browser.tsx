@@ -1,6 +1,6 @@
 /** Left panel: what's in the design (parameters, origin, bodies, sketches). */
 import { useState } from "react";
-import { type DatumKind, activeEnd, documentEvaluator, formatQuantity, isSketchConsumed } from "@whittle/core";
+import { type DatumKind, activeEnd, datumKind, documentEvaluator, featureInputs, formatQuantity, isSketchConsumed } from "@whittle/core";
 import { createSketchOn, handlePick, saveNamedView, showNamedView } from "../state/actions";
 import { editFeature, mutate, useApp } from "../state/store";
 import { renameBody, renameStep } from "../state/steps";
@@ -31,16 +31,20 @@ export function Browser() {
   const regen = useApp((s) => s.regen);
   const selection = useApp((s) => s.selection);
   const mode = useApp((s) => s.mode);
+  const sessionId = useApp((s) => s.session?.featureId);
+  const edited = doc.features.find((f) => f.id === sessionId);
+  const choosingDatum = edited?.type === "construct" || edited?.type === "cplane";
+  const inputs = choosingDatum ? featureInputs(edited) : [];
   const end = activeEnd(doc);
   const ev = documentEvaluator(doc);
   const bodies = regen?.bodies ?? [];
   const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch");
   const active = doc.features.slice(0, end);
-  const planes = active.filter((f) => f.type === "cplane" || (f.type === "construct" && (f.mode.startsWith("plane") || f.mode === "midplane")));
+  const planes = active.filter((f) => datumKind(f) === "plane");
   const groups = [
     { kind: "plane", title: "Planes", features: planes },
-    { kind: "axis", title: "Axes", features: active.filter((f) => f.type === "construct" && f.mode.startsWith("axis")) },
-    { kind: "point", title: "Points", features: active.filter((f) => f.type === "construct" && f.mode.startsWith("point")) },
+    { kind: "axis", title: "Axes", features: active.filter((f) => datumKind(f) === "axis") },
+    { kind: "point", title: "Points", features: active.filter((f) => datumKind(f) === "point") },
   ] as const satisfies ReadonlyArray<{ kind: DatumKind; title: string; features: typeof active }>;
   const curves = active.filter((f) => f.type === "curve");
   const isSel = (fn: (p: (typeof selection)[number]) => boolean) => selection.some(fn);
@@ -119,7 +123,7 @@ export function Browser() {
             }>
               {features.map((f) => {
                 const visible = doc.datumVisibility?.items?.[f.id] !== false;
-                const selected = isSel((pick) => pick.kind === "datum" && pick.id === f.id);
+                const selected = inputs.includes(f.id) || isSel((pick) => pick.kind === "datum" && pick.id === f.id);
                 const visibilityLabel = `${visible ? "Hide" : "Show"} ${f.name}`;
                 return (
                   <div key={f.id} className={`tree__row ${selected ? "is-selected" : ""}`}>
@@ -127,7 +131,7 @@ export function Browser() {
                       if (mode.kind === "model" || mode.kind === "pickPlane") {
                         handlePick({ kind: "datum", id: f.id, datumKind: kind }, e.shiftKey || e.ctrlKey || e.metaKey);
                       }
-                    }} onDoubleClick={() => mode.kind === "model" && editFeature(f.id)}>
+                    }} onDoubleClick={() => mode.kind === "model" && !choosingDatum && editFeature(f.id)}>
                       <Icon name={kind} size={16} />
                       <span className={`tree__name ${visible && categoryVisible ? "" : "is-muted"}`}>{f.name}</span>
                     </button>

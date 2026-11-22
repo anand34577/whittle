@@ -1,5 +1,22 @@
 /** Relationships between features (used for safe delete, reorder and UI hints). */
-import type { Feature, Id, WhittleDocument } from "./model";
+import type { ConstructFeature, ConstructRefs, DatumKind, Feature, Id, WhittleDocument } from "./model";
+
+export function datumKind(f: Feature): DatumKind | undefined {
+  if (f.type === "cplane") return "plane";
+  if (f.type !== "construct") return undefined;
+  if (f.mode.startsWith("axis")) return "axis";
+  if (f.mode.startsWith("point")) return "point";
+  return "plane";
+}
+
+/** Older documents store separate arrays of geometry picks and literal coordinates. */
+export function constructRefs(f: ConstructFeature): ConstructRefs {
+  return f.refs ?? {
+    planes: f.faces.map((face) => ({ kind: "face", face })),
+    lines: f.edges.map((edge) => ({ kind: "edge", edge })),
+    points: f.points.map((at) => ({ kind: "xyz", at })),
+  };
+}
 
 /** Ids of features/bodies this feature reads from. */
 export function featureInputs(f: Feature): Id[] {
@@ -24,8 +41,14 @@ export function featureInputs(f: Feature): Id[] {
       return [...new Set([...(f.bodyId ? [f.bodyId] : []), ...f.bodies, ...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId), ...(f.planeRef ? [f.planeRef] : [])])];
     case "curve":
       return [...new Set([...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId), ...(f.sketch ? [f.sketch] : [])])];
-    case "construct":
-      return [...new Set([...f.faces.map((x) => x.bodyId), ...f.edges.map((x) => x.bodyId)])];
+    case "construct": {
+      const { planes, lines, points } = constructRefs(f);
+      return [...new Set([
+        ...planes.map((ref) => ref.kind === "face" ? ref.face.bodyId : ref.id),
+        ...lines.map((ref) => ref.kind === "edge" ? ref.edge.bodyId : ref.id),
+        ...points.flatMap((ref) => ref.kind === "xyz" ? [] : [ref.kind === "vertex" ? ref.edge.bodyId : ref.id]),
+      ])];
+    }
     case "extrude":
       return [...new Set([f.sketch, ...(f.target ? [f.target] : []), ...(f.toFace ? [f.toFace.bodyId] : []), ...(f.startFace ? [f.startFace.bodyId] : [])])];
     case "revolve":

@@ -1,7 +1,7 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
 import { useEffect, useRef, useState } from "react";
-import { CONSTRUCT_MODES, CURVE_SOURCES, LENGTH_TO_MM, SURFACE_OPS, defaultLength, documentEvaluator, sketchCountText } from "@whittle/core";
+import { CONSTRUCT_MODES, CURVE_SOURCES, LENGTH_TO_MM, SURFACE_OPS, constructRefs, datumKind, defaultLength, documentEvaluator, sketchCountText } from "@whittle/core";
 import { volumeText } from "../state/measure";
 import type {
   BodyOp,
@@ -1011,7 +1011,7 @@ function DraftEditor({ f }: { f: DraftFeature }) {
 
 function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
   const features = useApp((s) => s.doc.features);
-  const before = features.slice(0, Math.max(0, features.findIndex((x) => x.id === f.id))).filter((x) => x.type === "cplane");
+  const before = features.slice(0, Math.max(0, features.findIndex((x) => x.id === f.id))).filter((x) => !x.suppressed && datumKind(x) === "plane");
   const p = f.plane;
   const set = (label: string, recipe: (pl: PlaneRef) => PlaneRef) => upd(f, label, (d) => void (d.type === "cplane" && (d.plane = recipe(d.plane))));
   const value = p.kind === "origin" ? p.plane : p.kind === "construction" ? p.plane : "face";
@@ -1051,15 +1051,38 @@ function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
 
 function ConstructEditor({ f }: { f: ConstructFeature }) {
   const need = CONSTRUCT_MODES[f.mode];
-  const has = f.faces.length + f.edges.length + f.points.length;
-  const parts = [f.faces.length && `${f.faces.length} face${f.faces.length > 1 ? "s" : ""}`, f.edges.length && `${f.edges.length} edge${f.edges.length > 1 ? "s" : ""}`, f.points.length && `${f.points.length} point${f.points.length > 1 ? "s" : ""}`].filter(Boolean);
+  const features = useApp((s) => s.doc.features);
+  const { planes, lines, points } = constructRefs(f);
+  const picks = [...planes, ...lines, ...points];
+  const parts = picks.map((ref) => {
+    switch (ref.kind) {
+      case "plane":
+      case "axis":
+      case "point":
+        return features.find((x) => x.id === ref.id)?.name ?? `Missing datum ${ref.kind}`;
+      case "vertex":
+        return "Vertex";
+      case "xyz":
+        return "XYZ point";
+      case "face":
+        return "Face";
+      case "edge":
+        return "Edge";
+    }
+  });
   return (
     <>
       <div className="picker">
         <Icon name={f.mode.startsWith("axis") ? "axis" : f.mode.startsWith("point") ? "point" : "plane"} size={16} />
-        <span>{has === 0 ? need.hint : parts.join(" · ")}</span>
-        {has > 0 && (
-          <button className="link" onClick={() => upd(f, "Clear picks", (d) => void (d.type === "construct" && ((d.faces = []), (d.edges = []), (d.points = []))))}>
+        <span>{picks.length === 0 ? need.hint : parts.join(" · ")}</span>
+        {picks.length > 0 && (
+          <button className="link" onClick={() => upd(f, "Clear picks", (d) => {
+            if (d.type !== "construct") return;
+            d.faces = [];
+            d.edges = [];
+            d.points = [];
+            delete d.refs;
+          })}>
             Clear
           </button>
         )}

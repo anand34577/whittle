@@ -8,7 +8,7 @@ const browser = await chromium.launch({
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
 });
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
   await page.addInitScript(() => localStorage.setItem("whittle.debug", "1"));
   await page.goto(process.argv[2] ?? "http://localhost:5173/");
   const welcome = page.getByRole("dialog", { name: "Welcome to Whittle" });
@@ -38,7 +38,7 @@ try {
     const vp = window.whittle.viewportRef.current;
     const [x, y] = vp.worldToScreen(world);
     const bounds = document.querySelector(".viewport canvas").getBoundingClientRect();
-    return [bounds.left + x, bounds.top + y];
+    return [bounds.left + x * bounds.width / vp.size.x, bounds.top + y * bounds.height / vp.size.y];
   }, world);
   const worlds = [[0, 0, 0], [5, 25, 10], [25, 0, 10]];
   for (const [i, datum] of datums.slice(0, 3).entries()) {
@@ -58,17 +58,17 @@ try {
 
   await row("Fixture plane").dblclick();
   assert.equal(await page.evaluate(() => window.whittle.useApp.getState().session?.featureId), "test-plane");
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await waitBuilt();
   await row("Edit Fixture plane").focus();
   await row("Edit Fixture plane").click();
   assert.equal(await page.evaluate(() => window.whittle.useApp.getState().session?.featureId), "test-plane");
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await waitBuilt();
 
   await page.mouse.dblclick(...await screen(worlds[2]));
   assert.equal(await page.evaluate(() => window.whittle.useApp.getState().session?.featureId), "test-point");
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await waitBuilt();
 
   await row("Hide Fixture point").click();
@@ -89,7 +89,75 @@ try {
     const s = window.whittle.useApp.getState();
     return s.doc.features.find((f) => f.id === s.session?.featureId)?.plane;
   }), { kind: "construction", plane: "test-plane", offset: "0" }, "Sketch command uses the selected plane");
+  await page.getByRole("button", { name: "Finish sketch", exact: true }).click();
+  await waitBuilt();
+  await page.evaluate(() => window.whittle.viewportRef.current.viewTo("home"));
+  await page.waitForFunction(() => !window.whittle.viewportRef.current.anim);
   console.log("ok  datum selection, highlighting, edit gestures, and hierarchical visibility");
+
+  const run = async (id, inputId) => {
+    await page.evaluate((id) => {
+      const command = window.whittle.commands.find((command) => command.id === id);
+      if (!command.when(window.whittle.useApp.getState())) throw new Error(`Construction command ${id} is disabled`);
+      command.run();
+    }, id);
+    await waitBuilt();
+    await page.waitForFunction((inputId) => window.whittle.viewportRef.current.filter.datumInputs?.has(inputId), inputId);
+  };
+  const active = () => page.evaluate(() => {
+    const { doc, session } = window.whittle.useApp.getState();
+    return doc.features.find((feature) => feature.id === session?.featureId);
+  });
+  const finish = async () => {
+    await waitBuilt();
+    await page.getByRole("button", { name: "OK", exact: true }).click();
+    await waitBuilt();
+    assert.equal(await active(), undefined);
+  };
+  const clickDatumOutline = async (id) => {
+    const segments = await page.evaluate((id) => window.whittle.viewportRef.current.datums.get(id).segments, id);
+    for (const [start, end] of segments) {
+      const [x, y] = await screen(start.map((value, i) => (value + end[i]) / 2));
+      const pick = await page.evaluate(([clientX, clientY]) => window.whittle.viewportRef.current.pick({ clientX, clientY }), [x, y]);
+      if (pick?.id === id) {
+        await page.mouse.click(x, y);
+        return;
+      }
+    }
+    assert.fail(`No pickable outline for datum ${id}`);
+  };
+
+  await page.evaluate(() => {
+    const { useApp } = window.whittle;
+    const side = { id: "test-yz", name: "Side plane", type: "cplane", plane: { kind: "origin", plane: "YZ", offset: "8" } };
+    useApp.setState(({ doc }) => ({ doc: { ...doc, features: [...doc.features, side] } }));
+  });
+  await waitBuilt();
+  await run("construct-axis2pl", "test-yz");
+  await row("Fixture axis").click();
+  assert.equal((await active()).refs, undefined, "Wrong-kind Browser pick is ignored");
+  await row("Fixture plane").click();
+  await clickDatumOutline("test-yz");
+  const intersectionAxis = await active();
+  assert.deepEqual(intersectionAxis.refs.planes, [{ kind: "plane", id: "test-plane" }, { kind: "plane", id: "test-yz" }]);
+  assert.equal(await row("Side plane").getAttribute("aria-pressed"), "true");
+  await finish();
+
+  await run("construct-axis2p", "test-point");
+  await row("Second point").click();
+  await page.mouse.click(...await screen(worlds[2]));
+  const pointAxis = await active();
+  assert.deepEqual(pointAxis.refs.points, [{ kind: "point", id: "test-point-2" }, { kind: "point", id: "test-point" }]);
+  await finish();
+
+  await row("Edit Fixture plane").click();
+  const offset = page.getByLabel("Offset", { exact: true });
+  await offset.fill("6");
+  await offset.press("Tab");
+  await finish();
+  const regenerated = await page.evaluate((id) => window.whittle.useApp.getState().regen.planes.find((frame) => frame.id === id), intersectionAxis.id);
+  assert.ok(Math.abs(regenerated.origin[2] - 6) < 1e-6, "Changing the plane offset moves its dependent axis");
+  console.log("ok  Browser and viewport construction picks persist and regenerate");
 } finally {
   await browser.close();
 }

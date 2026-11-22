@@ -6,6 +6,8 @@ import {
   SURFACE_OPS,
   type SurfaceOp,
   type ConstructMode,
+  type ConstructRefs,
+  type VertexRef,
   type EdgeRef,
   type FaceRef,
   type Feature,
@@ -16,6 +18,8 @@ import {
   type Vec2,
   type Vec3,
   activeEnd,
+  constructRefs,
+  datumKind,
   defaultLength,
   frameAxes,
   isSketchConsumed,
@@ -628,23 +632,36 @@ export function startConstruct(mode: ConstructMode) {
   toast("info", CONSTRUCT_MODES[mode].hint);
 }
 
-/** A clicked point, snapped to the nearest straight-edge corner of its body when close. */
-function snapPoint(p: Pick & { at?: Vec3 }): Vec3 | null {
+/** Snap to a nearby edge endpoint, retaining a straight edge's persistent reference when possible. */
+function snapPointPick(p: Pick & { at?: Vec3 }): { at: Vec3; vertex?: VertexRef } | null {
   if (!p.at) return null;
   const at = p.at;
   const body = p.kind === "face" || p.kind === "edge" || p.kind === "body" ? pickableBodies().find((b) => b.id === p.bodyId) : undefined;
   let best: Vec3 = at;
+  let vertex: VertexRef | undefined;
   let bestD = 3;
-  for (const e of body?.edges ?? []) {
-    for (const end of e.ends ?? []) {
-      const dd = d3(end, at);
-      if (dd < bestD) {
-        bestD = dd;
-        best = end;
-      }
+  if (body) for (const e of body.edges) {
+    if (!e.ends) continue;
+    const [start, end] = e.ends;
+    for (const i of [0, 1] as const) {
+      const pick = e.ends[i];
+      const dd = d3(pick, at);
+      if (dd >= bestD) continue;
+      bestD = dd;
+      best = pick;
+      const forward = e.tangent.reduce((sum, direction, axis) => sum + direction * (end[axis]! - start[axis]!), 0) > 0;
+      vertex = e.curve === "LINE" && e.length > 1e-9 ? {
+        kind: "vertex",
+        edge: { bodyId: body.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length },
+        end: forward ? i : i === 0 ? 1 : 0,
+      } : undefined;
     }
   }
-  return [Math.round(best[0] * 1e4) / 1e4, Math.round(best[1] * 1e4) / 1e4, Math.round(best[2] * 1e4) / 1e4];
+  return { at: [Math.round(best[0] * 1e4) / 1e4, Math.round(best[1] * 1e4) / 1e4, Math.round(best[2] * 1e4) / 1e4], vertex };
+}
+
+function snapPoint(p: Pick & { at?: Vec3 }): Vec3 | null {
+  return snapPointPick(p)?.at ?? null;
 }
 
 /** Press/Pull: starts with any flat faces already selected. */
@@ -702,6 +719,15 @@ export function samePick(a: Pick, b: Pick): boolean {
   }
 }
 
+function toggleConstructPick<T>(list: T[], pick: T, limit: number, matches: (ref: T) => boolean) {
+  const index = list.findIndex(matches);
+  if (index >= 0) list.splice(index, 1);
+  else {
+    list.push(pick);
+    if (list.length > limit) list.shift();
+  }
+}
+
 /** Route a viewport click according to the current mode/session. */
 export function handlePick(p: Pick | null, additive: boolean) {
   const { mode, session, doc, selection } = get();
@@ -755,36 +781,52 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f && (f.type === "construct" || f.type === "cplane") && p?.kind === "datum") {
+    const source = findFeature(doc, p.id);
+    const index = doc.features.findIndex((x) => x.id === p.id);
+    if (!source || index >= doc.features.indexOf(f) || source.suppressed) {
+      return toast("warn", "Pick an earlier, unsuppressed datum.");
+    }
+    const kind = datumKind(source);
+    if (kind !== p.datumKind) return toast("warn", "The picked feature's datum kind has changed.");
+    if (f.type === "cplane") {
+      if (kind !== "plane") return toast("info", "Pick a datum plane as the base.");
+      mutate("Pick base plane", (d) => {
+        const x = findFeature(d, f.id, "cplane");
+        if (x) x.plane = { kind: "construction", plane: p.id, offset: x.plane.offset };
+      });
+      return;
+    }
+    const need = CONSTRUCT_MODES[f.mode];
+    if (!need.datums?.includes(kind)) return toast("info", need.hint);
+    mutate("Pick datum", (d) => {
+      const x = findFeature(d, f.id, "construct");
+      if (!x) return;
+      const refs = (x.refs ??= constructRefs(x));
+      if (kind === "plane") toggleConstructPick(refs.planes, { kind, id: p.id }, need.faces || 1, (ref) => ref.kind === kind && ref.id === p.id);
+      else if (kind === "axis") toggleConstructPick(refs.lines, { kind, id: p.id }, need.edges, (ref) => ref.kind === kind && ref.id === p.id);
+      else toggleConstructPick(refs.points, { kind, id: p.id }, need.points, (ref) => ref.kind === kind && ref.id === p.id);
+    });
+    return;
+  }
   if (f && f.type === "construct" && (p?.kind === "face" || p?.kind === "edge")) {
     const need = CONSTRUCT_MODES[f.mode];
-    const round = f.mode === "axisCyl" || f.mode === "pointCenter";
-    const takesFace = (need.faces > 0 || f.mode === "pointCenter") && p.kind === "face";
-    const takesEdge = (need.edges > 0 || f.mode === "axisCyl") && p.kind === "edge";
-    const point = need.points > 0 && !round ? snapPoint(p) : null;
+    const takesFace = need.faces > 0 || f.mode === "pointCenter" || f.mode === "planeEdge";
+    const takesEdge = need.edges > 0 || f.mode === "axisCyl";
+    const point = need.points > 0 ? snapPointPick(p) : null;
     const fr = takesFace ? faceRefFromPick(p) : null;
     const er = takesEdge ? edgeRefFromPick(p) : null;
-    if (!fr && !er && !point) return toast("info", CONSTRUCT_MODES[f.mode].hint);
+    if (!fr && !er && !point) return toast("info", need.hint);
     mutate("Pick", (d) => {
-      const x = d.features.find((y) => y.id === f.id);
-      if (!x || x.type !== "construct") return;
-      const cap = (list: unknown[], n: number) => {
-        while (list.length > n) list.shift();
-      };
-      if (fr) {
-        const i = x.faces.findIndex((e) => sameFace(e, fr));
-        if (i >= 0) x.faces.splice(i, 1);
-        else x.faces.push(fr);
-        cap(x.faces, Math.max(1, need.faces));
-      }
-      if (er) {
-        const i = x.edges.findIndex((e) => d3(e.mid, er.mid) < 1e-6);
-        if (i >= 0) x.edges.splice(i, 1);
-        else x.edges.push(er);
-        cap(x.edges, Math.max(1, need.edges));
-      }
+      const x = findFeature(d, f.id, "construct");
+      if (!x) return;
+      const refs = (x.refs ??= constructRefs(x));
+      if (fr) toggleConstructPick(refs.planes, { kind: "face", face: fr }, Math.max(1, need.faces), (ref) => ref.kind === "face" && sameFace(ref.face, fr));
+      if (er) toggleConstructPick(refs.lines, { kind: "edge", edge: er }, Math.max(1, need.edges), (ref) => ref.kind === "edge" && ref.edge.bodyId === er.bodyId && d3(ref.edge.mid, er.mid) < 1e-6);
       if (point && (!fr || x.mode === "axisPerp")) {
-        x.points.push(point);
-        cap(x.points, need.points);
+        const ref: ConstructRefs["points"][number] = point.vertex ?? { kind: "xyz", at: point.at };
+        refs.points.push(ref);
+        if (refs.points.length > need.points) refs.points.shift();
       }
     });
     return;

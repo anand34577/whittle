@@ -27,6 +27,7 @@ export type CubeView = "front" | "back" | "left" | "right" | "top" | "bottom" | 
 
 export interface PickFilter {
   datums?: boolean;
+  datumInputs?: ReadonlySet<Id>;
   faces: boolean;
   edges: boolean;
   planes: boolean;
@@ -1409,6 +1410,11 @@ export class Viewport {
     // In a section view, ignore the part of each body that's cut away.
     const faceHit = this.view.section ? hits.find((h) => this.clip.distanceToPoint(h.point) >= 0) : hits[0];
     const sp = this.screen(e);
+    // During construction, visible datum outlines, axes and points take precedence over body edges.
+    if (this.filter.datumInputs) {
+      const datum = this.pickDatum(sp);
+      if (datum) return datum;
+    }
 
     // A sketch area in front of (or lying on) the faces is what the click meant: profiles sit on the faces they were drawn on.
     const regionHit = this.filter.sketches ? this.raycaster.intersectObjects(this.regionMeshes, false)[0] : undefined;
@@ -1429,7 +1435,7 @@ export class Viewport {
       const edge = this.pickEdge(views, sp, faceHit?.distance ?? Infinity);
       if (edge) return edge;
     }
-    if (this.filter.datums) {
+    if (this.filter.datums && !this.filter.datumInputs) {
       const datum = this.pickDatum(sp);
       if (datum) return datum;
     }
@@ -1450,7 +1456,9 @@ export class Viewport {
     const chooseSketchPlane = this.filter.planes && this.planes.visible;
     if (chooseSketchPlane || this.filter.datums) {
       const planes = chooseSketchPlane ? [...this.planes.children, ...this.cplanes.children] : this.cplanes.children;
-      const hits = this.raycaster.intersectObjects(planes, false);
+      const hits = this.raycaster.intersectObjects(planes, false).filter((hit) =>
+        !this.filter.datumInputs || this.filter.datumInputs.has(hit.object.userData.cplane as Id),
+      );
       const ph = (chooseSketchPlane && hits.find((h) => this.preferredPlane && h.object.userData.plane === this.preferredPlane)) || hits[0];
       if (ph?.object.userData.cplane) return { kind: "datum", id: ph.object.userData.cplane as Id, datumKind: "plane" };
       if (ph && chooseSketchPlane) return { kind: "plane", plane: ph.object.userData.plane as OriginPlane };
@@ -1550,6 +1558,7 @@ export class Viewport {
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
     for (const [id, { kind, segments }] of this.datums) {
+      if (this.filter.datumInputs && !this.filter.datumInputs.has(id)) continue;
       for (const [start, end] of segments) {
         // Screen-space tolerances stay usable at every zoom and projection.
         a.set(...start).project(this.camera);
