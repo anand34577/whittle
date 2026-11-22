@@ -680,6 +680,7 @@ export function ViewportView() {
       },
       onDoubleClick: (p) => {
         if (p?.kind === "sketch" || p?.kind === "region") editFeature(p.sketchId);
+        else if (p?.kind === "datum" && useApp.getState().mode.kind === "model") editFeature(p.id);
         else if (p && (p.kind === "face" || p.kind === "edge" || p.kind === "body")) editFeature(p.bodyId);
       },
       onSketchPointer: (e) => {
@@ -789,7 +790,7 @@ export function ViewportView() {
     else if (f?.type === "revolve") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     else if (mode.kind === "model" && priority !== "all") filter = { faces: priority === "face", edges: priority === "edge", planes: false, sketches: priority === "body" };
-    vp.setPickFilter(filter);
+    vp.setPickFilter({ ...filter, datums: mode.kind === "model" && !session && priority === "all" });
     vp.setPlanesVisible(mode.kind === "pickPlane");
   }, [vp, mode, session, sessionFeature, priority]);
 
@@ -936,10 +937,12 @@ export function ViewportView() {
     vp?.setFlags(interference.map((i) => i.bbox as unknown as [number[], number[]]));
   }, [vp, interference]);
 
-  // Construction planes.
+  const datumVisibility = doc.datumVisibility;
   useEffect(() => {
-    vp?.setConstructionPlanes(regen?.planes ?? []);
-  }, [vp, regen]);
+    vp?.setConstructionPlanes((regen?.planes ?? []).filter((frame) =>
+      frame.kind === "curve" || (datumVisibility?.categories?.[frame.kind ?? "plane"] !== false && datumVisibility?.items?.[frame.id] !== false),
+    ));
+  }, [vp, regen, datumVisibility]);
 
   // Reference pictures: the edited sketch's always, others unless hidden.
   useEffect(() => {
@@ -1040,7 +1043,7 @@ export function ViewportView() {
     // Hovering something already chosen keeps its selected color rather than masking it with the hover tint.
     if (hover && hover.kind !== "sketch" && mode.kind !== "sketch" && !items.some((i) => samePick(i.pick, hover))) items.push({ pick: hover, style: "hover" });
     vp.setHighlights(items);
-  }, [vp, regen, selection, hover, sessionFeature, mode.kind, picks]);
+  }, [vp, regen, selection, hover, sessionFeature, mode.kind, picks, datumVisibility, theme]);
 
   // Keyboard routing for sketch tools and typed dimensions.
   useEffect(() => {

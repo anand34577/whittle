@@ -7,6 +7,7 @@ import { create } from "zustand";
 import type { Draft } from "immer";
 import { produce } from "immer";
 import {
+  type DatumKind,
   type EdgeRef,
   type ConstraintType,
   type EntityType,
@@ -38,7 +39,7 @@ export type Pick =
   | { kind: "edge"; bodyId: Id; index: number; at?: Vec3 }
   | { kind: "body"; bodyId: Id; at?: Vec3 }
   | { kind: "plane"; plane: OriginPlane }
-  | { kind: "cplane"; id: Id }
+  | { kind: "datum"; id: Id; datumKind: DatumKind }
   | { kind: "sketch"; sketchId: Id }
   /** One enclosed area of a sketch: `index` into its regions, `at` the clicked point in sketch coordinates. */
   | { kind: "region"; sketchId: Id; index: number; at: Vec2 };

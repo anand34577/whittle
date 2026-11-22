@@ -813,6 +813,8 @@ export interface NamedView {
   phi: number;
 }
 
+export type DatumKind = "plane" | "axis" | "point";
+
 export interface WhittleDocument {
   schema: number;
   /** Stable identity across saves (keys local version history). Older files get one on open. */
@@ -824,6 +826,11 @@ export interface WhittleDocument {
   variants?: Variant[];
   features: Feature[];
   bodies: Record<Id, BodyMeta>;
+  /** Display settings for construction features. Missing entries default to visible. */
+  datumVisibility?: {
+    items?: Record<Id, boolean>;
+    categories?: Partial<Record<DatumKind, boolean>>;
+  };
   /** Named folders in the timeline, folding a run of steps into one. */
   folders?: TimelineFolder[];
   /** Saved camera views ("Front detail", "Underside"), restored from the browser. */

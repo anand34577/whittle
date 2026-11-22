@@ -153,6 +153,8 @@ export function startSketch() {
   }
   const plane = sel.find((p) => p.kind === "plane");
   if (plane && plane.kind === "plane") return createSketchOn({ kind: "origin", plane: plane.plane, offset: "0" });
+  const datum = sel.find((p) => p.kind === "datum" && p.datumKind === "plane");
+  if (datum) return pickSketchPlane(datum);
   if (get().session) commitSession();
   set({ mode: { kind: "pickPlane" }, selection: [] });
 }
@@ -165,7 +167,7 @@ export function createSketchOn(plane: PlaneRef) {
 
 export function pickSketchPlane(p: Pick) {
   if (p.kind === "plane") return createSketchOn({ kind: "origin", plane: p.plane as OriginPlane, offset: "0" });
-  if (p.kind === "cplane") return createSketchOn({ kind: "construction", plane: p.id, offset: "0" });
+  if (p.kind === "datum" && p.datumKind === "plane") return createSketchOn({ kind: "construction", plane: p.id, offset: "0" });
   if (p.kind === "face") {
     const ref = faceRefFromPick(p);
     if (!ref) return;
@@ -475,12 +477,12 @@ export function startJoint() {
 export function startConstructionPlane() {
   const { selection, doc } = get();
   const face = selection.map((p) => faceRefFromPick(p)).find((x): x is FaceRef => !!x && x.surface === "PLANE");
-  const cp = selection.find((p) => p.kind === "cplane");
+  const cp = selection.find((p) => p.kind === "datum" && p.datumKind === "plane");
   const op = selection.find((p) => p.kind === "plane");
   const off = defaultLength(doc.units, 10);
   const base: PlaneRef = face
     ? { kind: "face", face, offset: off }
-    : cp?.kind === "cplane"
+    : cp?.kind === "datum"
       ? { kind: "construction", plane: cp.id, offset: off }
       : { kind: "origin", plane: op?.kind === "plane" ? op.plane : "XY", offset: off };
   const f = makeConstructionPlane(doc, base);
@@ -691,7 +693,7 @@ export function samePick(a: Pick, b: Pick): boolean {
       return a.bodyId === (b as typeof a).bodyId;
     case "plane":
       return a.plane === (b as typeof a).plane;
-    case "cplane":
+    case "datum":
       return a.id === (b as typeof a).id;
     case "sketch":
       return a.sketchId === (b as typeof a).sketchId;
@@ -704,11 +706,11 @@ export function samePick(a: Pick, b: Pick): boolean {
 export function handlePick(p: Pick | null, additive: boolean) {
   const { mode, session, doc, selection } = get();
   if (mode.kind === "pickPlane") {
-    if (p && (p.kind === "plane" || p.kind === "cplane" || p.kind === "face")) pickSketchPlane(p);
+    if (p && (p.kind === "plane" || (p.kind === "datum" && p.datumKind === "plane") || p.kind === "face")) pickSketchPlane(p);
     return;
   }
   if (mode.kind === "measure") {
-    if (!p || p.kind === "plane" || p.kind === "cplane" || p.kind === "sketch" || p.kind === "region") return set({ measure: [] });
+    if (!p || p.kind === "plane" || p.kind === "datum" || p.kind === "sketch" || p.kind === "region") return set({ measure: [] });
     const m = get().measure;
     set({ measure: m.length >= 2 ? [p] : [...m, p] });
     return;

@@ -723,8 +723,8 @@ function describeSelection(): Record<string, unknown>[] {
         return { kind: "sketch area", sketch: name(p.sketchId), point: p.at };
       case "plane":
         return { kind: "origin plane", plane: p.plane };
-      case "cplane":
-        return { kind: "construction plane", plane: name(p.id) };
+      case "datum":
+        return { kind: `construction ${p.datumKind}`, [p.datumKind]: name(p.id) };
     }
   });
 }

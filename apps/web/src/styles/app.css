@@ -477,6 +477,16 @@ button.docname__state:hover {
 .tree__section + .tree__section {
   margin-top: 2px;
 }
+.tree__heading {
+  display: flex;
+  align-items: center;
+}
+.tree__heading .tree__datum-eye,
+.tree__row .tree__datum-eye {
+  flex: none;
+  opacity: 1;
+  padding-inline: 6px;
+}
 .tree__head {
   display: flex;
   align-items: center;
