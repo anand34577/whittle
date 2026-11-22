@@ -2,6 +2,7 @@
  * Whittle's own icon set: 20px grid, 1.5px stroke, isometric hints for 3D
  * operations. Drawn for this app (not a stock pack) so tools read as CAD.
  */
+import { datumKind, type DatumKind, type Feature } from "@whittle/core";
 import type { JSX, SVGProps } from "react";
 
 const P = {
@@ -1001,6 +1002,55 @@ const P = {
 } satisfies Record<string, JSX.Element>;
 
 export type IconName = keyof typeof P;
+
+export const DATUM_ICONS = {
+  plane: "plane",
+  axis: "axis",
+  point: "point",
+  csys: "origin",
+} as const satisfies Record<DatumKind, IconName>;
+
+const FEATURE_ICONS: Record<Feature["type"], IconName> = {
+  sketch: "sketch",
+  extrude: "extrude",
+  revolve: "revolve",
+  fillet: "fillet",
+  chamfer: "chamfer",
+  shell: "shell",
+  primitive: "box",
+  mirror: "mirror",
+  pattern: "pattern",
+  hole: "hole",
+  loft: "loft",
+  move: "move",
+  combine: "combine",
+  import: "import",
+  sweep: "sweep",
+  coil: "coil",
+  split: "split",
+  offset: "offset",
+  boundingSolid: "box",
+  scale: "scale",
+  draft: "draft",
+  offsetFace: "move",
+  cplane: "plane",
+  csys: "origin",
+  construct: "plane",
+  curve: "path",
+  surface: "shell",
+  rib: "extrude",
+  thread: "thread",
+  replaceFace: "move",
+  deleteFace: "trash",
+  align: "move",
+  boundaryFill: "combine",
+  joint: "move",
+};
+
+export function featureIcon(f: Feature): IconName {
+  const kind = datumKind(f);
+  return kind ? DATUM_ICONS[kind] : FEATURE_ICONS[f.type];
+}
 
 export function Icon({ name, size = 20, ...rest }: { name: IconName; size?: number } & SVGProps<SVGSVGElement>) {
   return (

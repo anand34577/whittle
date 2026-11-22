@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { beforeAll, describe, expect, it } from "vitest";
 import opencascade from "replicad-opencascadejs";
 import { setOC } from "replicad";
-import { type ConstructFeature, type ConstructMode, type PrimitiveFeature, type Vec3, makeConstruct, makePrimitive, newDocument } from "@whittle/core";
+import { type ConstructFeature, type ConstructMode, type ConstructionPlaneFeature, type PrimitiveFeature, type Vec3, dependents, deserializeDocument, makeConstruct, makeConstructionPlane, makePrimitive, newDocument, reorderProblem, serializeDocument } from "@whittle/core";
 import { Builder } from "../src/build";
 
 beforeAll(async () => {
@@ -102,5 +102,124 @@ describe("round references", () => {
     expect(Math.abs(axis.normal[2])).toBeCloseTo(1, 6);
     const center = make("pointCenter", (f) => void f.edges.push({ bodyId: body.id, mid: ring.mid, tangent: ring.tangent, curve: ring.curve, length: ring.length }));
     expect(Math.hypot(center.origin[0], center.origin[1])).toBeLessThan(1e-6);
+  });
+});
+
+describe("persistent datum references", () => {
+  function fixture() {
+    const doc = newDocument();
+    const addPlane = (plane: "XY" | "XZ" | "YZ", offset: string) => {
+      const f = makeConstructionPlane(doc, { kind: "origin", plane, offset }) as ConstructionPlaneFeature;
+      doc.features.push(f);
+      return f;
+    };
+    const xy = addPlane("XY", "5");
+    const yz = addPlane("YZ", "3");
+    const xz = addPlane("XZ", "0");
+    const axis = makeConstruct(doc, "axis2pl") as ConstructFeature;
+    axis.refs = { planes: [{ kind: "plane", id: xy.id }, { kind: "plane", id: yz.id }], lines: [], points: [] };
+    doc.features.push(axis);
+    const point = makeConstruct(doc, "pointEdgePlane") as ConstructFeature;
+    point.refs = { planes: [{ kind: "plane", id: xz.id }], lines: [{ kind: "axis", id: axis.id }], points: [] };
+    doc.features.push(point);
+    return { doc, xy, yz, xz, axis, point };
+  }
+
+  it("round-trips, regenerates through a chain and protects timeline dependencies", () => {
+    const { doc, xy, axis, point } = fixture();
+    const literal = makeConstruct(doc, "pointVertex") as ConstructFeature;
+    literal.points = [[13, 0, 5]];
+    doc.features.push(literal);
+    const through = makeConstruct(doc, "axis2p") as ConstructFeature;
+    through.refs = { planes: [], lines: [], points: [{ kind: "point", id: point.id }, { kind: "point", id: literal.id }] };
+    doc.features.push(through);
+    const plane = makeConstruct(doc, "plane3") as ConstructFeature;
+    plane.refs = { planes: [], lines: [], points: [...through.refs.points, { kind: "xyz", at: [3, 10, 5] }] };
+    doc.features.push(plane);
+    const offset = makeConstructionPlane(doc, { kind: "construction", plane: plane.id, offset: "2" });
+    doc.features.push(offset);
+
+    expect(dependents(doc, xy.id).map((f) => f.id)).toEqual([axis.id, point.id, through.id, plane.id, offset.id]);
+    expect(reorderProblem(doc, 0, 4)).toMatch(/uses/);
+    const saved = deserializeDocument(serializeDocument(doc));
+    expect(saved.features).toEqual(doc.features);
+    const builder = new Builder();
+    const read = () => {
+      const built = builder.regen(saved, "final");
+      expect(built.status.map((f) => f.state)).toEqual(saved.features.map(() => "ok"));
+      return built.planes;
+    };
+    expect(read().find((f) => f.id === point.id)?.origin).toEqual([3, 0, 5]);
+    const source = saved.features[0] as ConstructionPlaneFeature;
+    source.plane.offset = "8";
+    const updated = read();
+    for (const { id } of [axis, point, through, plane]) {
+      expect(updated.find((f) => f.id === id)?.origin[2]).toBeCloseTo(8);
+    }
+    expect(updated.find((f) => f.id === offset.id)!.origin[2]).toBeGreaterThan(8);
+  });
+
+  it("rejects wrong kinds, self-references, cycles, forward references, suppression and parallel inputs", () => {
+    const { doc, xy, xz, axis, point } = fixture();
+    const state = (f: ConstructFeature, message: RegExp) => {
+      const built = new Builder().regen(doc, "final");
+      expect(built.status.find((s) => s.id === f.id)).toMatchObject({ state: "error", message: expect.stringMatching(message) });
+      expect(built.planes.find((p) => p.id === f.id)).toBeUndefined();
+    };
+    const source = axis.refs!.planes[1]!;
+    const input = (id: string) => { axis.refs!.planes[1] = { kind: "plane", id }; };
+
+    point.refs!.lines[0] = { kind: "axis", id: xy.id };
+    state(point, /must be a datum axis/);
+    point.refs!.lines[0] = { kind: "axis", id: axis.id };
+    input(axis.id);
+    state(axis, /itself/);
+    const later = makeConstructionPlane(doc, { kind: "origin", plane: "XZ", offset: "0" });
+    doc.features.push(later);
+    input(later.id);
+    state(axis, /earlier in the timeline/);
+    axis.refs!.planes[1] = source;
+    xy.suppressed = true;
+    state(axis, /unsuppressed/);
+    xy.suppressed = false;
+    input(xy.id);
+    state(axis, /parallel/);
+    input(xz.id);
+    state(point, /parallel/);
+  });
+
+  it("rejects a cycle between otherwise compatible datum kinds", () => {
+    const { doc, xz, point } = fixture();
+    const axis = makeConstruct(doc, "axis2p") as ConstructFeature;
+    axis.refs = { planes: [], lines: [], points: [{ kind: "point", id: point.id }, { kind: "xyz", at: [0, 5, 0] }] };
+    doc.features.splice(doc.features.indexOf(point), 0, axis);
+    point.refs = { planes: [{ kind: "plane", id: xz.id }], lines: [{ kind: "axis", id: axis.id }], points: [] };
+    const built = new Builder().regen(doc, "final");
+    for (const { id } of [axis, point]) {
+      expect(built.status.find((status) => status.id === id)).toMatchObject({ state: "error", message: expect.stringMatching(/earlier in the timeline/) });
+      expect(built.planes.some((frame) => frame.id === id)).toBe(false);
+    }
+  });
+
+  it("keeps a straight-edge vertex attached when the source box changes height", () => {
+    const doc = newDocument();
+    const box = makePrimitive(doc, "box") as PrimitiveFeature;
+    box.height = "20";
+    doc.features.push(box);
+    doc.bodies[box.id] = { name: box.name, color: "#ccc", visible: true };
+    const builder = new Builder();
+    const body = builder.regen(doc, "final").bodies[0]!;
+    const { mid, tangent, curve, length } = body.edges.find((e) => e.curve === "LINE" && Math.abs(e.tangent[2]) > 0.99)!;
+    const point = makeConstruct(doc, "pointVertex") as ConstructFeature;
+    point.refs = {
+      planes: [], lines: [],
+      points: [{ kind: "vertex", edge: { bodyId: box.id, mid, tangent, curve, length }, end: tangent[2] > 0 ? 1 : 0 }],
+    };
+    doc.features.push(point);
+    expect(dependents(doc, box.id)).toEqual([point]);
+    const height = () => builder.regen(doc, "final").planes.find((p) => p.id === point.id)!.origin[2];
+    expect(height()).toBeCloseTo(body.bbox[1][2]);
+    box.height = "25";
+    expect(height()).toBeCloseTo(body.bbox[1][2] + 5);
   });
 });

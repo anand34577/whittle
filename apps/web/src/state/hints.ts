@@ -64,7 +64,9 @@ export function hintFor(s: AppState): string {
     const step = p && p.current >= 0 ? p.lesson.steps[p.current] : undefined;
     if (step) return `Lesson · ${step.title}: ${step.body}`;
   }
-  if (mode.kind === "pickPlane") return "Click an origin plane or a flat face to sketch on · Esc to cancel";
+  if (mode.kind === "pickPlane") return mode.csys
+    ? "Choose XY, XZ or YZ on the coordinate system · Esc to cancel"
+    : "Click a plane, flat face or coordinate system to sketch on · Esc to cancel";
   if (mode.kind === "measure") {
     return s.measure.length === 0
       ? "Measure: click a face, edge or body · Shift isn't needed for the second pick · Esc to stop"
@@ -148,8 +150,10 @@ export function hintFor(s: AppState): string {
         return f.tools.length < 2 ? "Click two or more overlapping bodies" : "Tick the cells to keep as a body · Enter to finish";
       case "construct":
         return CONSTRUCT_MODES[f.mode].hint + " · Enter to finish";
+      case "csys":
+        return f.mode === "manual" ? "Set the origin and rotation · Enter to finish" : "Choose the origin, Z and X references · Enter to finish";
       case "cplane":
-        return "Set the offset and tilt · then pick this plane when starting a sketch · Enter to finish";
+        return "Pick a flat face or datum plane as the base, then set the offset · Enter to finish";
       case "offsetFace":
         return f.faces.length === 0 ? "Click the flat faces to push or pull" : "Type a distance: positive pulls out, negative pushes in · Enter to finish";
       case "draft":

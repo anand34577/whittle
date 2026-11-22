@@ -7,6 +7,8 @@ import { create } from "zustand";
 import type { Draft } from "immer";
 import { produce } from "immer";
 import {
+  type DatumKind,
+  type CsysInput,
   type EdgeRef,
   type ConstraintType,
   type EntityType,
@@ -38,7 +40,7 @@ export type Pick =
   | { kind: "edge"; bodyId: Id; index: number; at?: Vec3 }
   | { kind: "body"; bodyId: Id; at?: Vec3 }
   | { kind: "plane"; plane: OriginPlane }
-  | { kind: "cplane"; id: Id }
+  | { kind: "datum"; id: Id; datumKind: DatumKind }
   | { kind: "sketch"; sketchId: Id }
   /** One enclosed area of a sketch: `index` into its regions, `at` the clicked point in sketch coordinates. */
   | { kind: "region"; sketchId: Id; index: number; at: Vec2 };
@@ -51,7 +53,7 @@ export type SketchTool = EntityType | "select" | "path" | "crect" | "rect3" | "c
 
 export type Mode =
   | { kind: "model" }
-  | { kind: "pickPlane" }
+  | { kind: "pickPlane"; csys?: Id }
   | { kind: "measure" }
   | { kind: "sketch"; sketchId: Id; tool: SketchTool; isNew: boolean };
 
@@ -92,6 +94,7 @@ export interface Session {
   label: string;
   /** Editing an early step rolled the timeline back to it; finishing puts the marker back. */
   isolated?: boolean;
+  csysInput?: CsysInput;
   /** Step-by-step undo inside the session (e.g. each shape drawn in a sketch). */
   stack: { doc: WhittleDocument; key?: string; at: number }[];
 }

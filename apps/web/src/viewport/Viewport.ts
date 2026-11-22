@@ -14,7 +14,7 @@ import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { BodyMeta, Id, OriginPlane, SketchImage, Vec2, Vec3 } from "@whittle/core";
-import type { BodyResult, SketchFrame } from "@whittle/kernel";
+import type { BodyResult, PartialCsys, SketchFrame } from "@whittle/kernel";
 import type { Pick, ViewSettings } from "../state/store";
 import { lookById } from "./looks";
 import { VIEWPORT_THEMES, type ViewportTheme } from "./theme";
@@ -26,6 +26,9 @@ const samePick = (a: Pick, b: Pick) => JSON.stringify({ ...a, at: 0 }) === JSON.
 export type CubeView = "front" | "back" | "left" | "right" | "top" | "bottom" | "iso";
 
 export interface PickFilter {
+  datums?: boolean;
+  datumInputs?: ReadonlySet<Id>;
+  csysGeometry?: "vertex" | "edge";
   faces: boolean;
   edges: boolean;
   planes: boolean;
@@ -189,8 +192,12 @@ export class Viewport {
   /** World Z, drawn with the grid while modelling (in a sketch the grid's own axes take over). */
   private axisZ = new THREE.Group();
   private planes = new THREE.Group();
-  /** User-made construction planes: always shown faintly, pickable when choosing a sketch plane. */
   private cplanes = new THREE.Group();
+  private datums = new Map<Id, {
+    kind: Extract<Pick, { kind: "datum" }>["datumKind"];
+    segments: [Vec3, Vec3][];
+    materials: (THREE.LineBasicMaterial | THREE.MeshBasicMaterial | THREE.PointsMaterial)[];
+  }>();
   /** Key light above and left of the camera, and a soft fill from the camera: faces read apart at any angle. */
   private headlight = new THREE.DirectionalLight(0xffffff, 1.9);
   private fill = new THREE.DirectionalLight(0xffffff, 0.55);
@@ -594,8 +601,12 @@ export class Viewport {
     return sprite;
   }
 
-  setConstructionPlanes(frames: SketchFrame[]) {
+  private static readonly csysColors = [0xdb575d, 0x43a872, 0x4b87df];
+
+  setConstructionPlanes(frames: SketchFrame[], partial?: PartialCsys) {
     this.clearGroup(this.cplanes);
+    this.datums.clear();
+    this.lastClick = null;
     const s = Math.max(30, this.sceneRadius * 0.5);
     for (const f of frames) {
       if (f.kind === "curve") {
@@ -607,21 +618,39 @@ export class Viewport {
         this.cplanes.add(lines);
         continue;
       }
+      if (f.kind === "csys") {
+        const origin = new THREE.Vector3(...f.origin);
+        const segments: [Vec3, Vec3][] = [];
+        const materials = [f.xDir, f.yDir, f.normal].map((dir, i) => {
+          const end = origin.clone().addScaledVector(new THREE.Vector3(...dir), s * 0.55);
+          const material = new THREE.LineBasicMaterial({ color: Viewport.csysColors[i], transparent: true, depthTest: false });
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, end]), material);
+          line.raycast = () => {};
+          line.renderOrder = 5;
+          this.cplanes.add(line);
+          segments.push([f.origin, end.toArray()]);
+          return material;
+        });
+        this.datums.set(f.id, { kind: "csys", segments, materials });
+        continue;
+      }
       if (f.kind === "axis") {
         const o = new THREE.Vector3(...f.origin);
         const d = new THREE.Vector3(...f.normal).multiplyScalar(s * 0.8);
-        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([o.clone().sub(d), o.clone().add(d)]), new THREE.LineDashedMaterial({ color: this.theme.plane, dashSize: s * 0.03, gapSize: s * 0.02, transparent: true, opacity: 0.9, depthTest: false }));
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([o.clone().sub(d), o.clone().add(d)]), new THREE.LineDashedMaterial({ color: this.theme.plane, dashSize: s * 0.03, gapSize: s * 0.02, transparent: true, opacity: 0.65, depthTest: false }));
         line.computeLineDistances();
         line.raycast = () => {};
         line.renderOrder = 5;
         this.cplanes.add(line);
+        this.datums.set(f.id, { kind: "axis", segments: [[o.clone().sub(d).toArray(), o.clone().add(d).toArray()]], materials: [line.material] });
         continue;
       }
       if (f.kind === "point") {
-        const pts = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...f.origin)]), new THREE.PointsMaterial({ color: this.theme.plane, size: 9, sizeAttenuation: false, depthTest: false }));
+        const pts = new THREE.Points(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...f.origin)]), new THREE.PointsMaterial({ color: this.theme.plane, size: 9, sizeAttenuation: false, transparent: true, opacity: 0.75, depthTest: false }));
         pts.raycast = () => {};
         pts.renderOrder = 5;
         this.cplanes.add(pts);
+        this.datums.set(f.id, { kind: "point", segments: [[f.origin, f.origin]], materials: [pts.material] });
         continue;
       }
       const geo = new THREE.PlaneGeometry(s, s);
@@ -635,6 +664,27 @@ export class Viewport {
       border.raycast = () => {};
       mesh.add(border);
       this.cplanes.add(mesh);
+      const h = s / 2;
+      const toWorld = this.frameMapper(f);
+      const corners = [toWorld([-h, -h]), toWorld([h, -h]), toWorld([h, h]), toWorld([-h, h])];
+      this.datums.set(f.id, { kind: "plane", segments: corners.map((start, i) => [start, corners[(i + 1) % 4]!]), materials: [mat, border.material] });
+    }
+    if (partial) {
+      const origin = new THREE.Vector3(...partial.origin);
+      const color = Viewport.csysColors[2];
+      const point = new THREE.Points(new THREE.BufferGeometry().setFromPoints([origin]),
+        new THREE.PointsMaterial({ color, size: 9, sizeAttenuation: false, depthTest: false }));
+      point.raycast = () => {};
+      point.renderOrder = 5;
+      this.cplanes.add(point);
+      if (partial.z) {
+        const end = origin.clone().addScaledVector(new THREE.Vector3(...partial.z), s * 0.55);
+        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, end]),
+          new THREE.LineBasicMaterial({ color, depthTest: false }));
+        line.raycast = () => {};
+        line.renderOrder = 5;
+        this.cplanes.add(line);
+      }
     }
     this.invalidate();
   }
@@ -1052,6 +1102,14 @@ export class Viewport {
 
   setHighlights(items: { pick: Pick; style: "hover" | "select" | "ref" }[]) {
     this.clearGroup(this.highlightGroup);
+    for (const datum of this.datums.values()) {
+      datum.materials.forEach((material, i) => {
+        material.color.set(datum.kind === "csys" ? Viewport.csysColors[i]! : this.theme.plane);
+        if (material instanceof THREE.PointsMaterial) material.size = 9;
+      });
+      datum.materials[0]!.opacity = datum.kind === "plane" ? 0.07 : datum.kind === "axis" ? 0.65 : datum.kind === "csys" ? 1 : 0.75;
+      if (datum.kind === "plane") datum.materials[1]!.opacity = 0.6;
+    }
     for (const { pick, style } of items) {
       const color = style === "hover" ? this.theme.hover : this.theme.select;
       if (pick.kind === "face" || pick.kind === "edge" || pick.kind === "body") {
@@ -1115,6 +1173,15 @@ export class Viewport {
           line.raycast = () => {};
           this.highlightGroup.add(line);
         }
+      } else if (pick.kind === "datum") {
+        const datum = this.datums.get(pick.id);
+        if (!datum) continue;
+        for (const material of datum.materials) {
+          material.color.set(color);
+          material.opacity = 1;
+          if (material instanceof THREE.PointsMaterial) material.size = 12;
+        }
+        if (datum.kind === "plane") datum.materials[0]!.opacity = style === "hover" ? 0.16 : 0.24;
       } else if (pick.kind === "plane") {
         const mesh = this.planes.children.find((c) => c.userData.plane === pick.plane) as THREE.Mesh | undefined;
         if (mesh) {
@@ -1331,7 +1398,11 @@ export class Viewport {
 
   worldToScreen(w: Vec3): Vec2 {
     tmpV.set(...w).project(this.camera);
-    return [((tmpV.x + 1) / 2) * this.size.x, ((1 - tmpV.y) / 2) * this.size.y];
+    return this.projectedToScreen(tmpV);
+  }
+
+  private projectedToScreen(v: THREE.Vector3): Vec2 {
+    return [((v.x + 1) / 2) * this.size.x, ((1 - v.y) / 2) * this.size.y];
   }
 
   /** World size of one screen pixel at the orbit target (for snapping tolerances). */
@@ -1348,6 +1419,7 @@ export class Viewport {
 
   setPickFilter(f: PickFilter) {
     this.filter = f;
+    this.lastClick = null;
   }
 
   private ndc(e: { clientX: number; clientY: number }): THREE.Vector2 {
@@ -1364,7 +1436,7 @@ export class Viewport {
   pick(e: { clientX: number; clientY: number }): Pick | null {
     // Bodies are drawn away from where they are while exploded, so a click wouldn't mean the right place.
     if ((this.view.explode ?? 0) > 0.001) return null;
-    const usePick = this.pickBodies.length > 0;
+    const usePick = this.pickBodies.length > 0 || !!this.filter.csysGeometry;
     const views = usePick ? this.pickBodies : [...this.bodies.values()].filter((v) => v.visible);
     this.raycaster.setFromCamera(this.ndc(e), this.camera);
     const meshes = views.map((v) => v.mesh);
@@ -1374,6 +1446,11 @@ export class Viewport {
     // In a section view, ignore the part of each body that's cut away.
     const faceHit = this.view.section ? hits.find((h) => this.clip.distanceToPoint(h.point) >= 0) : hits[0];
     const sp = this.screen(e);
+    // During construction, visible datum outlines, axes and points take precedence over body edges.
+    if (this.filter.datumInputs) {
+      const datum = this.pickDatum(sp);
+      if (datum) return datum;
+    }
 
     // A sketch area in front of (or lying on) the faces is what the click meant: profiles sit on the faces they were drawn on.
     const regionHit = this.filter.sketches ? this.raycaster.intersectObjects(this.regionMeshes, false)[0] : undefined;
@@ -1391,8 +1468,15 @@ export class Viewport {
     }
     // Edges first: they're thin, so they get a generous screen-space radius.
     if (this.filter.edges) {
-      const edge = this.pickEdge(views, sp, faceHit?.distance ?? Infinity);
+      const faceDist = faceHit?.distance ?? Infinity;
+      const edge = this.filter.csysGeometry === "vertex"
+        ? this.pickStraightEndpoint(views, sp, faceDist)
+        : this.pickEdge(views, sp, faceDist);
       if (edge) return edge;
+    }
+    if (this.filter.datums && !this.filter.datumInputs) {
+      const datum = this.pickDatum(sp);
+      if (datum) return datum;
     }
     if (faceHit && faceHit.faceIndex != null) {
       const bodyId = faceHit.object.userData.bodyId as Id;
@@ -1408,11 +1492,15 @@ export class Viewport {
       const s = this.pickSketch(sp);
       if (s) return s;
     }
-    if (this.filter.planes && this.planes.visible) {
-      const hits = this.raycaster.intersectObjects([...this.planes.children, ...this.cplanes.children], false);
-      const ph = hits.find((h) => this.preferredPlane && h.object.userData.plane === this.preferredPlane) ?? hits[0];
-      if (ph?.object.userData.cplane) return { kind: "cplane", id: ph.object.userData.cplane as Id };
-      if (ph) return { kind: "plane", plane: ph.object.userData.plane as OriginPlane };
+    const chooseSketchPlane = this.filter.planes && this.planes.visible;
+    if (chooseSketchPlane || this.filter.datums) {
+      const planes = chooseSketchPlane ? [...this.planes.children, ...this.cplanes.children] : this.cplanes.children;
+      const hits = this.raycaster.intersectObjects(planes, false).filter((hit) =>
+        !this.filter.datumInputs || this.filter.datumInputs.has(hit.object.userData.cplane as Id),
+      );
+      const ph = (chooseSketchPlane && hits.find((h) => this.preferredPlane && h.object.userData.plane === this.preferredPlane)) || hits[0];
+      if (ph?.object.userData.cplane) return { kind: "datum", id: ph.object.userData.cplane as Id, datumKind: "plane" };
+      if (ph && chooseSketchPlane) return { kind: "plane", plane: ph.object.userData.plane as OriginPlane };
     }
     return null;
   }
@@ -1470,6 +1558,30 @@ export class Viewport {
     return { d: Math.hypot(pa[0] + dx * t - sp[0], pa[1] + dy * t - sp[1]), t };
   }
 
+  private pickStraightEndpoint(views: BodyView[], sp: Vec2, faceDist: number): Pick | null {
+    let distance = 7;
+    let best: Pick | null = null;
+    const ray = this.raycaster.ray;
+    const point = new THREE.Vector3();
+    const tolerance = this.orbit.distance * 0.004;
+    for (const view of views) {
+      for (const [index, edge] of view.data.edges.entries()) {
+        if (edge.curve !== "LINE" || edge.length <= 1e-9 || !edge.ends) continue;
+        for (const at of edge.ends) {
+          const screen = this.worldToScreen(at);
+          const d = Math.hypot(screen[0] - sp[0], screen[1] - sp[1]);
+          if (d >= distance) continue;
+          point.set(...at);
+          if (this.view.section && this.clip.distanceToPoint(point) < 0) continue;
+          if (point.sub(ray.origin).dot(ray.direction) > faceDist + tolerance) continue;
+          distance = d;
+          best = { kind: "edge", bodyId: view.id, index, at };
+        }
+      }
+    }
+    return best;
+  }
+
   private pickEdge(views: BodyView[], sp: Vec2, faceDist: number): Pick | null {
     const radius = 7;
     let best: { d: number; bodyId: Id; index: number; at: Vec3 } | null = null;
@@ -1482,6 +1594,7 @@ export class Viewport {
       const pos = v.data.edgePositions;
       const ranges = v.data.edgeRanges;
       for (let ei = 0; ei < ranges.length / 2; ei++) {
+        if (this.filter.csysGeometry === "edge" && v.data.edges[ei]?.curve !== "LINE") continue;
         const s = ranges[ei * 2]!;
         const c = ranges[ei * 2 + 1]!;
         for (let k = s; k + 1 < s + c; k += 2) {
@@ -1501,6 +1614,28 @@ export class Viewport {
       }
     }
     return best ? { kind: "edge", bodyId: best.bodyId, index: best.index, at: best.at } : null;
+  }
+
+  private pickDatum(sp: Vec2): Pick | null {
+    let nearest: Pick | null = null;
+    let distance = 7;
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    for (const [id, { kind, segments }] of this.datums) {
+      if (this.filter.datumInputs && !this.filter.datumInputs.has(id)) continue;
+      if (this.filter.planes && kind !== "plane" && kind !== "csys") continue;
+      for (const [start, end] of segments) {
+        // Screen-space tolerances stay usable at every zoom and projection.
+        a.set(...start).project(this.camera);
+        b.set(...end).project(this.camera);
+        if (Math.abs(a.z) > 1 || Math.abs(b.z) > 1) continue;
+        const { d } = this.distToSegment(sp, this.projectedToScreen(a), this.projectedToScreen(b));
+        if (d >= distance) continue;
+        distance = d;
+        nearest = { kind: "datum", id, datumKind: kind };
+      }
+    }
+    return nearest;
   }
 
   private pickSketch(sp: Vec2): Pick | null {

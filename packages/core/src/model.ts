@@ -45,7 +45,8 @@ export type PlaneRef =
     }
   | { kind: "face"; face: FaceRef; offset: Expr }
   /** A named construction plane (see ConstructionPlaneFeature). */
-  | { kind: "construction"; plane: Id; offset: Expr };
+  | { kind: "construction"; plane: Id; offset: Expr }
+  | { kind: "csys"; csys: Id; plane: OriginPlane; offset: Expr };
 
 /**
  * A persistent reference to a face. Rather than an index (which changes
@@ -251,10 +252,43 @@ export interface ConstructionPlaneFeature extends FeatureBase {
   plane: PlaneRef;
 }
 
+export interface CsysFeature extends FeatureBase {
+  type: "csys";
+  /** World-coordinate origin and right-hand rotations about fixed world X, then Y, then Z. */
+  position: [Expr, Expr, Expr];
+  rotation: [Expr, Expr, Expr];
+  mode: "manual" | "references";
+  refs: {
+    origin?: DatumRef<"point" | "csys"> | VertexRef;
+    z?: DatumRef<"axis" | "plane"> | { kind: "edge"; edge: EdgeRef };
+    x?: DatumRef<"axis" | "plane"> | { kind: "edge"; edge: EdgeRef };
+  };
+  flipZ: boolean;
+  flipX: boolean;
+}
+
+export type CsysInput = keyof CsysFeature["refs"];
+
 export type ConstructMode =
   | "midplane" | "plane3" | "plane2e" | "planeEdge" | "planeTangent" | "planePath"
   | "axisCyl" | "axis2p" | "axis2pl" | "axisEdge" | "axisPerp"
   | "pointVertex" | "point2e" | "point3pl" | "pointCenter" | "pointEdgePlane";
+
+/** A datum is identified by its producing feature and the geometry it is expected to produce. */
+export type DatumRef<K extends DatumKind = DatumKind> = { kind: K; id: Id };
+
+/** A straight edge endpoint, oriented by the saved edge direction. */
+export interface VertexRef {
+  kind: "vertex";
+  edge: EdgeRef;
+  end: 0 | 1;
+}
+
+export interface ConstructRefs {
+  planes: (DatumRef<"plane"> | { kind: "face"; face: FaceRef })[];
+  lines: (DatumRef<"axis"> | { kind: "edge"; edge: EdgeRef })[];
+  points: (DatumRef<"point"> | VertexRef | { kind: "xyz"; at: Vec3 })[];
+}
 
 /**
  * Construction geometry derived from model faces, edges and points: planes (sketchable),
@@ -267,6 +301,8 @@ export interface ConstructFeature extends FeatureBase {
   faces: FaceRef[];
   edges: EdgeRef[];
   points: Vec3[];
+  /** When present, these ordered picks replace the legacy face, edge and XYZ arrays. */
+  refs?: ConstructRefs;
   value: Expr;
 }
 
@@ -752,6 +788,7 @@ export type Feature =
   | JointFeature
   | ConstructionPlaneFeature
   | ConstructFeature
+  | CsysFeature
   | CurveFeature
   | SurfaceFeature
   | RibFeature
@@ -813,6 +850,8 @@ export interface NamedView {
   phi: number;
 }
 
+export type DatumKind = "plane" | "axis" | "point" | "csys";
+
 export interface WhittleDocument {
   schema: number;
   /** Stable identity across saves (keys local version history). Older files get one on open. */
@@ -824,6 +863,11 @@ export interface WhittleDocument {
   variants?: Variant[];
   features: Feature[];
   bodies: Record<Id, BodyMeta>;
+  /** Display settings for construction features. Missing entries default to visible. */
+  datumVisibility?: {
+    items?: Record<Id, boolean>;
+    categories?: Partial<Record<DatumKind, boolean>>;
+  };
   /** Named folders in the timeline, folding a run of steps into one. */
   folders?: TimelineFolder[];
   /** Saved camera views ("Front detail", "Underside"), restored from the browser. */

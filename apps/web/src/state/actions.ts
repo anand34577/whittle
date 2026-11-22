@@ -6,6 +6,8 @@ import {
   SURFACE_OPS,
   type SurfaceOp,
   type ConstructMode,
+  type ConstructRefs,
+  type VertexRef,
   type EdgeRef,
   type FaceRef,
   type Feature,
@@ -16,6 +18,9 @@ import {
   type Vec2,
   type Vec3,
   activeEnd,
+  CSYS_INPUT_KINDS,
+  constructRefs,
+  datumKind,
   defaultLength,
   frameAxes,
   isSketchConsumed,
@@ -26,6 +31,7 @@ import {
   makeAlign,
   makeBoundaryFill,
   makeConstruct,
+  makeCsys,
   makeCurve,
   makeSurface,
   makeDeleteFace,
@@ -153,6 +159,8 @@ export function startSketch() {
   }
   const plane = sel.find((p) => p.kind === "plane");
   if (plane && plane.kind === "plane") return createSketchOn({ kind: "origin", plane: plane.plane, offset: "0" });
+  const datum = sel.find((p) => p.kind === "datum" && (p.datumKind === "plane" || p.datumKind === "csys"));
+  if (datum) return pickSketchPlane(datum);
   if (get().session) commitSession();
   set({ mode: { kind: "pickPlane" }, selection: [] });
 }
@@ -165,7 +173,14 @@ export function createSketchOn(plane: PlaneRef) {
 
 export function pickSketchPlane(p: Pick) {
   if (p.kind === "plane") return createSketchOn({ kind: "origin", plane: p.plane as OriginPlane, offset: "0" });
-  if (p.kind === "cplane") return createSketchOn({ kind: "construction", plane: p.id, offset: "0" });
+  if (p.kind === "datum" && p.datumKind === "plane") return createSketchOn({ kind: "construction", plane: p.id, offset: "0" });
+  if (p.kind === "datum" && p.datumKind === "csys") {
+    if (get().session) commitSession();
+    if (get().regen?.planes.some((frame) => frame.id === p.id && frame.kind === "csys")) {
+      set({ mode: { kind: "pickPlane", csys: p.id }, selection: [p] });
+    } else toast("warn", "Pick a successfully built coordinate system.");
+    return;
+  }
   if (p.kind === "face") {
     const ref = faceRefFromPick(p);
     if (!ref) return;
@@ -475,12 +490,15 @@ export function startJoint() {
 export function startConstructionPlane() {
   const { selection, doc } = get();
   const face = selection.map((p) => faceRefFromPick(p)).find((x): x is FaceRef => !!x && x.surface === "PLANE");
-  const cp = selection.find((p) => p.kind === "cplane");
+  const cp = selection.find((p) => p.kind === "datum" && p.datumKind === "plane");
   const op = selection.find((p) => p.kind === "plane");
+  if (!face && !cp && !op && selection.some((p) => p.kind === "face")) {
+    return toast("warn", "A construction plane needs a flat face.");
+  }
   const off = defaultLength(doc.units, 10);
   const base: PlaneRef = face
     ? { kind: "face", face, offset: off }
-    : cp?.kind === "cplane"
+    : cp?.kind === "datum"
       ? { kind: "construction", plane: cp.id, offset: off }
       : { kind: "origin", plane: op?.kind === "plane" ? op.plane : "XY", offset: off };
   const f = makeConstructionPlane(doc, base);
@@ -619,6 +637,11 @@ export function startSplitFaces() {
   beginNewFeature(f, `New ${f.name}`);
 }
 
+export function startCsys() {
+  const f = makeCsys(get().doc);
+  beginNewFeature(f, `New ${f.name}`);
+}
+
 /** Construction plane / axis / point: picks are routed by handlePick. */
 export function startConstruct(mode: ConstructMode) {
   const f = makeConstruct(get().doc, mode);
@@ -626,23 +649,36 @@ export function startConstruct(mode: ConstructMode) {
   toast("info", CONSTRUCT_MODES[mode].hint);
 }
 
-/** A clicked point, snapped to the nearest straight-edge corner of its body when close. */
-function snapPoint(p: Pick & { at?: Vec3 }): Vec3 | null {
+/** Snap to a nearby edge endpoint, retaining a straight edge's persistent reference when possible. */
+function snapPointPick(p: Pick & { at?: Vec3 }, persistentOnly = false): { at: Vec3; vertex?: VertexRef } | null {
   if (!p.at) return null;
   const at = p.at;
   const body = p.kind === "face" || p.kind === "edge" || p.kind === "body" ? pickableBodies().find((b) => b.id === p.bodyId) : undefined;
   let best: Vec3 = at;
+  let vertex: VertexRef | undefined;
   let bestD = 3;
-  for (const e of body?.edges ?? []) {
-    for (const end of e.ends ?? []) {
-      const dd = d3(end, at);
-      if (dd < bestD) {
-        bestD = dd;
-        best = end;
-      }
+  if (body) for (const e of body.edges) {
+    if (!e.ends || (persistentOnly && (e.curve !== "LINE" || e.length <= 1e-9))) continue;
+    const [start, end] = e.ends;
+    for (const i of [0, 1] as const) {
+      const pick = e.ends[i];
+      const dd = d3(pick, at);
+      if (dd >= bestD) continue;
+      bestD = dd;
+      best = pick;
+      const forward = e.tangent.reduce((sum, direction, axis) => sum + direction * (end[axis]! - start[axis]!), 0) > 0;
+      vertex = e.curve === "LINE" && e.length > 1e-9 ? {
+        kind: "vertex",
+        edge: { bodyId: body.id, mid: e.mid, tangent: e.tangent, curve: e.curve, length: e.length },
+        end: forward ? i : i === 0 ? 1 : 0,
+      } : undefined;
     }
   }
-  return [Math.round(best[0] * 1e4) / 1e4, Math.round(best[1] * 1e4) / 1e4, Math.round(best[2] * 1e4) / 1e4];
+  return { at: [Math.round(best[0] * 1e4) / 1e4, Math.round(best[1] * 1e4) / 1e4, Math.round(best[2] * 1e4) / 1e4], vertex };
+}
+
+function snapPoint(p: Pick & { at?: Vec3 }): Vec3 | null {
+  return snapPointPick(p)?.at ?? null;
 }
 
 /** Press/Pull: starts with any flat faces already selected. */
@@ -691,7 +727,7 @@ export function samePick(a: Pick, b: Pick): boolean {
       return a.bodyId === (b as typeof a).bodyId;
     case "plane":
       return a.plane === (b as typeof a).plane;
-    case "cplane":
+    case "datum":
       return a.id === (b as typeof a).id;
     case "sketch":
       return a.sketchId === (b as typeof a).sketchId;
@@ -700,15 +736,24 @@ export function samePick(a: Pick, b: Pick): boolean {
   }
 }
 
+function toggleConstructPick<T>(list: T[], pick: T, limit: number, matches: (ref: T) => boolean) {
+  const index = list.findIndex(matches);
+  if (index >= 0) list.splice(index, 1);
+  else {
+    list.push(pick);
+    if (list.length > limit) list.shift();
+  }
+}
+
 /** Route a viewport click according to the current mode/session. */
 export function handlePick(p: Pick | null, additive: boolean) {
   const { mode, session, doc, selection } = get();
   if (mode.kind === "pickPlane") {
-    if (p && (p.kind === "plane" || p.kind === "cplane" || p.kind === "face")) pickSketchPlane(p);
+    if (p && (p.kind === "plane" || (p.kind === "datum" && (p.datumKind === "plane" || p.datumKind === "csys")) || p.kind === "face")) pickSketchPlane(p);
     return;
   }
   if (mode.kind === "measure") {
-    if (!p || p.kind === "plane" || p.kind === "cplane" || p.kind === "sketch" || p.kind === "region") return set({ measure: [] });
+    if (!p || p.kind === "plane" || p.kind === "datum" || p.kind === "sketch" || p.kind === "region") return set({ measure: [] });
     const m = get().measure;
     set({ measure: m.length >= 2 ? [p] : [...m, p] });
     return;
@@ -753,36 +798,95 @@ export function handlePick(p: Pick | null, additive: boolean) {
     });
     return;
   }
+  if (f?.type === "csys" && f.mode === "references" && session?.csysInput && p) {
+    const input = session.csysInput;
+    const refs = { ...f.refs };
+    if (p.kind === "datum") {
+      const source = findFeature(doc, p.id);
+      if (!source || source.suppressed || doc.features.indexOf(source) >= doc.features.indexOf(f)) {
+        return toast("warn", "Pick an earlier, unsuppressed datum.");
+      }
+      const kind = datumKind(source);
+      if (kind !== p.datumKind || !CSYS_INPUT_KINDS[input].includes(kind)) {
+        return toast("warn", "Pick a reference of the requested kind.");
+      }
+      if (input === "origin" && (kind === "point" || kind === "csys")) refs.origin = { kind, id: p.id };
+      if (input !== "origin" && (kind === "axis" || kind === "plane")) refs[input] = { kind, id: p.id };
+    } else if (input === "origin") {
+      const vertex = p.kind === "edge" ? snapPointPick(p, true)?.vertex : undefined;
+      if (!vertex) return toast("warn", "Pick a model vertex at the end of a straight edge, or a datum point.");
+      refs.origin = vertex;
+    } else {
+      const edge = edgeRefFromPick(p);
+      if (edge?.curve !== "LINE" || edge.length <= 1e-9) return toast("warn", "Pick a straight edge, datum axis, or plane.");
+      refs[input] = { kind: "edge", edge };
+    }
+    mutate("Pick coordinate system reference", (d) => {
+      const x = findFeature(d, f.id, "csys");
+      if (x) x.refs = refs;
+    });
+    const current = get().session;
+    const order = ["origin", "z", "x"] as const;
+    const next = order.slice(order.indexOf(input) + 1).find((field) => !refs[field])
+      ?? order.find((field) => !refs[field]);
+    if (current?.featureId === f.id) set({ session: { ...current, csysInput: next } });
+    return;
+  }
+  if (f?.type === "cplane" && p?.kind === "face") {
+    const face = faceRefFromPick(p);
+    if (!face || face.surface !== "PLANE") return toast("warn", "A construction plane needs a flat face.");
+    mutate("Pick base face", (d) => {
+      const x = findFeature(d, f.id, "cplane");
+      if (x) x.plane = { kind: "face", face, offset: x.plane.offset };
+    });
+    return;
+  }
+  if (f && (f.type === "construct" || f.type === "cplane") && p?.kind === "datum") {
+    const source = findFeature(doc, p.id);
+    const index = doc.features.findIndex((x) => x.id === p.id);
+    if (!source || index >= doc.features.indexOf(f) || source.suppressed) {
+      return toast("warn", "Pick an earlier, unsuppressed datum.");
+    }
+    const kind = datumKind(source);
+    if (kind !== p.datumKind) return toast("warn", "The picked feature's datum kind has changed.");
+    if (f.type === "cplane") {
+      if (kind !== "plane") return toast("info", "Pick a datum plane as the base.");
+      mutate("Pick base plane", (d) => {
+        const x = findFeature(d, f.id, "cplane");
+        if (x) x.plane = { kind: "construction", plane: p.id, offset: x.plane.offset };
+      });
+      return;
+    }
+    const need = CONSTRUCT_MODES[f.mode];
+    if (kind === "csys" || !need.datums?.includes(kind)) return toast("info", need.hint);
+    mutate("Pick datum", (d) => {
+      const x = findFeature(d, f.id, "construct");
+      if (!x) return;
+      const refs = (x.refs ??= constructRefs(x));
+      if (kind === "plane") toggleConstructPick(refs.planes, { kind, id: p.id }, need.faces || 1, (ref) => ref.kind === kind && ref.id === p.id);
+      else if (kind === "axis") toggleConstructPick(refs.lines, { kind, id: p.id }, need.edges, (ref) => ref.kind === kind && ref.id === p.id);
+      else toggleConstructPick(refs.points, { kind, id: p.id }, need.points, (ref) => ref.kind === kind && ref.id === p.id);
+    });
+    return;
+  }
   if (f && f.type === "construct" && (p?.kind === "face" || p?.kind === "edge")) {
     const need = CONSTRUCT_MODES[f.mode];
-    const round = f.mode === "axisCyl" || f.mode === "pointCenter";
-    const takesFace = (need.faces > 0 || f.mode === "pointCenter") && p.kind === "face";
-    const takesEdge = (need.edges > 0 || f.mode === "axisCyl") && p.kind === "edge";
-    const point = need.points > 0 && !round ? snapPoint(p) : null;
+    const takesFace = need.faces > 0 || f.mode === "pointCenter" || f.mode === "planeEdge";
+    const takesEdge = need.edges > 0 || f.mode === "axisCyl";
+    const point = need.points > 0 ? snapPointPick(p) : null;
     const fr = takesFace ? faceRefFromPick(p) : null;
     const er = takesEdge ? edgeRefFromPick(p) : null;
-    if (!fr && !er && !point) return toast("info", CONSTRUCT_MODES[f.mode].hint);
+    if (!fr && !er && !point) return toast("info", need.hint);
     mutate("Pick", (d) => {
-      const x = d.features.find((y) => y.id === f.id);
-      if (!x || x.type !== "construct") return;
-      const cap = (list: unknown[], n: number) => {
-        while (list.length > n) list.shift();
-      };
-      if (fr) {
-        const i = x.faces.findIndex((e) => sameFace(e, fr));
-        if (i >= 0) x.faces.splice(i, 1);
-        else x.faces.push(fr);
-        cap(x.faces, Math.max(1, need.faces));
-      }
-      if (er) {
-        const i = x.edges.findIndex((e) => d3(e.mid, er.mid) < 1e-6);
-        if (i >= 0) x.edges.splice(i, 1);
-        else x.edges.push(er);
-        cap(x.edges, Math.max(1, need.edges));
-      }
+      const x = findFeature(d, f.id, "construct");
+      if (!x) return;
+      const refs = (x.refs ??= constructRefs(x));
+      if (fr) toggleConstructPick(refs.planes, { kind: "face", face: fr }, Math.max(1, need.faces), (ref) => ref.kind === "face" && sameFace(ref.face, fr));
+      if (er) toggleConstructPick(refs.lines, { kind: "edge", edge: er }, Math.max(1, need.edges), (ref) => ref.kind === "edge" && ref.edge.bodyId === er.bodyId && d3(ref.edge.mid, er.mid) < 1e-6);
       if (point && (!fr || x.mode === "axisPerp")) {
-        x.points.push(point);
-        cap(x.points, need.points);
+        const ref: ConstructRefs["points"][number] = point.vertex ?? { kind: "xyz", at: point.at };
+        refs.points.push(ref);
+        if (refs.points.length > need.points) refs.points.shift();
       }
     });
     return;

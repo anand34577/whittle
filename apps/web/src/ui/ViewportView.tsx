@@ -11,6 +11,11 @@ import {
   type Vec2,
   type Vec3,
   CONSTRAINT_LABELS,
+  CONSTRUCT_MODES,
+  CSYS_INPUT_KINDS,
+  type DatumKind,
+  datumKind,
+  featureInputs,
   LENGTH_TO_MM,
   activeEnd,
   documentEvaluator,
@@ -25,7 +30,7 @@ import {
   resolveGeometry,
   trim,
 } from "@whittle/core";
-import { handlePick, matchEdge, matchFace, samePick } from "../state/actions";
+import { createSketchOn, faceRefFromPick, handlePick, matchEdge, matchFace, samePick } from "../state/actions";
 import { regionAt } from "../state/regions";
 import { addSplineGeometry, projectPick, dimensionPick, addArcGeometry, addMidpointLine, addTangentArcGeometry, addTangentCircleGeometry, addCircleGeometry, addFreePoint, addLines, addShapeAsGeometry, makeConstrainable, cornerAt, dimPlaceCancel, dimPlaceClick, dimPlaceMove, placingConstraint, useDimPlacing, offsetAt, offsetCancel, offsetDrag, offsetPlace, useCornerPreview, editDimension, extendAt, movePoints, openSketch, trimAt } from "../state/constraintOps";
 import { type Command, commandById, isAvailable, whyUnavailable } from "../state/commands";
@@ -679,7 +684,11 @@ export function ViewportView() {
         for (const p of picks) handlePick(p, true);
       },
       onDoubleClick: (p) => {
+        const { doc, session } = useApp.getState();
+        const edited = findFeature(doc, session?.featureId);
+        if (edited?.type === "construct" || edited?.type === "cplane") return;
         if (p?.kind === "sketch" || p?.kind === "region") editFeature(p.sketchId);
+        else if (p?.kind === "datum" && useApp.getState().mode.kind === "model") editFeature(p.id);
         else if (p && (p.kind === "face" || p.kind === "edge" || p.kind === "body")) editFeature(p.bodyId);
       },
       onSketchPointer: (e) => {
@@ -780,6 +789,7 @@ export function ViewportView() {
     else if (f?.type === "rib") filter = { faces: false, edges: false, planes: false, sketches: true };
     else if (f?.type === "surface") filter = f.op === "patch" || f.op === "ruled" ? { faces: false, edges: true, planes: false, sketches: false } : bodiesOnly;
     else if (f?.type === "curve") filter = { faces: true, edges: true, planes: false, sketches: f.source === "project" };
+    else if (f?.type === "cplane") filter = bodiesOnly;
     else if (f?.type === "construct") filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "pattern" && f.axisGeom) filter = { faces: true, edges: true, planes: false, sketches: false };
     else if (f?.type === "combine" || f?.type === "joint" || f?.type === "move" || f?.type === "mirror" || f?.type === "pattern") filter = bodiesOnly;
@@ -787,11 +797,23 @@ export function ViewportView() {
     // Areas of the sketch go in and out of the profile; "up to a face" also takes a face.
     else if (f?.type === "extrude") filter = { faces: f.extent === "face", edges: false, planes: false, sketches: true };
     else if (f?.type === "revolve") filter = { faces: false, edges: false, planes: false, sketches: true };
+    else if (f?.type === "csys" && f.mode === "references" && session?.csysInput) {
+      filter = { faces: false, edges: true, planes: false, sketches: false, csysGeometry: session.csysInput === "origin" ? "vertex" : "edge" };
+    }
     else if (session) filter = { faces: false, edges: false, planes: false, sketches: false };
     else if (mode.kind === "model" && priority !== "all") filter = { faces: priority === "face", edges: priority === "edge", planes: false, sketches: priority === "body" };
-    vp.setPickFilter(filter);
+    const kinds: readonly DatumKind[] | undefined = f?.type === "construct" ? CONSTRUCT_MODES[f.mode].datums
+      : f?.type === "cplane" ? ["plane"]
+      : f?.type === "csys" && f.mode === "references" && session?.csysInput ? CSYS_INPUT_KINDS[session.csysInput] : undefined;
+    const datumInputs = kinds && f && mode.kind === "model"
+      ? new Set(doc.features.slice(0, doc.features.indexOf(f)).filter((source) => {
+        const kind = datumKind(source);
+        return !source.suppressed && kind && kinds.includes(kind);
+      }).map((source) => source.id))
+      : undefined;
+    vp.setPickFilter({ ...filter, datumInputs, datums: !!datumInputs || mode.kind === "pickPlane" || (mode.kind === "model" && !session && priority === "all") });
     vp.setPlanesVisible(mode.kind === "pickPlane");
-  }, [vp, mode, session, sessionFeature, priority]);
+  }, [vp, mode, session, sessionFeature, priority, doc.features]);
 
   // A lesson that asks for one plane lights that plane while picking (audit B-2).
   const coach = useApp((s) => s.coach);
@@ -936,10 +958,38 @@ export function ViewportView() {
     vp?.setFlags(interference.map((i) => i.bbox as unknown as [number[], number[]]));
   }, [vp, interference]);
 
-  // Construction planes.
+  const datumVisibility = doc.datumVisibility;
+  const editingCsys = sessionFeature?.type === "csys" ? sessionFeature : undefined;
   useEffect(() => {
-    vp?.setConstructionPlanes(regen?.planes ?? []);
-  }, [vp, regen]);
+    const visible = (id: Id, kind: DatumKind) =>
+      datumVisibility?.categories?.[kind] !== false && datumVisibility?.items?.[id] !== false;
+    const frames = (regen?.planes ?? []).filter((frame) => frame.kind === "curve" || visible(frame.id, frame.kind ?? "plane"));
+    let partial = regen?.partialCsys?.id === editingCsys?.id ? regen?.partialCsys : undefined;
+    if (editingCsys && visible(editingCsys.id, "csys")) {
+      const f = editingCsys;
+      const builtDoc = useApp.getState().builtDoc;
+      const built = builtDoc && findFeature(builtDoc, f.id, "csys");
+      const index = frames.findIndex((frame) => frame.id === f.id);
+      if (!built || built.mode !== f.mode || (f.mode === "references" && built.refs !== f.refs)) {
+        if (index >= 0) frames.splice(index, 1);
+        partial = undefined;
+      } else if (f.mode === "references") {
+        const flipX = built.flipX !== f.flipX;
+        const flipZ = built.flipZ !== f.flipZ;
+        const reverse = (v: Vec3): Vec3 => [-v[0], -v[1], -v[2]];
+        const frame = frames[index];
+        // Display flip changes immediately while the worker regenerates dependent features.
+        if (frame && (flipX || flipZ)) frames[index] = {
+          ...frame,
+          xDir: flipX ? reverse(frame.xDir) : frame.xDir,
+          yDir: flipX !== flipZ ? reverse(frame.yDir) : frame.yDir,
+          normal: flipZ ? reverse(frame.normal) : frame.normal,
+        };
+        if (partial?.z && flipZ) partial = { ...partial, z: reverse(partial.z) };
+      }
+    } else partial = undefined;
+    vp?.setConstructionPlanes(frames, partial);
+  }, [vp, regen, datumVisibility, editingCsys]);
 
   // Reference pictures: the edited sketch's always, others unless hidden.
   useEffect(() => {
@@ -1019,16 +1069,27 @@ export function ViewportView() {
     const f = sessionFeature;
     const pb = regen?.pickBodies ?? regen?.bodies ?? [];
     const edgeRefs = f && (f.type === "fillet" || f.type === "chamfer") ? f.edges : f?.type === "pattern" && f.axisGeom?.edge ? [f.axisGeom.edge] : [];
-    for (const ref of edgeRefs) {
+    const csysEdges = f?.type === "csys" && f.mode === "references"
+      ? Object.values(f.refs ?? {}).flatMap((ref) => ref.kind === "edge" || ref.kind === "vertex" ? [ref.edge] : [])
+      : [];
+    for (const ref of [...edgeRefs, ...csysEdges]) {
       const b = pb.find((x) => x.id === ref.bodyId);
       const i = b ? matchEdge(b.edges, ref) : -1;
       if (b && i >= 0) items.push({ pick: { kind: "edge", bodyId: b.id, index: i }, style: "ref" });
     }
-    const faceRefs = f?.type === "shell" ? f.faces : f?.type === "hole" && f.face ? [f.face] : f?.type === "pattern" && f.axisGeom?.face ? [f.axisGeom.face] : [];
+    const faceRefs = f?.type === "cplane" && f.plane.kind === "face" ? [f.plane.face] : f?.type === "shell" ? f.faces : f?.type === "hole" && f.face ? [f.face] : f?.type === "pattern" && f.axisGeom?.face ? [f.axisGeom.face] : [];
     for (const ref of faceRefs) {
       const b = pb.find((x) => x.id === ref.bodyId);
       const i = b ? matchFace(b.faces, ref) : -1;
       if (b && i >= 0) items.push({ pick: { kind: "face", bodyId: b.id, index: i }, style: "ref" });
+    }
+    if (f?.type === "construct" || f?.type === "cplane" || f?.type === "csys") {
+      const inputs = featureInputs(f);
+      for (const frame of regen?.planes ?? []) {
+        if (frame.kind && frame.kind !== "curve" && inputs.includes(frame.id)) {
+          items.push({ pick: { kind: "datum", id: frame.id, datumKind: frame.kind }, style: "ref" });
+        }
+      }
     }
     if (f?.type === "combine") {
       if (f.target) items.push({ pick: { kind: "body", bodyId: f.target }, style: "ref" });
@@ -1040,7 +1101,7 @@ export function ViewportView() {
     // Hovering something already chosen keeps its selected color rather than masking it with the hover tint.
     if (hover && hover.kind !== "sketch" && mode.kind !== "sketch" && !items.some((i) => samePick(i.pick, hover))) items.push({ pick: hover, style: "hover" });
     vp.setHighlights(items);
-  }, [vp, regen, selection, hover, sessionFeature, mode.kind, picks]);
+  }, [vp, regen, selection, hover, sessionFeature, mode.kind, picks, datumVisibility, theme]);
 
   // Keyboard routing for sketch tools and typed dimensions.
   useEffect(() => {
@@ -1117,7 +1178,7 @@ export function ViewportView() {
     const p = selection[0]!;
     const ids =
       p.kind === "face"
-        ? ["sketch", "press-pull", "hole", "fillet", "shell", "measure"]
+        ? ["sketch", ...(faceRefFromPick(p)?.surface === "PLANE" ? ["plane"] : []), "press-pull", "hole", "fillet", "shell", "measure"]
         : p.kind === "edge"
           ? ["fillet", "chamfer", "measure"]
           : p.kind === "sketch"
@@ -1159,7 +1220,15 @@ export function ViewportView() {
 
       {mode.kind === "pickPlane" && (
         <div className="viewport__banner">
-          <Icon name="plane" size={16} /> Pick a plane or a flat face to sketch on
+          <Icon name="plane" size={16} />
+          {mode.csys ? (
+            <>
+              Choose a principal plane of {findFeature(doc, mode.csys)?.name ?? "the coordinate system"}
+              {(["XY", "XZ", "YZ"] as const).map((plane) => (
+                <button key={plane} className="btn btn--small" onClick={() => createSketchOn({ kind: "csys", csys: mode.csys!, plane, offset: "0" })}>{plane}</button>
+              ))}
+            </>
+          ) : "Pick a plane, a flat face, or a coordinate system to sketch on"}
           <button className="btn btn--small btn--ghost" onClick={() => useApp.setState({ mode: { kind: "model" } })}>
             Cancel
           </button>

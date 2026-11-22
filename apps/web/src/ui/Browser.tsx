@@ -1,22 +1,25 @@
 /** Left panel: what's in the design (parameters, origin, bodies, sketches). */
 import { useState } from "react";
-import { activeEnd, documentEvaluator, formatQuantity, isSketchConsumed } from "@whittle/core";
-import { createSketchOn, saveNamedView, showNamedView } from "../state/actions";
+import { type DatumKind, activeEnd, datumKind, documentEvaluator, featureInputs, formatQuantity, isSketchConsumed } from "@whittle/core";
+import { createSketchOn, handlePick, saveNamedView, showNamedView } from "../state/actions";
 import { editFeature, mutate, useApp } from "../state/store";
 import { renameBody, renameStep } from "../state/steps";
-import { Icon } from "./icons";
+import { DATUM_ICONS, Icon } from "./icons";
 import { DeferredInput } from "./DeferredInput";
 
-function Section({ title, count, children, defaultOpen = true, forceOpen = false }: { title: string; count?: number; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean }) {
+function Section({ title, count, children, defaultOpen = true, forceOpen = false, control }: { title: string; count?: number; children: React.ReactNode; defaultOpen?: boolean; forceOpen?: boolean; control?: React.ReactNode }) {
   const [userOpen, setOpen] = useState(defaultOpen);
   const open = userOpen || forceOpen;
   return (
     <section className="tree__section">
-      <button className="tree__head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <Icon name={open ? "chevronDown" : "chevronRight"} size={14} />
-        <span>{title}</span>
-        {count !== undefined && <span className="tree__count">{count}</span>}
-      </button>
+      <div className="tree__heading">
+        <button className="tree__head" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <Icon name={open ? "chevronDown" : "chevronRight"} size={14} />
+          <span>{title}</span>
+          {count !== undefined && <span className="tree__count">{count}</span>}
+        </button>
+        {control}
+      </div>
       {open && <div className="tree__items">{children}</div>}
     </section>
   );
@@ -28,12 +31,23 @@ export function Browser() {
   const regen = useApp((s) => s.regen);
   const selection = useApp((s) => s.selection);
   const mode = useApp((s) => s.mode);
+  const sessionId = useApp((s) => s.session?.featureId);
+  const edited = doc.features.find((f) => f.id === sessionId);
+  const choosingDatum = edited?.type === "construct" || edited?.type === "cplane" || edited?.type === "csys";
+  const inputs = choosingDatum ? featureInputs(edited) : [];
   const end = activeEnd(doc);
   const ev = documentEvaluator(doc);
   const bodies = regen?.bodies ?? [];
   const sketches = doc.features.slice(0, end).filter((f) => f.type === "sketch");
-  const cplanes = doc.features.slice(0, end).filter((f) => f.type === "cplane" || (f.type === "construct" && (f.mode.startsWith("plane") || f.mode === "midplane")));
-  const refs = doc.features.slice(0, end).filter((f) => (f.type === "construct" && !(f.mode.startsWith("plane") || f.mode === "midplane")) || f.type === "curve");
+  const active = doc.features.slice(0, end);
+  const planes = active.filter((f) => datumKind(f) === "plane");
+  const groups = [
+    { kind: "plane", title: "Planes", features: planes },
+    { kind: "axis", title: "Axes", features: active.filter((f) => datumKind(f) === "axis") },
+    { kind: "point", title: "Points", features: active.filter((f) => datumKind(f) === "point") },
+    { kind: "csys", title: "Coordinate systems", features: active.filter((f) => datumKind(f) === "csys") },
+  ] as const satisfies ReadonlyArray<{ kind: DatumKind; title: string; features: typeof active }>;
+  const curves = active.filter((f) => f.type === "curve");
   const isSel = (fn: (p: (typeof selection)[number]) => boolean) => selection.some(fn);
 
   return (
@@ -93,25 +107,56 @@ export function Browser() {
               <span className="tree__action">Sketch</span>
             </button>
           ))}
-          {cplanes.map((c) => (
-            <div key={c.id} className="tree__row" title="Sketch on this plane">
-              <button className="tree__main" onClick={() => createSketchOn({ kind: "construction", plane: c.id, offset: "0" })} onDoubleClick={() => editFeature(c.id)}>
-                <Icon name="plane" size={16} />
-                <span className="tree__name">{c.name}</span>
-                <span className="tree__action">Sketch</span>
-              </button>
-              <button className="tree__eye" title="Edit plane" aria-label="Edit plane" onClick={() => editFeature(c.id)}>
-                <Icon name="edit" size={15} />
-              </button>
-            </div>
-          ))}
         </Section>
 
-        {refs.length > 0 && (
-          <Section title="Axes & points" count={refs.length} defaultOpen={false}>
-            {refs.map((c) => (
+        {groups.map(({ kind, title, features }) => {
+          if (!features.length) return null;
+          const categoryVisible = doc.datumVisibility?.categories?.[kind] !== false;
+          const categoryLabel = `${categoryVisible ? "Hide" : "Show"} all datum ${title.toLowerCase()}`;
+          return (
+            <Section key={kind} title={title} count={features.length} forceOpen={(kind === "plane" || kind === "csys") && mode.kind === "pickPlane"} control={
+              <button className="tree__eye tree__datum-eye" aria-label={categoryLabel} title={categoryLabel} onClick={() => mutate(categoryLabel, (d) => {
+                const settings = (d.datumVisibility ??= {});
+                (settings.categories ??= {})[kind] = !categoryVisible;
+              })}>
+                <Icon name={categoryVisible ? "eye" : "eyeOff"} size={16} />
+              </button>
+            }>
+              {features.map((f) => {
+                const visible = doc.datumVisibility?.items?.[f.id] !== false;
+                const selected = inputs.includes(f.id) || isSel((pick) => pick.kind === "datum" && pick.id === f.id);
+                const visibilityLabel = `${visible ? "Hide" : "Show"} ${f.name}`;
+                return (
+                  <div key={f.id} className={`tree__row ${selected ? "is-selected" : ""}`}>
+                    <button className="tree__main" aria-pressed={selected} title="Double-click to edit" onClick={(e) => {
+                      if (mode.kind === "model" || mode.kind === "pickPlane") {
+                        handlePick({ kind: "datum", id: f.id, datumKind: kind }, e.shiftKey || e.ctrlKey || e.metaKey);
+                      }
+                    }} onDoubleClick={() => mode.kind === "model" && !choosingDatum && editFeature(f.id)}>
+                      <Icon name={DATUM_ICONS[kind]} size={16} />
+                      <span className={`tree__name ${visible && categoryVisible ? "" : "is-muted"}`}>{f.name}</span>
+                    </button>
+                    <button className="tree__eye" title="Edit" aria-label={`Edit ${f.name}`} onClick={() => editFeature(f.id)}>
+                      <Icon name="edit" size={15} />
+                    </button>
+                    <button className="tree__eye tree__datum-eye" title={visibilityLabel} aria-label={visibilityLabel} onClick={() => mutate(visibilityLabel, (d) => {
+                      const settings = (d.datumVisibility ??= {});
+                      (settings.items ??= {})[f.id] = !visible;
+                    })}>
+                      <Icon name={visible ? "eye" : "eyeOff"} size={16} />
+                    </button>
+                  </div>
+                );
+              })}
+            </Section>
+          );
+        })}
+
+        {curves.length > 0 && (
+          <Section title="Curves" count={curves.length} defaultOpen={false}>
+            {curves.map((c) => (
               <button key={c.id} className="tree__row" onClick={() => editFeature(c.id)} title="Edit">
-                <Icon name={c.type === "curve" ? "path" : c.type === "construct" && c.mode.startsWith("axis") ? "axis" : "point"} size={16} />
+                <Icon name="path" size={16} />
                 <span className="tree__name">{c.name}</span>
               </button>
             ))}

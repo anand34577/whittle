@@ -5,12 +5,12 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { Feature } from "@whittle/core";
-import { activeEnd, dependents, featureInputs, reorderProblem, sketchCountText } from "@whittle/core";
-import { confirmDeleteFeature, editFeature, moveFeature, mutate, updateFeature, useApp } from "../state/store";
-import { Icon } from "./icons";
+import { activeEnd, datumKind, dependents, featureInputs, reorderProblem, sketchCountText } from "@whittle/core";
+import { confirmDeleteFeature, editFeature, moveFeature, mutate, updateFeature, useApp, type Pick } from "../state/store";
+import { featureIcon, Icon } from "./icons";
 import { copySteps, folderSteps, renameStep, timelinePick } from "../state/steps";
 import { promptDialog } from "../state/dialogs";
-import { FEATURE_ICONS } from "./PropertiesPanel";
+import { handlePick } from "../state/actions";
 
 /** A menu opened at `x` stays inside the window, even for the last steps at the right end. */
 const menuLeft = (x: number) => Math.max(8, Math.min(x, window.innerWidth - 248));
@@ -119,18 +119,23 @@ export function Timeline() {
   };
 
   const isSelected = (f: Feature) =>
-    session?.featureId === f.id || selection.some((p) => (p.kind === "sketch" && p.sketchId === f.id) || ((p.kind === "body" || p.kind === "face" || p.kind === "edge") && p.bodyId === f.id));
+    session?.featureId === f.id || selection.some((p) => (p.kind === "datum" && p.id === f.id) || (p.kind === "sketch" && p.sketchId === f.id) || ((p.kind === "body" || p.kind === "face" || p.kind === "edge") && p.bodyId === f.id));
 
   const markerAt = drag ?? end;
   const hotFeature = doc.features.find((x) => x.id === hot);
   const parents = new Set(hotFeature ? featureInputs(hotFeature) : []);
   const children = new Set(hotFeature ? dependents(doc, hotFeature.id).map((x) => x.id) : []);
   // Hovering geometry in the model lights the step that made it.
-  const hovered = hover && (hover.kind === "sketch" ? hover.sketchId : "bodyId" in hover ? hover.bodyId : null);
-  const glow = (f: Feature) => {
-    const target = f.type === "sketch" ? { kind: "sketch" as const, sketchId: f.id } : doc.bodies[f.id] ? { kind: "body" as const, bodyId: f.id } : null;
+  const hovered = hover && (hover.kind === "sketch" ? hover.sketchId : hover.kind === "datum" ? hover.id : "bodyId" in hover ? hover.bodyId : null);
+  const geometryPick = (f: Feature): Pick | null => {
+    const kind = datumKind(f);
+    if (kind) return { kind: "datum", id: f.id, datumKind: kind };
+    if (f.type === "sketch") return { kind: "sketch", sketchId: f.id };
+    return doc.bodies[f.id] ? { kind: "body", bodyId: f.id } : null;
+  };
+  const glow = (f: Feature, pick: Pick | null) => {
     const body = featureInputs(f).find((i) => doc.bodies[i]);
-    useApp.setState({ hover: target ?? (body ? { kind: "body", bodyId: body } : null) });
+    useApp.setState({ hover: pick ?? (body ? { kind: "body", bodyId: body } : null) });
   };
 
   return (
@@ -153,6 +158,8 @@ export function Timeline() {
       <div className="timeline__track" ref={track}>
         {doc.features.length === 0 && <span className="timeline__empty">Your design history appears here, one step per feature.</span>}
         {doc.features.map((f, i) => {
+          const pick = geometryPick(f);
+          const selected = isSelected(f) || (picked.length > 1 && picked.includes(f.id));
           const st = regen?.status.find((s) => s.id === f.id);
           const state = i >= end ? "rolledback" : f.suppressed ? "suppressed" : st?.state ?? "ok";
           return (
@@ -194,17 +201,21 @@ export function Timeline() {
                   setDragStep(null);
                 }}
                 onDragEnd={() => setDragStep(null)}
-                className={`step step--${state} ${isSelected(f) || (picked.length > 1 && picked.includes(f.id)) ? "is-selected" : ""} ${folderOf.has(f.id) ? "is-in-folder" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? (reorderProblem(doc, dragStep.from, i) ? "is-drop-blocked" : "is-drop-before") : ""} ${parents.has(f.id) ? "is-parent" : ""} ${children.has(f.id) ? "is-child" : ""} ${hovered === f.id ? "is-hovered" : ""}`}
-                onPointerEnter={() => (setHot(f.id), glow(f))}
+                className={`step step--${state} ${selected ? "is-selected" : ""} ${folderOf.has(f.id) ? "is-in-folder" : ""} ${dragStep && dragStep.over === i && dragStep.from !== i ? (reorderProblem(doc, dragStep.from, i) ? "is-drop-blocked" : "is-drop-before") : ""} ${parents.has(f.id) ? "is-parent" : ""} ${children.has(f.id) ? "is-child" : ""} ${hovered === f.id ? "is-hovered" : ""}`}
+                onPointerEnter={() => (setHot(f.id), glow(f, pick))}
                 onPointerLeave={() => (setHot(null), useApp.setState({ hover: null }))}
+                aria-pressed={selected}
                 aria-label={`${f.name}${summary(f, doc.units) ? ", " + summary(f, doc.units) : ""}${state === "error" ? ", failed" : state === "warning" ? ", needs a look" : ""}`}
                 title={`${f.name}${summary(f, doc.units) ? " · " + summary(f, doc.units) : ""}${st?.message ? "\n" + st.message : ""}\nDouble-click (or Enter) to edit · F2 to rename · drag, or Alt + arrow keys, to reorder`}
                 onClick={(e) => {
                   if (e.shiftKey || e.ctrlKey || e.metaKey) return setPicked((p) => (p.includes(f.id) ? p.filter((x) => x !== f.id) : [...p, f.id]));
                   setPicked([f.id]);
-                  useApp.setState({
-                    selection: f.type === "sketch" ? [{ kind: "sketch", sketchId: f.id }] : doc.bodies[f.id] ? [{ kind: "body", bodyId: f.id }] : [],
-                  });
+                  const { mode } = useApp.getState();
+                  if (pick?.kind === "datum" && i < end && (mode.kind === "model" || mode.kind === "pickPlane")) {
+                    handlePick(pick, false);
+                  } else {
+                    useApp.setState({ selection: pick ? [pick] : [] });
+                  }
                 }}
                 onDoubleClick={() => editFeature(f.id)}
                 onKeyDown={(e) => {
@@ -226,7 +237,7 @@ export function Timeline() {
                   setMenu({ f, index: i, x: e.clientX, y: e.clientY });
                 }}
               >
-                <Icon name={FEATURE_ICONS[f.type]!} size={18} />
+                <Icon name={featureIcon(f)} size={18} />
                 {(state === "error" || state === "warning") && <span className={`step__badge step__badge--${state}`} />}
               </button>
             </div>

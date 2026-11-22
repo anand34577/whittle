@@ -56,7 +56,7 @@ export interface SketchFrame {
   yDir: Vec3;
   normal: Vec3;
   /** Construction geometry kind (planes by default). */
-  kind?: "plane" | "axis" | "point" | "curve";
+  kind?: "plane" | "axis" | "point" | "csys" | "curve";
   /** Curves: line segments as xyz pairs, for display. */
   line?: Float32Array;
   /** Triangles (xyz per vertex, world space) of the closed profile regions. */
@@ -94,12 +94,19 @@ export interface FeatureStatus {
   cells?: { volume: number; center: Vec3 }[];
 }
 
+export interface PartialCsys {
+  id: Id;
+  origin: Vec3;
+  z?: Vec3;
+}
+
 export interface RegenResult {
   seq: number;
   bodies: BodyResult[];
   sketches: SketchFrame[];
   /** Construction planes, for display and picking. */
   planes: SketchFrame[];
+  partialCsys?: PartialCsys;
   status: FeatureStatus[];
   /** Bodies as they were just before pickBefore (for picking while a feature previews). */
   pickBodies?: BodyResult[];

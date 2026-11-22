@@ -500,7 +500,7 @@ function RibbonBody({ tab }: { tab: "solid" | "surface" | "tools" }) {
         <>
           <Group label="Create" ids={create.primary} more={create.more} />
           <Group label="Modify" ids={modify.primary} more={modify.more} />
-          {!simple && <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane"]} />}
+          {!simple && <Group label="Construct" ids={[]} more={["#Planes", "plane", "construct-midplane", "construct-plane3", "construct-plane2e", "construct-planeEdge", "construct-planeTangent", "construct-planePath", "#Axes", "construct-axisCyl", "construct-axis2p", "construct-axis2pl", "construct-axisEdge", "construct-axisPerp", "#Points", "construct-pointVertex", "construct-point2e", "construct-point3pl", "construct-pointCenter", "construct-pointEdgePlane", "#Coordinate systems", "csys"]} />}
           <Group label="Inspect" ids={["measure", "section"]} more={["#Measure", "measure", "section", "check-geometry", "interference", "#For making", "overhang", "draft-analysis", "min-radius", "accessibility", "#Surface quality", "curvature", "zebra", "#Display", "display-edges", "display-shaded", "display-wire", "display-xray", "ortho"]} />
         </>
       )}

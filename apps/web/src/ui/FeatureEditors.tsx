@@ -1,7 +1,7 @@
 /** Property editors for each feature type (shown in the right-hand panel). */
 import type { Draft } from "immer";
 import { useEffect, useRef, useState } from "react";
-import { CONSTRUCT_MODES, CURVE_SOURCES, LENGTH_TO_MM, SURFACE_OPS, defaultLength, documentEvaluator, sketchCountText } from "@whittle/core";
+import { CONSTRUCT_MODES, CURVE_SOURCES, LENGTH_TO_MM, SURFACE_OPS, constructRefs, datumKind, defaultLength, documentEvaluator, sketchCountText } from "@whittle/core";
 import { volumeText } from "../state/measure";
 import type {
   BodyOp,
@@ -29,6 +29,8 @@ import type {
   ScaleFeature,
   ConstructionPlaneFeature,
   ConstructFeature,
+  CsysFeature,
+  CsysInput,
   CurveFeature,
   SurfaceFeature,
   RibFeature,
@@ -1011,13 +1013,15 @@ function DraftEditor({ f }: { f: DraftFeature }) {
 
 function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
   const features = useApp((s) => s.doc.features);
-  const before = features.slice(0, Math.max(0, features.findIndex((x) => x.id === f.id))).filter((x) => x.type === "cplane");
+  const before = features.slice(0, Math.max(0, features.findIndex((x) => x.id === f.id))).filter((x) => !x.suppressed && datumKind(x) === "plane");
   const p = f.plane;
   const set = (label: string, recipe: (pl: PlaneRef) => PlaneRef) => upd(f, label, (d) => void (d.type === "cplane" && (d.plane = recipe(d.plane))));
   const value = p.kind === "origin" ? p.plane : p.kind === "construction" ? p.plane : "face";
   return (
     <>
-      {p.kind === "face" ? (
+      {p.kind === "csys" ? (
+        <p className="field__note">On the {p.plane} plane of a coordinate system.</p>
+      ) : p.kind === "face" ? (
         <p className="field__note">On a flat model face. Offset moves it along the face normal.</p>
       ) : (
         <Select
@@ -1049,17 +1053,109 @@ function ConstructionPlaneEditor({ f }: { f: ConstructionPlaneFeature }) {
   );
 }
 
+const CSYS_FIELDS: { input: CsysInput; label: string; hint: string }[] = [
+  { input: "origin", label: "Origin", hint: "Point, CSYS, or vertex" },
+  { input: "z", label: "Z axis", hint: "Axis, plane, or straight edge" },
+  { input: "x", label: "X axis", hint: "Axis, plane, or straight edge" },
+];
+
+function CsysEditor({ f }: { f: CsysFeature }) {
+  const features = useApp((s) => s.doc.features);
+  const picking = useApp((s) => s.session?.csysInput);
+  function chooseInput(input?: CsysInput) {
+    const { session } = useApp.getState();
+    if (session?.featureId === f.id) useApp.setState({ session: { ...session, csysInput: input } });
+  }
+  return (
+    <>
+      <Segmented label="Placement" value={f.mode} options={[
+        { value: "manual", label: "Manual" }, { value: "references", label: "References" },
+      ]} onChange={(mode) => {
+        upd(f, "Placement", (d) => { d.mode = mode; });
+        chooseInput(mode === "references" ? CSYS_FIELDS.find(({ input }) => !f.refs?.[input])?.input : undefined);
+      }} />
+      {f.mode === "manual" ? (
+        <>
+          {(["position", "rotation"] as const).map((field) => (
+            <div key={field}>
+              {([0, 1, 2] as const).map((i) => {
+                const axis = "XYZ"[i];
+                const label = field === "position" ? `Origin ${axis}` : `Rotation about ${axis}`;
+                return <ExprInput key={i} label={label} kind={field === "position" ? "length" : "angle"}
+                  value={f[field][i]} onChange={(value) => upd(f, label, (d) => { d[field][i] = value; })} />;
+              })}
+            </div>
+          ))}
+          <p className="field__note">The origin uses world coordinates. Rotations follow the right-hand rule about fixed world X, then Y, then Z.</p>
+        </>
+      ) : (
+        <>
+          <div className="csys-refs">
+            {CSYS_FIELDS.map(({ input, label, hint }) => {
+              const ref = f.refs?.[input];
+              const active = picking === input;
+              const name = ref && (ref.kind === "edge" || ref.kind === "vertex"
+                ? `${features.find((feature) => feature.id === ref.edge.bodyId)?.name ?? "Missing body"} · ${ref.kind === "edge" ? "Edge" : "Vertex"}`
+                : features.find((feature) => feature.id === ref.id)?.name ?? "Missing datum");
+              return (
+                <div className="csys-refs__row" key={input}>
+                  <span>{label}</span>
+                  <button type="button" className="btn btn--small csys-refs__pick" aria-pressed={active}
+                    aria-label={`${ref ? "Replace" : "Pick"} ${label}`} title={name ? `${name} · Pick ${hint.toLowerCase()}` : hint}
+                    onClick={() => chooseInput(input)}>
+                    {name ?? hint}
+                  </button>
+                  <button type="button" className="link" aria-label={`Clear ${label}`} disabled={!ref} onClick={() => {
+                    upd(f, `Clear ${label}`, (d) => { delete d.refs[input]; });
+                    chooseInput(input);
+                  }}>Clear</button>
+                </div>
+              );
+            })}
+          </div>
+          <Checkbox label="Flip Z" checked={f.flipZ} onChange={(value) => upd(f, "Flip Z", (d) => { d.flipZ = value; })} />
+          <Checkbox label="Flip X" checked={f.flipX} onChange={(value) => upd(f, "Flip X", (d) => { d.flipX = value; })} />
+          <p className="field__note">X is projected perpendicular to Z. An X plane supplies its intersection with the plane perpendicular to Z.</p>
+        </>
+      )}
+    </>
+  );
+}
+
 function ConstructEditor({ f }: { f: ConstructFeature }) {
   const need = CONSTRUCT_MODES[f.mode];
-  const has = f.faces.length + f.edges.length + f.points.length;
-  const parts = [f.faces.length && `${f.faces.length} face${f.faces.length > 1 ? "s" : ""}`, f.edges.length && `${f.edges.length} edge${f.edges.length > 1 ? "s" : ""}`, f.points.length && `${f.points.length} point${f.points.length > 1 ? "s" : ""}`].filter(Boolean);
+  const features = useApp((s) => s.doc.features);
+  const { planes, lines, points } = constructRefs(f);
+  const picks = [...planes, ...lines, ...points];
+  const parts = picks.map((ref) => {
+    switch (ref.kind) {
+      case "plane":
+      case "axis":
+      case "point":
+        return features.find((x) => x.id === ref.id)?.name ?? `Missing datum ${ref.kind}`;
+      case "vertex":
+        return "Vertex";
+      case "xyz":
+        return "XYZ point";
+      case "face":
+        return "Face";
+      case "edge":
+        return "Edge";
+    }
+  });
   return (
     <>
       <div className="picker">
         <Icon name={f.mode.startsWith("axis") ? "axis" : f.mode.startsWith("point") ? "point" : "plane"} size={16} />
-        <span>{has === 0 ? need.hint : parts.join(" · ")}</span>
-        {has > 0 && (
-          <button className="link" onClick={() => upd(f, "Clear picks", (d) => void (d.type === "construct" && ((d.faces = []), (d.edges = []), (d.points = []))))}>
+        <span>{picks.length === 0 ? need.hint : parts.join(" · ")}</span>
+        {picks.length > 0 && (
+          <button className="link" onClick={() => upd(f, "Clear picks", (d) => {
+            if (d.type !== "construct") return;
+            d.faces = [];
+            d.edges = [];
+            d.points = [];
+            delete d.refs;
+          })}>
             Clear
           </button>
         )}
@@ -1561,6 +1657,8 @@ export function FeatureEditor({ f }: { f: Feature }) {
       return <JointEditor f={f} />;
     case "construct":
       return <ConstructEditor f={f} />;
+    case "csys":
+      return <CsysEditor f={f} />;
     case "curve":
       return <CurveEditor f={f} />;
     case "surface":

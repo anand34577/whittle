@@ -95,6 +95,12 @@ describe("file format", () => {
     expect(back).toEqual({ ...doc, modifiedAt: back.modifiedAt });
   });
 
+  it("round-trips item and category datum visibility independently", () => {
+    const doc = newDocument();
+    doc.datumVisibility = { items: { "datum-1": false }, categories: { plane: false } };
+    expect(deserializeDocument(serializeDocument(doc)).datumVisibility).toEqual(doc.datumVisibility);
+  });
+
   it("refuses files from the future", () => {
     const doc = { ...newDocument(), schema: 999 };
     expect(() => deserializeDocument(serializeDocument(doc))).toThrow(/newer version/);

@@ -11,7 +11,7 @@
  *   3. otherwise take the closest one, and flag a warning when the choice is
  *      ambiguous so the user can confirm instead of getting a silent wrong pick.
  */
-import type { EdgeRef, FaceRef, Vec3 } from "@whittle/core";
+import type { EdgeRef, FaceRef, Vec3, VertexRef } from "@whittle/core";
 import { type Edge, type Face, type Shape3D, measureArea } from "replicad";
 import type { EdgeInfo, FaceInfo } from "./protocol";
 
@@ -162,6 +162,17 @@ export function resolveEdge(shape: Shape3D, ref: EdgeRef, infos?: EdgeInfo[]): R
     0,
   );
   return loose ? { item: loose.item, uncertain: true } : null;
+}
+
+/** Resolve a persisted straight endpoint, keeping its orientation relative to the saved edge. */
+export function resolveVertex(shape: Shape3D, ref: VertexRef): Resolved<Vec3> | null {
+  const match = resolveEdge(shape, ref.edge);
+  if (!match || match.item.geomType !== "LINE") return null;
+  const start = match.item.startPoint.toTuple();
+  const end = match.item.endPoint.toTuple();
+  const alignment = dot(norm(sub(end, start)), ref.edge.tangent);
+  if (Math.abs(alignment) < 0.9) return null;
+  return { item: (ref.end === 0) === (alignment > 0) ? start : end, uncertain: match.uncertain };
 }
 
 /**
